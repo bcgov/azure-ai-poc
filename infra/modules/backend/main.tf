@@ -79,10 +79,6 @@ resource "azurerm_linux_web_app" "backend" {
     DOCKER_ENABLE_CI                      = "true"
     APPLICATIONINSIGHTS_CONNECTION_STRING = var.appinsights_connection_string
     APPINSIGHTS_INSTRUMENTATIONKEY        = var.appinsights_instrumentation_key
-    POSTGRES_HOST                         = var.postgres_host
-    POSTGRES_USER                         = var.postgresql_admin_username
-    POSTGRES_PASSWORD                     = var.db_master_password
-    POSTGRES_DATABASE                     = var.database_name
     WEBSITE_SKIP_RUNNING_KUDUAGENT        = "false"
     WEBSITES_ENABLE_APP_SERVICE_STORAGE   = "false"
     WEBSITE_ENABLE_SYNC_UPDATE_SITE       = "1"
@@ -153,125 +149,6 @@ resource "azurerm_monitor_autoscale_setting" "backend_autoscale" {
         cooldown  = "PT1M"
       }
     }
-  }
-}
-
-# CloudBeaver Storage Account (optional)
-resource "azurerm_storage_account" "cloudbeaver" {
-  count                           = var.enable_psql_sidecar ? 1 : 0
-  name                            = "${replace(var.app_name, "-", "")}cbstorage"
-  resource_group_name             = var.resource_group_name
-  location                        = var.location
-  account_tier                    = "Standard"
-  account_replication_type        = "LRS"
-  public_network_access_enabled   = false
-  allow_nested_items_to_be_public = false
-  tags                            = var.common_tags
-  lifecycle {
-    ignore_changes = [tags]
-  }
-}
-
-resource "azurerm_storage_share" "cloudbeaver_workspace" {
-  count              = var.enable_psql_sidecar ? 1 : 0
-  name               = "${var.app_name}-cb-workspace"
-  storage_account_id = azurerm_storage_account.cloudbeaver[0].id
-  quota              = 10
-}
-
-resource "azurerm_private_endpoint" "cloudbeaver_storage" {
-  count               = var.enable_psql_sidecar ? 1 : 0
-  name                = "${var.app_name}-cb-storage-pe"
-  location            = var.location
-  resource_group_name = var.resource_group_name
-  subnet_id           = var.private_endpoint_subnet_id
-  private_service_connection {
-    name                           = "${var.app_name}-cb-storage-psc"
-    private_connection_resource_id = azurerm_storage_account.cloudbeaver[0].id
-    subresource_names              = ["file"]
-    is_manual_connection           = false
-  }
-  tags = var.common_tags
-  lifecycle {
-    ignore_changes = [tags, private_dns_zone_group]
-  }
-}
-
-resource "random_string" "cloudbeaver_admin_name" {
-  count   = var.enable_psql_sidecar ? 1 : 0
-  length  = 12
-  special = false
-  upper   = false
-  numeric = true
-}
-
-resource "random_password" "cloudbeaver_admin_password" {
-  count   = var.enable_psql_sidecar ? 1 : 0
-  length  = 16
-  special = true
-}
-
-resource "azurerm_linux_web_app" "psql_sidecar" {
-  count                     = var.enable_psql_sidecar ? 1 : 0
-  name                      = "${var.repo_name}-${var.app_env}-cloudbeaver"
-  resource_group_name       = var.resource_group_name
-  location                  = var.location
-  service_plan_id           = azurerm_service_plan.backend.id
-  virtual_network_subnet_id = var.backend_subnet_id
-  https_only                = true
-  identity {
-    type         = "UserAssigned"
-    identity_ids = [var.user_assigned_identity_id]
-  }
-  site_config {
-    always_on                                     = true
-    container_registry_use_managed_identity       = true
-    container_registry_managed_identity_client_id = var.user_assigned_identity_client_id
-    minimum_tls_version                           = "1.3"
-    health_check_path                             = "/"
-    health_check_eviction_time_in_min             = 10
-    application_stack {
-      docker_image_name   = "dbeaver/cloudbeaver:latest"
-      docker_registry_url = "https://index.docker.io"
-    }
-    ftps_state       = "Disabled"
-    app_command_line = "/bin/sh -c 'mkdir -p /opt/cloudbeaver/workspace && echo \"CloudBeaver starting with persistent workspace...\" && /opt/cloudbeaver/run-server.sh'"
-  }
-  app_settings = {
-    WEBSITES_ENABLE_APP_SERVICE_STORAGE   = "false"
-    DOCKER_ENABLE_CI                      = "true"
-    APPLICATIONINSIGHTS_CONNECTION_STRING = var.appinsights_connection_string
-    APPINSIGHTS_INSTRUMENTATIONKEY        = var.appinsights_instrumentation_key
-    WEBSITES_PORT                         = "8978"
-    PORT                                  = "8978"
-    CB_SERVER_NAME                        = var.app_name
-    CB_SERVER_URL                         = "https://${var.app_name}-cloudbeaver-app.azurewebsites.net"
-    CB_ADMIN_NAME                         = random_string.cloudbeaver_admin_name[0].result
-    CB_ADMIN_PASSWORD                     = random_password.cloudbeaver_admin_password[0].result
-    POSTGRES_HOST                         = var.postgres_host
-    POSTGRES_USER                         = var.postgresql_admin_username
-    POSTGRES_PASSWORD                     = var.db_master_password
-    POSTGRES_DATABASE                     = var.database_name
-    POSTGRES_PORT                         = "5432"
-    CB_LOCAL_HOST_ACCESS                  = "false"
-    CB_ENABLE_REVERSEPROXY_AUTH           = "false"
-    CB_DEV_MODE                           = "false"
-    AZURE_STORAGE_CONNECTION_STRING       = azurerm_storage_account.cloudbeaver[0].primary_connection_string
-    WORKSPACE_PATH                        = "/opt/cloudbeaver/workspace"
-  }
-  logs {
-    detailed_error_messages = true
-    failed_request_tracing  = true
-    http_logs {
-      file_system {
-        retention_in_days = 7
-        retention_in_mb   = 100
-      }
-    }
-  }
-  tags = var.common_tags
-  lifecycle {
-    ignore_changes = [tags]
   }
 }
 
