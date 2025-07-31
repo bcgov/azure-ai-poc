@@ -5,10 +5,10 @@ import { TanStackRouterVite } from '@tanstack/router-plugin/vite'
 
 export default ({ mode }) => {
   // Load app-level env vars to node-level env vars.
-  const loadedEnv = loadEnv(mode, process.cwd());
+  const loadedEnv = loadEnv(mode, process.cwd())
   for (const [key, value] of Object.entries(loadedEnv)) {
     if (key.startsWith('VITE_')) {
-      process.env[key] = value;
+      process.env[key] = value
     }
   }
 
@@ -22,6 +22,24 @@ export default ({ mode }) => {
         target: 'react',
         autoCodeSplitting: true,
       }),
+      {
+        name: 'build-html',
+        apply: 'build',
+        transformIndexHtml: (html) => {
+          return {
+            html,
+            tags: [
+              {
+                tag: 'script',
+                attrs: {
+                  src: '/env.js',
+                },
+                injectTo: 'head',
+              },
+            ],
+          }
+        },
+      },
       react(),
     ],
     server: {

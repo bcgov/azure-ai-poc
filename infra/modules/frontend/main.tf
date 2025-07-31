@@ -65,6 +65,9 @@ resource "azurerm_linux_web_app" "frontend" {
     APPINSIGHTS_INSTRUMENTATIONKEY        = var.appinsights_instrumentation_key
     VITE_BACKEND_URL                      = "https://${var.repo_name}-${var.app_env}-api.azurewebsites.net"
     LOG_LEVEL                             = "info"
+    VITE_KEYCLOAK_URL                     = "https://dev.loginproxy.gov.bc.ca/auth"
+    VITE_KEYCLOAK_REALM                   = "standard"
+    VITE_KEYCLOAK_CLIENT_ID               = "azure-poc-6086"
   }
   logs {
     detailed_error_messages = true

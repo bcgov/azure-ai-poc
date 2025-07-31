@@ -1,9 +1,9 @@
 import Keycloak from 'keycloak-js'
-
+import { env } from '@/env'
 const kcObject = {
-  url: import.meta.env.VITE_KEYCLOAK_URL,
-  realm: import.meta.env.VITE_KEYCLOAK_REALM,
-  clientId: import.meta.env.VITE_KEYCLOAK_CLIENT_ID,
+  url: env.VITE_KEYCLOAK_URL || 'https://dev.loginproxy.gov.bc.ca/auth',
+  realm: env.VITE_KEYCLOAK_REALM || 'standard',
+  clientId: env.VITE_KEYCLOAK_CLIENT_ID || 'azure-poc-6086',
 }
 console.log('Environment variables:', kcObject)
 
