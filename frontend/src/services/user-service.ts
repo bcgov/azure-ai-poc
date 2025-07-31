@@ -24,7 +24,7 @@ const initKeycloak = (onAuthenticatedCallback: () => void) => {
     .catch(console.error)
 
   _kc.onTokenExpired = () => {
-    _kc.updateToken(5).then((refreshed) => {
+    _kc.updateToken(3).then((refreshed) => {
       if (refreshed) {
         localStorage.setItem(AUTH_TOKEN, `${_kc.token}`)
       }

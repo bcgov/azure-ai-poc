@@ -5,7 +5,6 @@ const kcObject = {
   realm: env.VITE_KEYCLOAK_REALM || 'standard',
   clientId: env.VITE_KEYCLOAK_CLIENT_ID || 'azure-poc-6086',
 }
-console.log('Environment variables:', kcObject)
 
 // Setup Keycloak instance as needed
 // Pass initialization options as required or leave blank to load from 'keycloak.json'

@@ -125,20 +125,10 @@ export const useAuthStore = create<AuthState>()(
             pkceMethod: 'S256',
           }
 
-          console.log('Using init options:', initOptions)
-
           const authenticated = await _kc.init(initOptions)
-
-          console.log('Keycloak initialization result:', {
-            authenticated,
-            token: !!_kc.token,
-            tokenParsed: _kc.tokenParsed,
-            refreshToken: !!_kc.refreshToken,
-          })
 
           if (authenticated) {
             get().updateAuthState()
-            console.log('User authenticated successfully')
           } else {
             console.log('User is not authenticated, will redirect to login')
             // If not authenticated with check-sso, manually trigger login
