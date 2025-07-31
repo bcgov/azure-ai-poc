@@ -4,7 +4,6 @@ FROM node:22.17.1-slim AS build
 # Copy, build static files; see .dockerignore for exclusions
 WORKDIR /app
 COPY . ./
-ENV PRISMA_CLI_BINARY_TARGETS=debian-openssl-3.0.x
 RUN npm run deploy
 
 # Dependencies
@@ -23,9 +22,6 @@ ENV NODE_ENV=production
 # Copy app and dependencies
 WORKDIR /app
 COPY --from=dependencies /app/node_modules ./node_modules
-COPY --from=build /app/node_modules/@prisma ./node_modules/@prisma
-COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
-COPY --from=build /app/node_modules/prisma ./node_modules/prisma
 COPY --from=build /app/dist ./dist
 
 # Boilerplate, not used in OpenShift/Kubernetes
