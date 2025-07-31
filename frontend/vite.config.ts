@@ -22,24 +22,6 @@ export default ({ mode }) => {
         target: 'react',
         autoCodeSplitting: true,
       }),
-      {
-        name: 'build-html',
-        apply: 'build',
-        transformIndexHtml: (html) => {
-          return {
-            html,
-            tags: [
-              {
-                tag: 'script',
-                attrs: {
-                  src: '/env.js',
-                },
-                injectTo: 'head',
-              },
-            ],
-          }
-        },
-      },
       react(),
     ],
     server: {
