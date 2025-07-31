@@ -68,6 +68,7 @@ resource "azurerm_linux_web_app" "frontend" {
     VITE_KEYCLOAK_URL                     = "https://dev.loginproxy.gov.bc.ca/auth"
     VITE_KEYCLOAK_REALM                   = "standard"
     VITE_KEYCLOAK_CLIENT_ID               = "azure-poc-6086"
+    FORCE_REDEPLOY                        = null_resource.trigger_frontend.id
   }
   logs {
     detailed_error_messages = true
@@ -84,6 +85,11 @@ resource "azurerm_linux_web_app" "frontend" {
     ignore_changes = [tags]
   }
 
+}
+resource "null_resource" "trigger_frontend" {
+  triggers = {
+    always_run = timestamp()
+  }
 }
 
 # Frontend Diagnostics
