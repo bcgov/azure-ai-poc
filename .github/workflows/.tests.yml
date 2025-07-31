@@ -1,0 +1,99 @@
+name: .Tests
+
+on:
+ workflow_call: 
+  inputs: 
+    tag: 
+      description: 'The tag of the containers to run tests on'
+      required: true
+      type: string
+
+permissions: 
+  contents: write # This is required for actions/checkout
+jobs:
+  backend-tests:
+    name: Backend Tests
+    if: ${{ ! github.event.pull_request.draft }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    services:
+      postgres:
+        image: postgis/postgis:17-3.5 # Updated to PostgreSQL 17 with PostGIS 3.5
+        env:
+          POSTGRES_PASSWORD: default
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - uses: bcgov-nr/action-test-and-analyse@v1.3.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN_BACKEND }}
+          NODE_ENV: unittest
+        with:
+          commands: |
+            npm ci
+            npm run test:cov
+          dir: backend
+          node_version: "22"
+          sonar_args: >
+            -Dsonar.exclusions=**/coverage/**,**/node_modules/**,**/*spec.ts
+            -Dsonar.organization=bcgov-sonarcloud
+            -Dsonar.projectKey=quickstart-aws-containers_backend
+            -Dsonar.sources=src
+            -Dsonar.tests.inclusions=**/*spec.ts
+            -Dsonar.javascript.lcov.reportPaths=./coverage/lcov.info
+          sonar_token: ${{ env.SONAR_TOKEN }}
+          triggers: ('backend/')
+  
+  frontend-tests:
+    name: Frontend Tests
+    if: (! github.event.pull_request.draft)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: bcgov/action-test-and-analyse@v1.3.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN_FRONTEND }}
+        with:
+          commands: |
+            npm ci
+            npm run test:cov
+          dir: frontend
+          node_version: "22"
+          sonar_args: >
+            -Dsonar.exclusions=**/coverage/**,**/node_modules/**,**/*spec.ts
+            -Dsonar.organization=bcgov-sonarcloud
+            -Dsonar.projectKey=quickstart-openshift_frontend
+            -Dsonar.sources=src
+            -Dsonar.tests.inclusions=**/*spec.ts
+            -Dsonar.javascript.lcov.reportPaths=./coverage/lcov.info
+          sonar_token: ${{ env.SONAR_TOKEN }}
+          triggers: ('frontend/')
+  trivy:
+    name: Trivy Security Scan
+    if: (! github.event.pull_request.draft) 
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read # This is required for actions/checkout
+      security-events: write # This is required to upload SARIF results to the Security tab
+    timeout-minutes: 1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Trivy vulnerability scanner in repo mode
+        uses: aquasecurity/trivy-action@dc5a429b52fcf669ce959baa2c2dd26090d2a6c4 # 0.32.0
+        with:
+          format: "sarif"
+          output: "trivy-results.sarif"
+          ignore-unfixed: true
+          scan-type: "fs"
+          scanners: "vuln,secret,config"
+          severity: "CRITICAL,HIGH"
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: "trivy-results.sarif"

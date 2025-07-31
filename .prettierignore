@@ -1,0 +1,7 @@
+**/.github
+**/.git
+**/node_modules
+migrations
+**/build
+.idea
+.vscode
