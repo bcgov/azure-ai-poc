@@ -1,13 +1,20 @@
 import Keycloak from 'keycloak-js'
 
+const kcObject = {
+  url: import.meta.env.VITE_KEYCLOAK_URL,
+  realm: import.meta.env.VITE_KEYCLOAK_REALM,
+  clientId: import.meta.env.VITE_KEYCLOAK_CLIENT_ID,
+}
+console.log('Environment variables:', kcObject)
+
 // Setup Keycloak instance as needed
 // Pass initialization options as required or leave blank to load from 'keycloak.json'
-const _kc = new Keycloak({
-  url:
-    import.meta.env.VITE_KEYCLOAK_URL ||
-    'https://dev.loginproxy.gov.bc.ca/auth',
-  realm: import.meta.env.VITE_KEYCLOAK_REALM || 'standard',
-  clientId: import.meta.env.VITE_KEYCLOAK_CLIENT_ID || 'nr-arch-data-in-5757',
+const _kc = new Keycloak(kcObject)
+
+console.log('Keycloak instance created:', {
+  authServerUrl: _kc.authServerUrl,
+  realm: _kc.realm,
+  clientId: _kc.clientId,
 })
 
 export default _kc

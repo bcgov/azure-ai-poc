@@ -11,7 +11,6 @@ const initKeycloak = (onAuthenticatedCallback: () => void) => {
   _kc
     .init({
       onLoad: 'login-required',
-      pkceMethod: 'S256',
       checkLoginIframe: false,
     })
     .then((authenticated) => {
@@ -51,12 +50,60 @@ const updateToken = (
 const getUsername = () => _kc.tokenParsed?.display_name
 
 /**
+ * Validates that the token's audience claim matches the expected client ID
+ * @returns True if audience is valid, false otherwise
+ */
+const validateAudience = (): boolean => {
+  // Get the client ID from the Keycloak instance configuration
+  const expectedClientId = _kc.clientId
+
+  if (!expectedClientId) {
+    console.error('Keycloak client ID is not configured')
+    return false
+  }
+
+  if (!_kc.tokenParsed) {
+    console.warn('No token parsed available for audience validation')
+    return false
+  }
+
+  const tokenAudience = _kc.tokenParsed.aud
+  if (!tokenAudience) {
+    console.warn('Token missing audience claim')
+    return false
+  }
+
+  // Handle both string and array audience values
+  const audiences = Array.isArray(tokenAudience)
+    ? tokenAudience
+    : [tokenAudience]
+
+  const isValid = audiences.includes(expectedClientId)
+
+  if (!isValid) {
+    console.error('Audience validation failed:', {
+      expected: expectedClientId,
+      received: audiences,
+    })
+  }
+
+  return isValid
+}
+
+/**
  * Determines if a user's role(s) overlap with the role on the private route.  The user's role is determined via jwt.client_roles
  * @param roles
  * @returns True or false, inidicating if the user has the role or not.
  */
 const hasRole = (roles: any) => {
   const jwt = _kc.tokenParsed
+
+  // Validate audience claim first
+  if (!validateAudience()) {
+    console.warn('Audience validation failed, denying role access')
+    return false
+  }
+
   const userroles = jwt?.client_roles
   const includesRoles =
     typeof roles === 'string'
@@ -74,6 +121,7 @@ const UserService = {
   updateToken,
   getUsername,
   hasRole,
+  validateAudience,
 }
 
 export default UserService
