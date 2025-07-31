@@ -35,30 +35,6 @@ module "network" {
 
   depends_on = [azurerm_resource_group.main]
 }
-module "postgresql" {
-  source = "./modules/postgresql"
-
-  app_name                     = var.app_name
-  auto_grow_enabled            = var.postgres_auto_grow_enabled
-  backup_retention_period      = var.postgres_backup_retention_period
-  common_tags                  = var.common_tags
-  database_name                = var.database_name
-  db_master_password           = var.db_master_password
-  geo_redundant_backup_enabled = var.postgres_geo_redundant_backup_enabled
-  ha_enabled                   = var.postgres_ha_enabled
-  is_postgis_enabled           = var.postgres_is_postgis_enabled
-  location                     = var.location
-  postgresql_admin_username    = var.postgresql_admin_username
-  postgresql_sku_name          = var.postgres_sku_name
-  postgresql_storage_mb        = var.postgres_storage_mb
-  private_endpoint_subnet_id   = module.network.private_endpoint_subnet_id
-  resource_group_name          = azurerm_resource_group.main.name
-  standby_availability_zone    = var.postgres_standby_availability_zone
-  zone                         = var.postgres_zone
-  postgres_version             = var.postgres_version
-
-  depends_on = [module.network]
-}
 module "monitoring" {
   source = "./modules/monitoring"
 
@@ -70,25 +46,6 @@ module "monitoring" {
   resource_group_name          = azurerm_resource_group.main.name
 
   depends_on = [azurerm_resource_group.main, module.network]
-}
-
-module "flyway" {
-  source   = "./modules/flyway"
-  app_name = var.app_name
-
-  container_instance_subnet_id = module.network.container_instance_subnet_id
-  database_name                = module.postgresql.database_name
-  db_master_password           = var.db_master_password
-  dns_servers                  = module.network.dns_servers
-  flyway_image                 = var.flyway_image
-  location                     = var.location
-  log_analytics_workspace_id   = module.monitoring.log_analytics_workspace_workspaceId
-  log_analytics_workspace_key  = module.monitoring.log_analytics_workspace_key
-  postgres_host                = module.postgresql.postgres_host
-  postgresql_admin_username    = var.postgresql_admin_username
-  resource_group_name          = azurerm_resource_group.main.name
-
-  depends_on = [module.postgresql, module.monitoring]
 }
 
 
@@ -141,22 +98,17 @@ module "backend" {
   appinsights_instrumentation_key         = module.monitoring.appinsights_instrumentation_key
   backend_subnet_id                       = module.network.app_service_subnet_id
   common_tags                             = var.common_tags
-  database_name                           = var.database_name
-  db_master_password                      = var.db_master_password
-  enable_psql_sidecar                     = var.enable_psql_sidecar
   frontend_frontdoor_resource_guid        = module.frontdoor.frontdoor_resource_guid
   frontend_possible_outbound_ip_addresses = module.frontend.possible_outbound_ip_addresses
   location                                = var.location
   log_analytics_workspace_id              = module.monitoring.log_analytics_workspace_id
-  postgres_host                           = module.postgresql.postgres_host
-  postgresql_admin_username               = var.postgresql_admin_username
   private_endpoint_subnet_id              = module.network.private_endpoint_subnet_id
   repo_name                               = var.repo_name
   resource_group_name                     = azurerm_resource_group.main.name
   user_assigned_identity_client_id        = azurerm_user_assigned_identity.app_service_identity.client_id
   user_assigned_identity_id               = azurerm_user_assigned_identity.app_service_identity.id
 
-  depends_on = [module.frontend, module.flyway]
+  depends_on = [module.frontend]
 }
 
 

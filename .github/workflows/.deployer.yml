@@ -66,7 +66,6 @@ jobs:
       shell: bash
       run: |
         API_IMAGE="ghcr.io/${{ github.repository }}/backend:${{ inputs.tag }}"
-        FLYWAY_IMAGE="ghcr.io/${{ github.repository }}/migrations:${{ inputs.tag }}"
         FRONTEND_IMAGE="ghcr.io/${{ github.repository }}/frontend:${{ inputs.tag }}"
         
         echo "api-image=$API_IMAGE" >> $GITHUB_OUTPUT
@@ -81,7 +80,6 @@ jobs:
           azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
           vnet_resource_group_name: ${{ secrets.VNET_RESOURCE_GROUP_NAME }} 
           vnet_name: ${{ secrets.VNET_NAME }}
-          flyway_image: ${{ steps.image-tags.outputs.flyway-image }}
           api_image: ${{ steps.image-tags.outputs.api-image }}
           stack_prefix: ${{ inputs.stack_prefix }}
           azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}

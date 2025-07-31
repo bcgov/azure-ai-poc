@@ -4,7 +4,6 @@ terraform {
 
 locals {
   stack_prefix               = get_env("stack_prefix")
-  flyway_image               = get_env("flyway_image")
   frontend_image             = get_env("frontend_image")
   api_image                  = get_env("api_image")
   vnet_resource_group_name   = get_env("vnet_resource_group_name") # Resource group where the VNet exists.
@@ -52,9 +51,7 @@ tenant_id                 = "${local.azure_tenant_id}"
 client_id                 = "${local.azure_client_id}"
 vnet_name                 = "${local.vnet_name}"
 vnet_resource_group_name  = "${local.vnet_resource_group_name}"
-db_master_password        = "${get_env("db_master_password")}"
 api_image                 = "${local.api_image}"
-flyway_image              = "${local.flyway_image}"
 frontend_image            = "${local.frontend_image}"
 common_tags = {
   "Environment" = "${local.target_env}"

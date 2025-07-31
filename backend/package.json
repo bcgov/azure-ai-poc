@@ -3,9 +3,8 @@
   "license": "Apache-2.0",
   "main": "index.js",
   "scripts": {
-    "prisma-generate": "prisma generate",
     "prebuild": "rimraf dist",
-    "build": "prisma generate && nest build",
+    "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "deploy": "npm ci --ignore-scripts --no-update-notifier && npm run build",
     "start": "nest start",
@@ -17,7 +16,7 @@
     "make-badges": "istanbul-badges-readme --logo=vitest --exitCode=1",
     "make-badges:ci": "npm run make-badges -- --ci",
     "test": "vitest --dir src",
-    "test:cov": "prisma generate && vitest run --coverage",
+    "test:cov": "vitest run --coverage",
     "test:e2e": "vitest --dir test"
   },
   "dependencies": {
@@ -32,13 +31,11 @@
     "@nestjs/terminus": "^11.0.0",
     "@nestjs/testing": "^11.0.0",
     "@opentelemetry/api": "^1.9.0",
-    "@prisma/client": "^6.1.0",
     "dotenv": "^17.0.0",
     "express-prom-bundle": "^8.0.0",
     "helmet": "^8.0.0",
     "nest-winston": "^1.9.7",
     "pg": "^8.13.1",
-    "prisma": "^6.1.0",
     "prom-client": "^15.1.3",
     "reflect-metadata": "^0.2.2",
     "rimraf": "^6.0.1",

@@ -71,24 +71,6 @@ variable "container_registry_url" {
   default     = "https://ghcr.io"
 }
 
-variable "database_name" {
-  description = "The name of the PostgreSQL database."
-  type        = string
-  nullable    = false
-}
-
-variable "db_master_password" {
-  description = "The password for the PostgreSQL admin user."
-  type        = string
-  sensitive   = true
-  nullable    = false
-}
-
-variable "enable_psql_sidecar" {
-  description = "Whether to enable the CloudBeaver PostgreSQL sidecar."
-  type        = bool
-  default     = false
-}
 
 variable "frontend_frontdoor_resource_guid" {
   description = "The resource GUID for the Front Door service associated with the frontend App Service."
@@ -120,17 +102,6 @@ variable "node_env" {
   default     = "production"
 }
 
-variable "postgres_host" {
-  description = "The FQDN of the PostgreSQL server."
-  type        = string
-  nullable    = false
-}
-
-variable "postgresql_admin_username" {
-  description = "The admin username for the PostgreSQL server."
-  type        = string
-  nullable    = false
-}
 
 variable "private_endpoint_subnet_id" {
   description = "The subnet ID for private endpoints."
