@@ -8,7 +8,7 @@ import '@/scss/styles.scss'
 
 // Import the generated route tree
 import { routeTree } from './routeTree.gen'
-import UserService from './services/user-service'
+import { useAuthStore } from './stores'
 
 // Create a new router instance
 const router = createRouter({ routeTree })
@@ -20,10 +20,16 @@ declare module '@tanstack/react-router' {
   }
 }
 
-const onAuthenticatedCallback = () =>
+const renderApp = () => {
   ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
     <StrictMode>
       <RouterProvider router={router} />
     </StrictMode>,
   )
-UserService.initKeycloak(onAuthenticatedCallback)
+}
+
+// Initialize authentication
+const authStore = useAuthStore.getState()
+authStore.initKeycloak().then(() => {
+  renderApp()
+})

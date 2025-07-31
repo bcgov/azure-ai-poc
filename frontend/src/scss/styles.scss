@@ -1,5 +1,5 @@
 // A custom theme for this app, see: https://getbootstrap.com/docs/5.3/customize/sass/#maps-and-loops
-$primary: #ffffff;
+$primary: #0d6efd;  // Bootstrap blue instead of white
 $secondary: #385a8a;
 $success: #234720;
 $warning: #81692c;
@@ -13,3 +13,83 @@ $bootstrap-icons-font-src:
   url('../../node_modules/bootstrap-icons/font/fonts/bootstrap-icons.woff')
     format('woff');
 @import '../../node_modules/bootstrap-icons/font/bootstrap-icons.scss';
+
+// Custom styles for chat interface
+.chat-container {
+  height: calc(100vh - 200px);
+  min-height: 500px;
+}
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem;
+  
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+  
+  &::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 3px;
+  }
+  
+  &::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border-radius: 3px;
+    
+    &:hover {
+      background: #a8a8a8;
+    }
+  }
+}
+
+.message-bubble {
+  max-width: 80%;
+  margin-bottom: 1rem;
+  
+  &.user {
+    margin-left: auto;
+    
+    .card {
+      background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+      border: none;
+      color: white;
+    }
+  }
+  
+  &.assistant {
+    margin-right: auto;
+    
+    .card {
+      background: #f8f9fa;
+      border: 1px solid #e9ecef;
+    }
+  }
+}
+
+.chat-input-container {
+  border-top: 1px solid #dee2e6;
+  background: white;
+  padding: 1rem;
+  
+  textarea {
+    resize: none;
+    border-radius: 20px;
+    border: 1px solid #ced4da;
+    
+    &:focus {
+      border-color: #007bff;
+      box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+    }
+  }
+  
+  .btn-send {
+    border-radius: 50%;
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}

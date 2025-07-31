@@ -2,31 +2,33 @@ import React, { type FC } from 'react'
 import { Footer, Header } from '@bcgov/design-system-react-components'
 import { Link } from '@tanstack/react-router'
 import { Button } from 'react-bootstrap'
-import UserService from '../services/user-service'
+import { useAuth } from '../stores'
 
 type Props = {
   children: React.ReactNode
 }
 
 const Layout: FC<Props> = ({ children }) => {
+  const { isLoggedIn, username, logout } = useAuth()
+
   const handleLogout = () => {
-    UserService.doLogout()
+    logout()
   }
 
   return (
     <div className="d-flex flex-column min-vh-100">
       <div className="mb-3">
-        <Header title={'QuickStart Azure Containers Using App Service'}>
+        <Header title={'AI Chat'}>
           <div className="d-flex align-items-center gap-3">
             <Link to="/">
               <Button variant="light" size="lg">
                 <i className="bi bi-house-door-fill" />
               </Button>
             </Link>
-            {UserService.isLoggedIn() && (
+            {isLoggedIn && (
               <div className="d-flex align-items-center gap-3">
                 <span className="text-white">
-                  Welcome, {UserService.getUsername() || 'User'}
+                  Welcome, {username || 'User'}
                 </span>
                 <Button
                   variant="outline-light"
@@ -40,9 +42,7 @@ const Layout: FC<Props> = ({ children }) => {
           </div>
         </Header>
       </div>
-      <div className="d-flex flex-grow-1 align-items-start justify-content-center mt-5 mb-5 ml-1 mr-1">
-        {children}
-      </div>
+      <div className="flex-grow-1 d-flex flex-column">{children}</div>
       <Footer />
     </div>
   )
