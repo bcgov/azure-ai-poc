@@ -27,14 +27,10 @@ const Layout: FC<Props> = ({ children }) => {
             </Link>
             {isLoggedIn && (
               <div className="d-flex align-items-center gap-3">
-                <span className="text-white">
+                <span className="text-dark fw-semibold">
                   Welcome, {username || 'User'}
                 </span>
-                <Button
-                  variant="outline-light"
-                  size="sm"
-                  onClick={handleLogout}
-                >
+                <Button variant="outline-dark" size="sm" onClick={handleLogout}>
                   Sign Out
                 </Button>
               </div>

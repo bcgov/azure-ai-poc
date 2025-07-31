@@ -110,10 +110,10 @@ const ChatInterface: FC = () => {
           <div className="py-3 border-bottom">
             <h4 className="mb-0 text-center">
               <i className="bi bi-chat-dots me-2"></i>
-              AI Assistant
+              AI Assistant for Architecture Confluence space
             </h4>
             <p className="text-muted text-center mb-0 small">
-              Ask me anything about your data or get help with your questions
+              Ask me anything about Architecture confluence space topics.
             </p>
           </div>
 
@@ -125,7 +125,7 @@ const ChatInterface: FC = () => {
             {messages.length === 0 ? (
               <div className="text-center text-muted py-5">
                 <i className="bi bi-chat-quote display-4 mb-3"></i>
-                <h5>Welcome to AI Assistant</h5>
+                <h5>Welcome</h5>
                 <p>Start a conversation by typing your question below</p>
               </div>
             ) : (
