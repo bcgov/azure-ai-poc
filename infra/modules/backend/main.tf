@@ -82,6 +82,7 @@ resource "azurerm_linux_web_app" "backend" {
     WEBSITE_SKIP_RUNNING_KUDUAGENT        = "false"
     WEBSITES_ENABLE_APP_SERVICE_STORAGE   = "false"
     WEBSITE_ENABLE_SYNC_UPDATE_SITE       = "1"
+    FORCE_REDEPLOY                        = null_resource.trigger_backend.id
   }
   logs {
     detailed_error_messages = true
@@ -151,7 +152,11 @@ resource "azurerm_monitor_autoscale_setting" "backend_autoscale" {
     }
   }
 }
-
+resource "null_resource" "trigger_backend" {
+  triggers = {
+    always_run = timestamp()
+  }
+}
 # Backend Diagnostics
 resource "azurerm_monitor_diagnostic_setting" "backend_diagnostics" {
   name                       = "${var.app_name}-backend-diagnostics"
