@@ -1,4 +1,9 @@
-import { Injectable, UnauthorizedException } from "@nestjs/common";
+import {
+  ForbiddenException,
+  Injectable,
+  Logger,
+  UnauthorizedException,
+} from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
 import jwksClient from "jwks-rsa";
@@ -61,20 +66,20 @@ export class AuthService {
         publicKey: key,
         algorithms: ["RS256"],
       }) as KeycloakUser;
-
+      console.info("payload", payload);
       // Validate audience claim
       await this.validateAudience(payload);
       // validate role
       if (!payload.client_roles) {
-        throw new UnauthorizedException("Token missing client roles");
+        throw new ForbiddenException("Token missing client roles");
       }
-      if (this.hasRole(payload, "ai-poc-participant")) {
-        throw new UnauthorizedException("User does not have the required role");
+      if (!this.hasRole(payload, "ai-poc-participant")) {
+        throw new ForbiddenException("User does not have the required role");
       }
       return payload;
     } catch (error) {
       console.error("Token validation error:", error);
-      throw new UnauthorizedException("Invalid or expired token");
+      throw error;
     }
   }
 
@@ -116,6 +121,10 @@ export class AuthService {
 
   hasRole(user: KeycloakUser, role: string): boolean {
     // Check realm roles
+    if (!Array.isArray(user.client_roles)) {
+      console.info("User has no client roles is not array");
+      return false;
+    }
     if (user.client_roles?.includes(role)) {
       return true;
     }
