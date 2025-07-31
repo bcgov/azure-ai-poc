@@ -60,13 +60,18 @@ export class AuthService {
 
       // Get the signing key from Keycloak
       const key = await this.getKey(decodedHeader.header.kid);
-
+      let payload: KeycloakUser;
       // Verify and decode the token
-      const payload = this.jwtService.verify(token, {
-        publicKey: key,
-        algorithms: ["RS256"],
-      }) as KeycloakUser;
-      console.info("payload", payload);
+      try {
+        payload = this.jwtService.verify(token, {
+          publicKey: key,
+          algorithms: ["RS256"],
+        }) as KeycloakUser;
+        console.info("payload", payload);
+      } catch (error) {
+        console.error("JWT verification failed:", error);
+        throw new UnauthorizedException("Invalid or expired token");
+      }
       // Validate audience claim
       await this.validateAudience(payload);
       // validate role
