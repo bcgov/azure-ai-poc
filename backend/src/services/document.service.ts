@@ -1,6 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { AzureOpenAIService } from "./azure-openai.service";
-import * as pdf from "pdf-parse";
+import pdf from "pdf-parse";
 
 export interface DocumentChunk {
   id: string;
