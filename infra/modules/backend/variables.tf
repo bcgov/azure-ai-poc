@@ -40,6 +40,31 @@ variable "appinsights_instrumentation_key" {
   nullable    = false
 }
 
+# Azure OpenAI Configuration Variables
+variable "azure_openai_endpoint" {
+  description = "Azure OpenAI service endpoint URL"
+  type        = string
+  sensitive   = true
+}
+
+variable "azure_openai_api_key" {
+  description = "Azure OpenAI API key"
+  type        = string
+  sensitive   = true
+}
+
+variable "azure_openai_deployment_name" {
+  description = "Azure OpenAI model deployment name"
+  type        = string
+  default     = "gpt-4o"
+}
+
+variable "azure_openai_embedding_deployment" {
+  description = "Azure OpenAI embedding model deployment name"
+  type        = string
+  default     = "text-embedding-3-small"
+}
+
 variable "backend_autoscale_enabled" {
   description = "Whether autoscaling is enabled for the backend App Service plan."
   type        = bool

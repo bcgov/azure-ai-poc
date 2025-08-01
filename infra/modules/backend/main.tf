@@ -83,6 +83,13 @@ resource "azurerm_linux_web_app" "backend" {
     WEBSITES_ENABLE_APP_SERVICE_STORAGE   = "false"
     WEBSITE_ENABLE_SYNC_UPDATE_SITE       = "1"
     FORCE_REDEPLOY                        = null_resource.trigger_backend.id
+
+    # Azure OpenAI Configuration
+    AZURE_OPENAI_ENDPOINT             = var.azure_openai_endpoint
+    AZURE_OPENAI_API_KEY              = var.azure_openai_api_key
+    AZURE_OPENAI_DEPLOYMENT_NAME      = var.azure_openai_deployment_name
+    AZURE_OPENAI_EMBEDDING_DEPLOYMENT = var.azure_openai_embedding_deployment
+
   }
   logs {
     detailed_error_messages = true

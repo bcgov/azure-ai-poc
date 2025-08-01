@@ -10,6 +10,9 @@ import { HealthController } from "./health.controller";
 import { ChatController } from "./chat.controller";
 import { ChatService } from "./chat.service";
 import { AuthModule } from "./auth/auth.module";
+import { DocumentController } from "./document.controller";
+import { DocumentService } from "./services/document.service";
+import { AzureOpenAIService } from "./services/azure-openai.service";
 
 @Module({
   imports: [ConfigModule.forRoot(), TerminusModule, AuthModule],
@@ -18,8 +21,9 @@ import { AuthModule } from "./auth/auth.module";
     MetricsController,
     HealthController,
     ChatController,
+    DocumentController,
   ],
-  providers: [AppService, ChatService],
+  providers: [AppService, ChatService, DocumentService, AzureOpenAIService],
 })
 export class AppModule {
   // let's add a middleware on all routes

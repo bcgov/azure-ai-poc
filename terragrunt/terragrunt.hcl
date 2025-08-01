@@ -53,6 +53,13 @@ vnet_name                 = "${local.vnet_name}"
 vnet_resource_group_name  = "${local.vnet_resource_group_name}"
 api_image                 = "${local.api_image}"
 frontend_image            = "${local.frontend_image}"
+
+# Azure OpenAI Configuration
+azure_openai_endpoint                = "${get_env("azure_openai_endpoint")}"
+azure_openai_api_key                 = "${get_env("azure_openai_api_key")}"
+azure_openai_deployment_name         = "${get_env("azure_openai_deployment_name", "gpt-4o-mini")}"
+azure_openai_embedding_deployment    = "${get_env("azure_openai_embedding_deployment", "")}"
+
 common_tags = {
   "Environment" = "${local.target_env}"
   "AppEnv"      = "${local.app_env}"

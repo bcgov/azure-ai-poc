@@ -96,6 +96,10 @@ module "backend" {
   app_service_subnet_id                   = module.network.app_service_subnet_id
   appinsights_connection_string           = module.monitoring.appinsights_connection_string
   appinsights_instrumentation_key         = module.monitoring.appinsights_instrumentation_key
+  azure_openai_endpoint                   = var.azure_openai_endpoint
+  azure_openai_api_key                    = var.azure_openai_api_key
+  azure_openai_deployment_name            = var.azure_openai_deployment_name
+  azure_openai_embedding_deployment       = var.azure_openai_embedding_deployment
   backend_subnet_id                       = module.network.app_service_subnet_id
   common_tags                             = var.common_tags
   frontend_frontdoor_resource_guid        = module.frontdoor.frontdoor_resource_guid
