@@ -87,6 +87,12 @@ jobs:
           repo_name: ${{ github.event.repository.name }}
           frontend_image: ${{ steps.image-tags.outputs.frontend-image }}
           app_env: ${{ inputs.app_env }}
+          
+          # Azure OpenAI Configuration
+          azure_openai_endpoint: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          azure_openai_api_key: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          azure_openai_deployment_name: ${{ secrets.AZURE_OPENAI_DEPLOYMENT_NAME }}
+          azure_openai_embedding_deployment: ${{ secrets.AZURE_OPENAI_EMBEDDING_DEPLOYMENT }}
       run: |
           # Run terraform
           terragrunt run-all ${{inputs.command}} --terragrunt-non-interactive

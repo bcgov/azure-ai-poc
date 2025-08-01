@@ -1,8 +1,8 @@
 import type { FC } from 'react'
-import ChatInterface from './ChatInterface'
+import ChatInterfaceWithDocuments from './ChatInterfaceWithDocuments'
 
 const Dashboard: FC = () => {
-  return <ChatInterface />
+  return <ChatInterfaceWithDocuments />
 }
 
 export default Dashboard

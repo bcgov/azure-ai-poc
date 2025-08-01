@@ -29,6 +29,31 @@ variable "app_service_sku_name_frontend" {
   default     = "B1" # Basic tier 
 }
 
+# Azure OpenAI Configuration
+variable "azure_openai_endpoint" {
+  description = "Azure OpenAI service endpoint URL"
+  type        = string
+  sensitive   = true
+}
+
+variable "azure_openai_api_key" {
+  description = "Azure OpenAI API key"
+  type        = string
+  sensitive   = true
+}
+
+variable "azure_openai_deployment_name" {
+  description = "Azure OpenAI model deployment name"
+  type        = string
+  default     = "gpt-4o"
+}
+
+variable "azure_openai_embedding_deployment" {
+  description = "Azure OpenAI embedding model deployment name"
+  type        = string
+  default     = "text-embedding-3-small"
+}
+
 variable "client_id" {
   description = "Azure client ID for the service principal"
   type        = string
