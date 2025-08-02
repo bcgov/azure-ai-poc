@@ -16,15 +16,24 @@ export class AzureOpenAIService {
   }
 
   private async initializeClients(): Promise<void> {
-    const llmEndpoint = this.configService.get<string>("AZURE_OPENAI_LLM_ENDPOINT");
-    const embeddingEndpoint = this.configService.get<string>("AZURE_OPENAI_EMBEDDING_ENDPOINT");
+    if (process.env.NODE_ENV === "local") return;
+    const llmEndpoint = this.configService.get<string>(
+      "AZURE_OPENAI_LLM_ENDPOINT",
+    );
+    const embeddingEndpoint = this.configService.get<string>(
+      "AZURE_OPENAI_EMBEDDING_ENDPOINT",
+    );
     const apiKey = this.configService.get<string>("AZURE_OPENAI_API_KEY");
 
     if (!llmEndpoint) {
-      throw new Error("AZURE_OPENAI_LLM_ENDPOINT environment variable is required");
+      throw new Error(
+        "AZURE_OPENAI_LLM_ENDPOINT environment variable is required",
+      );
     }
     if (!embeddingEndpoint) {
-      throw new Error("AZURE_OPENAI_EMBEDDING_ENDPOINT environment variable is required");
+      throw new Error(
+        "AZURE_OPENAI_EMBEDDING_ENDPOINT environment variable is required",
+      );
     }
 
     try {
