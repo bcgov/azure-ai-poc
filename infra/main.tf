@@ -134,4 +134,9 @@ resource "azurerm_cosmosdb_sql_role_assignment" "cosmosdb_role_assignment_app_se
   role_definition_id  = "${module.cosmos.account_id}/sqlRoleDefinitions/00000000-0000-0000-0000-000000000002"
   principal_id        = module.backend.backend_managed_identity_principal_id
   scope               = module.cosmos.account_id
+
+  depends_on = [
+    module.backend,
+    module.cosmos
+  ]
 }
