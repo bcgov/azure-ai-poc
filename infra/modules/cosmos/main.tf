@@ -6,6 +6,16 @@ resource "azurerm_cosmosdb_account" "cosmosdb_sql" {
   kind                          = "GlobalDocumentDB"
   public_network_access_enabled = false
 
+  # Enable serverless capacity mode for cost optimization
+  capabilities {
+    name = "EnableServerless"
+  }
+
+  # Enable vector search capability
+  capabilities {
+    name = "EnableNoSQLVectorSearch"
+  }
+
   consistency_policy {
     consistency_level = "Session"
   }
@@ -64,7 +74,7 @@ resource "azurerm_cosmosdb_sql_database" "cosmosdb_sql_db" {
   name                = var.cosmosdb_sql_database_name
   account_name        = azurerm_cosmosdb_account.cosmosdb_sql.name
   resource_group_name = var.resource_group_name
-  throughput          = 400
+  # Remove throughput for serverless mode - not supported
 }
 
 resource "azurerm_cosmosdb_sql_container" "cosmosdb_sql_db_container" {
@@ -73,5 +83,23 @@ resource "azurerm_cosmosdb_sql_container" "cosmosdb_sql_db_container" {
   account_name        = azurerm_cosmosdb_account.cosmosdb_sql.name
   database_name       = azurerm_cosmosdb_sql_database.cosmosdb_sql_db.name
   partition_key_paths = ["/partitionKey"]
+
+  # Optimized indexing policy for document storage with embeddings
+  indexing_policy {
+    indexing_mode = "consistent"
+
+    included_path {
+      path = "/*"
+    }
+
+    # Exclude large embedding arrays from indexing to improve performance
+    excluded_path {
+      path = "/chunks/*/embedding/*"
+    }
+
+    excluded_path {
+      path = "/embedding/*"
+    }
+  }
 }
 

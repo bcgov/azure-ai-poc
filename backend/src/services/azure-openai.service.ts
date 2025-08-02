@@ -6,37 +6,50 @@ import { DefaultAzureCredential } from "@azure/identity";
 @Injectable()
 export class AzureOpenAIService {
   private readonly logger = new Logger(AzureOpenAIService.name);
-  private openaiClient: OpenAI;
-  private readonly deploymentName: string;
+  private chatClient: OpenAI;
+  private embeddingClient: OpenAI;
+  private readonly chatDeploymentName: string;
+  private readonly embeddingDeploymentName: string;
 
   constructor(private configService: ConfigService) {
-    this.deploymentName = this.configService.get<string>(
-      "AZURE_OPENAI_DEPLOYMENT_NAME",
-      "gpt-4o",
-    );
-    this.initializeClient();
+    this.initializeClients();
   }
 
-  private async initializeClient(): Promise<void> {
-    const endpoint = this.configService.get<string>("AZURE_OPENAI_ENDPOINT");
+  private async initializeClients(): Promise<void> {
+    const llmEndpoint = this.configService.get<string>("AZURE_OPENAI_LLM_ENDPOINT");
+    const embeddingEndpoint = this.configService.get<string>("AZURE_OPENAI_EMBEDDING_ENDPOINT");
     const apiKey = this.configService.get<string>("AZURE_OPENAI_API_KEY");
 
-    if (!endpoint) {
-      throw new Error("AZURE_OPENAI_ENDPOINT environment variable is required");
+    if (!llmEndpoint) {
+      throw new Error("AZURE_OPENAI_LLM_ENDPOINT environment variable is required");
+    }
+    if (!embeddingEndpoint) {
+      throw new Error("AZURE_OPENAI_EMBEDDING_ENDPOINT environment variable is required");
     }
 
     try {
       if (apiKey) {
-        // Use API key authentication
-        this.openaiClient = new OpenAI({
+        // Initialize chat client with API key authentication
+        this.chatClient = new OpenAI({
           apiKey,
-          baseURL: `${endpoint}/openai/deployments/${this.deploymentName}`,
-          defaultQuery: { "api-version": "2024-12-01-preview" },
+          baseURL: `${llmEndpoint}`,
+          defaultQuery: { "api-version": "2025-01-01-preview" },
           defaultHeaders: {
-            api_key: apiKey,
+            "api-key": apiKey,
           },
         });
-        this.logger.log("Initialized Azure OpenAI client with API key");
+
+        // Initialize embedding client with API key authentication
+        this.embeddingClient = new OpenAI({
+          apiKey,
+          baseURL: `${embeddingEndpoint}`,
+          defaultQuery: { "api-version": "2023-05-15" },
+          defaultHeaders: {
+            "api-key": apiKey,
+          },
+        });
+
+        this.logger.log("Initialized Azure OpenAI clients with API key");
       } else {
         // Use managed identity authentication for Azure App Service
         const credential = new DefaultAzureCredential();
@@ -44,20 +57,32 @@ export class AzureOpenAIService {
           "https://cognitiveservices.azure.com/.default",
         );
 
-        this.openaiClient = new OpenAI({
+        // Initialize chat client with managed identity
+        this.chatClient = new OpenAI({
           apiKey: token.token,
-          baseURL: `${endpoint}/openai/deployments/${this.deploymentName}`,
-          defaultQuery: { "api-version": "2024-12-01-preview" },
+          baseURL: `${llmEndpoint}`,
+          defaultQuery: { "api-version": "2025-01-01-preview" },
           defaultHeaders: {
             Authorization: `Bearer ${token.token}`,
           },
         });
+
+        // Initialize embedding client with managed identity
+        this.embeddingClient = new OpenAI({
+          apiKey: token.token,
+          baseURL: `${embeddingEndpoint}`,
+          defaultQuery: { "api-version": "2023-05-15" },
+          defaultHeaders: {
+            Authorization: `Bearer ${token.token}`,
+          },
+        });
+
         this.logger.log(
-          "Initialized Azure OpenAI client with managed identity",
+          "Initialized Azure OpenAI clients with managed identity",
         );
       }
     } catch (error) {
-      this.logger.error("Failed to initialize Azure OpenAI client", error);
+      this.logger.error("Failed to initialize Azure OpenAI clients", error);
       throw error;
     }
   }
@@ -68,8 +93,8 @@ export class AzureOpenAIService {
         ? `You are a helpful AI assistant. Use the following context to answer questions: ${context}`
         : "You are a helpful AI assistant.";
 
-      const response = await this.openaiClient.chat.completions.create({
-        model: this.deploymentName,
+      const response = await this.chatClient.chat.completions.create({
+        model: this.chatDeploymentName,
         messages: [
           { role: "system", content: systemMessage },
           { role: "user", content: prompt },
@@ -92,13 +117,8 @@ export class AzureOpenAIService {
 
   async generateEmbeddings(text: string): Promise<number[]> {
     try {
-      const embeddingDeployment = this.configService.get<string>(
-        "AZURE_OPENAI_EMBEDDING_DEPLOYMENT",
-        "text-embedding-3-small",
-      );
-
-      const response = await this.openaiClient.embeddings.create({
-        model: embeddingDeployment,
+      const response = await this.embeddingClient.embeddings.create({
+        model: this.embeddingDeploymentName,
         input: text,
       });
 

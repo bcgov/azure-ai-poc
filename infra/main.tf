@@ -50,6 +50,7 @@ module "cosmos" {
   resource_group_name        = azurerm_resource_group.main.name
   private_endpoint_subnet_id = module.network.private_endpoint_subnet_id
   log_analytics_workspace_id = module.monitoring.log_analytics_workspace_id
+  embedding_dimensions       = 1536 # text-embedding-3-small dimensions
 
   depends_on = [azurerm_resource_group.main, module.network]
 }

@@ -94,6 +94,8 @@ jobs:
           azure_openai_deployment_name: ${{ secrets.AZURE_OPENAI_DEPLOYMENT_NAME }}
           azure_openai_embedding_deployment: ${{ secrets.AZURE_OPENAI_EMBEDDING_DEPLOYMENT }}
           image_tag: ${{ inputs.tag }}
+          azure_openai_llm_endpoint: ${{ secrets.AZURE_OPENAI_LLM_ENDPOINT }}
+          azure_openai_embedding_endpoint: ${{ secrets.AZURE_OPENAI_EMBEDDING_ENDPOINT }}
       run: |
           # Run terraform
           terragrunt run-all ${{inputs.command}} --terragrunt-non-interactive

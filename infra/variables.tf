@@ -143,3 +143,13 @@ variable "vnet_resource_group_name" {
   description = "Resource group name where the virtual network exists"
   type        = string
 }
+variable "azure_openai_llm_endpoint" {
+  description = "The endpoint for the Azure OpenAI LLM service."
+  type        = string
+  nullable    = false
+}
+variable "azure_openai_embedding_endpoint" {
+  description = "The endpoint for the Azure OpenAI embedding service."
+  type        = string
+  nullable    = false
+}
