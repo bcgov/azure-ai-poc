@@ -76,13 +76,8 @@ resource "azurerm_cosmosdb_sql_container" "cosmosdb_sql_db_container" {
       path = "/*"
     }
 
-    # Exclude large embedding arrays from indexing to improve performance
     excluded_path {
-      path = "/chunks/*/embedding/*"
-    }
-
-    excluded_path {
-      path = "/embedding/*"
+      path = "/embedding/?*"
     }
   }
 }
