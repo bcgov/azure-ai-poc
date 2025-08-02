@@ -21,6 +21,7 @@ jobs:
     with:
       tags: |
         ${{ github.event.number || 'manual' }}
+        manual-${{ github.run_number }}
         latest
 
   plan-stack:
@@ -65,7 +66,7 @@ jobs:
  
   deploy-to-tools:
     name: Deploy to Tools
-    #needs: builds
+    needs: builds
     if: (github.event_name == 'workflow_dispatch')
     concurrency:
       group: deploy-tools-${{ github.event.number || 'latest' }}
@@ -74,7 +75,7 @@ jobs:
     with:
       environment_name: tools
       command: apply
-      tag: manual
+      tag: manual-${{ github.run_number }}
       app_env: tools
     secrets: inherit
 

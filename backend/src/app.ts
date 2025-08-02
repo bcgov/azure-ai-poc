@@ -1,10 +1,10 @@
-import { NestFactory } from '@nestjs/core';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { AppModule } from './app.module';
-import { customLogger } from './common/logger.config';
-import { NestExpressApplication } from '@nestjs/platform-express';
-import helmet from 'helmet';
-import { VersioningType } from '@nestjs/common';
+import { NestFactory } from "@nestjs/core";
+import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
+import { AppModule } from "./app.module";
+import { customLogger } from "./common/logger.config";
+import { NestExpressApplication } from "@nestjs/platform-express";
+import helmet from "helmet";
+import { VersioningType } from "@nestjs/common";
 import { metricsMiddleware } from "src/middleware/prom";
 
 /**
@@ -28,7 +28,7 @@ export async function bootstrap() {
   const config = new DocumentBuilder()
     .setTitle("QuickStart API for Azure Containers - NestJS")
     .setDescription("The user API description")
-    .setVersion("1.0")
+    .setVersion(process.env.IMAGE_TAG || "latest")
     .addTag("users")
     .build();
 
