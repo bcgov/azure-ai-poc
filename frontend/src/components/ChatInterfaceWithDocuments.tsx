@@ -40,6 +40,11 @@ const ChatInterface: FC = () => {
   const [showUploadModal, setShowUploadModal] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [isUploading, setIsUploading] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [documentToDelete, setDocumentToDelete] = useState<Document | null>(
+    null,
+  )
+  const [isDeleting, setIsDeleting] = useState(false)
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -134,6 +139,56 @@ const ChatInterface: FC = () => {
     }
   }
 
+  const handleDeleteDocument = async (document: Document) => {
+    setDocumentToDelete(document)
+    setShowDeleteConfirm(true)
+  }
+
+  const confirmDeleteDocument = async () => {
+    if (!documentToDelete) return
+
+    setIsDeleting(true)
+    setError(null)
+
+    try {
+      await apiService
+        .getAxiosInstance()
+        .delete(`/api/v1/documents/${documentToDelete.id}`)
+
+      // Remove from documents list
+      setDocuments((prev) =>
+        prev.filter((doc) => doc.id !== documentToDelete.id),
+      )
+
+      // Clear selection if deleted document was selected
+      if (selectedDocument === documentToDelete.id) {
+        setSelectedDocument(null)
+      }
+
+      // Add success message
+      const successMessage: ChatMessage = {
+        id: Date.now().toString(),
+        type: 'assistant',
+        content: `Document "${documentToDelete.filename}" has been deleted successfully.`,
+        timestamp: new Date(),
+      }
+      setMessages((prev) => [...prev, successMessage])
+
+      setShowDeleteConfirm(false)
+      setDocumentToDelete(null)
+    } catch (err: any) {
+      console.error('Delete error:', err)
+      setError(err.response?.data?.message || 'Failed to delete document')
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
+  const cancelDeleteDocument = () => {
+    setShowDeleteConfirm(false)
+    setDocumentToDelete(null)
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
@@ -216,9 +271,14 @@ const ChatInterface: FC = () => {
     : null
 
   return (
-    <Container fluid className="h-100 d-flex flex-column">
+    <Container fluid className="vh-100 d-flex flex-column">
       <Row className="flex-grow-1 overflow-hidden">
-        <Col xs={12} lg={8} xl={6} className="mx-auto d-flex flex-column h-100">
+        <Col
+          xs={12}
+          lg={10}
+          xl={8}
+          className="mx-auto d-flex flex-column h-100"
+        >
           {/* Chat Header */}
           <div className="py-3 border-bottom">
             <div className="d-flex justify-content-between align-items-center mb-2">
@@ -237,32 +297,61 @@ const ChatInterface: FC = () => {
             </div>
 
             {/* Document Selection */}
-            <div className="d-flex flex-wrap gap-2 align-items-center">
-              <small className="text-muted">Ask about:</small>
-              <Button
-                variant={!selectedDocument ? 'primary' : 'outline-secondary'}
-                size="sm"
-                onClick={() => setSelectedDocument(null)}
-              >
-                General Questions
-              </Button>
-              {documents.map((doc) => (
+            <div className="mb-2">
+              <div className="d-flex flex-wrap gap-2 align-items-center mb-2">
+                <small className="text-muted">Ask about:</small>
                 <Button
-                  key={doc.id}
-                  variant={
-                    selectedDocument === doc.id
-                      ? 'primary'
-                      : 'outline-secondary'
-                  }
+                  variant={!selectedDocument ? 'primary' : 'outline-secondary'}
                   size="sm"
-                  onClick={() => setSelectedDocument(doc.id)}
-                  className="text-truncate"
-                  style={{ maxWidth: '200px' }}
+                  onClick={() => setSelectedDocument(null)}
                 >
-                  <i className="bi bi-file-pdf me-1"></i>
-                  {doc.filename}
+                  General Questions
                 </Button>
-              ))}
+              </div>
+
+              {/* Uploaded Documents */}
+              {documents.length > 0 && (
+                <div className="d-flex flex-wrap gap-2">
+                  {documents.map((doc) => (
+                    <div
+                      key={doc.id}
+                      className="d-flex align-items-center border rounded p-1"
+                      style={{
+                        backgroundColor:
+                          selectedDocument === doc.id ? '#e3f2fd' : '#f8f9fa',
+                      }}
+                    >
+                      <Button
+                        variant={
+                          selectedDocument === doc.id
+                            ? 'primary'
+                            : 'outline-secondary'
+                        }
+                        size="sm"
+                        onClick={() => setSelectedDocument(doc.id)}
+                        className="text-truncate border-0 me-1"
+                        style={{ maxWidth: '180px' }}
+                      >
+                        <i className="bi bi-file-pdf me-1"></i>
+                        {doc.filename}
+                      </Button>
+                      <Button
+                        variant="outline-danger"
+                        size="sm"
+                        onClick={() => handleDeleteDocument(doc)}
+                        className="border-0 p-1 d-flex align-items-center justify-content-center"
+                        style={{ width: '28px', height: '28px' }}
+                        title={`Remove ${doc.filename}`}
+                      >
+                        <i
+                          className="bi bi-x"
+                          style={{ fontSize: '1.1em' }}
+                        ></i>
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {selectedDocumentName && (
@@ -275,10 +364,13 @@ const ChatInterface: FC = () => {
             )}
           </div>
 
-          {/* Messages Container */}
+          {/* Messages Container - Made responsive with proper scrolling */}
           <div
-            className="flex-grow-1 overflow-auto py-3"
-            style={{ minHeight: '400px' }}
+            className="flex-grow-1 overflow-auto py-3 chat-messages"
+            style={{
+              minHeight: '200px',
+              maxHeight: 'calc(100vh - 300px)',
+            }}
           >
             {messages.length === 0 ? (
               <div className="text-center text-muted py-5">
@@ -424,7 +516,7 @@ const ChatInterface: FC = () => {
           )}
 
           {/* Input Form */}
-          <div className="border-top pt-3">
+          <div className="border-top pt-3 chat-input-container">
             <Form onSubmit={handleSubmit}>
               <div className="d-flex align-items-end gap-2">
                 <div className="flex-grow-1">
@@ -453,8 +545,12 @@ const ChatInterface: FC = () => {
                   type="submit"
                   variant="primary"
                   disabled={!currentQuestion.trim() || isLoading}
-                  className="d-flex align-items-center px-3"
-                  style={{ height: '44px' }}
+                  className="d-flex align-items-center justify-content-center px-3"
+                  style={{
+                    height: '44px',
+                    minWidth: '80px',
+                    borderRadius: '22px',
+                  }}
                 >
                   {isLoading ? (
                     <Spinner animation="border" size="sm" />
@@ -529,6 +625,56 @@ const ChatInterface: FC = () => {
             )}
           </div>
         </Modal.Body>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal show={showDeleteConfirm} onHide={cancelDeleteDocument} centered>
+        <Modal.Header closeButton>
+          <Modal.Title>
+            <i className="bi bi-exclamation-triangle text-warning me-2"></i>
+            Confirm Delete
+          </Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <div className="text-center py-3">
+            <i className="bi bi-file-pdf display-4 text-danger mb-3"></i>
+            <h5>Delete Document</h5>
+            <p className="text-muted">
+              Are you sure you want to delete "{documentToDelete?.filename}"?
+            </p>
+            <p className="text-warning small">
+              <i className="bi bi-exclamation-triangle me-1"></i>
+              This action cannot be undone. The document and all associated data
+              will be permanently removed.
+            </p>
+          </div>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button
+            variant="secondary"
+            onClick={cancelDeleteDocument}
+            disabled={isDeleting}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="danger"
+            onClick={confirmDeleteDocument}
+            disabled={isDeleting}
+          >
+            {isDeleting ? (
+              <>
+                <Spinner animation="border" size="sm" className="me-2" />
+                Deleting...
+              </>
+            ) : (
+              <>
+                <i className="bi bi-trash me-1"></i>
+                Delete Document
+              </>
+            )}
+          </Button>
+        </Modal.Footer>
       </Modal>
     </Container>
   )

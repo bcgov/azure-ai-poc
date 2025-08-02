@@ -59,7 +59,8 @@ azure_openai_endpoint                = "${get_env("azure_openai_endpoint")}"
 azure_openai_api_key                 = "${get_env("azure_openai_api_key")}"
 azure_openai_deployment_name         = "${get_env("azure_openai_deployment_name", "gpt-4o-mini")}"
 azure_openai_embedding_deployment    = "${get_env("azure_openai_embedding_deployment", "")}"
-
+azure_openai_llm_endpoint          = "${get_env("azure_openai_llm_endpoint")}"
+azure_openai_embedding_endpoint    = "${get_env("azure_openai_embedding_endpoint")}"
 common_tags = {
   "Environment" = "${local.target_env}"
   "AppEnv"      = "${local.app_env}"

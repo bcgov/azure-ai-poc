@@ -26,10 +26,25 @@ export async function bootstrap() {
     prefix: "v",
   });
   const config = new DocumentBuilder()
-    .setTitle("QuickStart API for Azure Containers - NestJS")
-    .setDescription("The user API description")
+    .setTitle("Azure AI POC API")
+    .setDescription(
+      "API for Azure AI POC with document management and chat functionality",
+    )
     .setVersion(process.env.IMAGE_TAG || "latest")
-    .addTag("users")
+    .addTag("documents", "Document management endpoints")
+    .addTag("chat", "Chat functionality endpoints")
+    .addTag("health", "Health check endpoints")
+    .addBearerAuth(
+      {
+        type: "http",
+        scheme: "bearer",
+        bearerFormat: "JWT",
+        name: "JWT",
+        description: "Enter JWT token from Keycloak",
+        in: "header",
+      },
+      "JWT-auth", // This name here is important for matching up with @ApiBearerAuth('JWT-auth') in your controllers
+    )
     .build();
 
   const document = SwaggerModule.createDocument(app, config);

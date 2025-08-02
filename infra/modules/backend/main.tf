@@ -87,7 +87,8 @@ resource "azurerm_linux_web_app" "backend" {
     AZURE_OPENAI_API_KEY              = var.azure_openai_api_key
     AZURE_OPENAI_DEPLOYMENT_NAME      = var.azure_openai_deployment_name
     AZURE_OPENAI_EMBEDDING_DEPLOYMENT = var.azure_openai_embedding_deployment
-
+    AZURE_OPENAI_LLM_ENDPOINT         = var.azure_openai_llm_endpoint
+    AZURE_OPENAI_EMBEDDING_ENDPOINT   = var.azure_openai_embedding_endpoint
     # CosmosDB Configuration
     COSMOS_DB_ENDPOINT       = var.cosmosdb_endpoint
     COSMOS_DB_DATABASE_NAME  = var.cosmosdb_db_name
