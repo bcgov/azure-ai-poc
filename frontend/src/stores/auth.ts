@@ -353,7 +353,6 @@ export const useAuthStore = create<AuthState>()(
 
           try {
             console.log('Performing background token refresh...')
-            // Refresh token if it expires within 5 minutes (300 seconds)
             const refreshed = await _kc.updateToken(300)
 
             if (refreshed) {
@@ -367,7 +366,7 @@ export const useAuthStore = create<AuthState>()(
             // Don't logout on background refresh failure to avoid interrupting user experience
             // The onTokenExpired handler will handle critical failures
           }
-        }, 60000) // 60 seconds = 60,000 milliseconds
+        }, 180000) // 180 seconds = 180,000 milliseconds
 
         set({ refreshIntervalId: intervalId })
       },
