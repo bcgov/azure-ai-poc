@@ -89,17 +89,6 @@ variable "resource_group_name" {
   nullable    = false
 }
 
-variable "user_assigned_identity_client_id" {
-  description = "The client ID of the user-assigned managed identity for the frontend."
-  type        = string
-  nullable    = false
-}
-
-variable "user_assigned_identity_id" {
-  description = "The resource ID of the user-assigned managed identity for the frontend."
-  type        = string
-  nullable    = false
-}
 
 variable "app_service_sku_name_frontend" {
   description = "The SKU name for the frontend App Service plan."

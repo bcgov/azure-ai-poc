@@ -21,16 +21,14 @@ resource "azurerm_linux_web_app" "frontend" {
   virtual_network_subnet_id = var.frontend_subnet_id
   https_only                = true
   identity {
-    type         = "UserAssigned"
-    identity_ids = [var.user_assigned_identity_id]
+    type = "SystemAssigned"
   }
   site_config {
-    always_on                                     = true
-    container_registry_use_managed_identity       = true
-    container_registry_managed_identity_client_id = var.user_assigned_identity_client_id
-    minimum_tls_version                           = "1.3"
-    health_check_path                             = "/"
-    health_check_eviction_time_in_min             = 2
+    always_on                               = true
+    container_registry_use_managed_identity = true
+    minimum_tls_version                     = "1.3"
+    health_check_path                       = "/"
+    health_check_eviction_time_in_min       = 2
     application_stack {
       docker_image_name   = var.frontend_image
       docker_registry_url = var.container_registry_url
