@@ -114,6 +114,8 @@ module "backend" {
   repo_name                               = var.repo_name
   resource_group_name                     = azurerm_resource_group.main.name
   image_tag                               = var.image_tag
+  azure_openai_embedding_endpoint         = var.azure_openai_embedding_endpoint
+  azure_openai_llm_endpoint               = var.azure_openai_llm_endpoint
   # CosmosDB
   cosmosdb_endpoint       = module.cosmos.cosmosdb_endpoint
   cosmosdb_db_name        = module.cosmos.cosmosdb_sql_database_name
