@@ -44,35 +44,54 @@ export class DocumentService {
     file: UploadedFile,
     userId?: string,
   ): Promise<ProcessedDocument> {
-    try {
-      this.logger.log(`Processing document: ${file.originalname}`);
+    let pdfData = null;
 
-      // Parse PDF
-      const pdfData = await pdf(file.buffer);
+    try {
+      this.logger.log(
+        `Processing document: ${file.originalname} (${(file.size / 1024 / 1024).toFixed(2)} MB)`,
+      );
+
+      // Parse PDF with memory optimization options
+      pdfData = await pdf(file.buffer, {
+        // Optimize PDF parsing for large files
+        max: 0, // No page limit
+      });
+
+      // Clear the original buffer as soon as possible
+      file.buffer = null;
 
       // Create document ID and partition key
       const documentId = this.generateDocumentId(file.originalname);
       const partitionKey = userId || "default";
 
-      // Split text into chunks (for better context management)
+      // Split text into chunks with memory-efficient processing
       const chunks = this.chunkText(
         pdfData.text,
         file.originalname,
         partitionKey,
       );
 
+      // Clear PDF data from memory
+      const totalPages = pdfData.numpages;
+      pdfData = null;
+
       const processedDoc: ProcessedDocument = {
         id: documentId,
         filename: file.originalname,
         chunks,
         uploadedAt: new Date(),
-        totalPages: pdfData.numpages,
+        totalPages: totalPages || 0,
         partitionKey,
         userId,
       };
 
       // Store in Cosmos DB
       await this.cosmosDbService.createItem(processedDoc, partitionKey);
+
+      // Force garbage collection if available
+      if (global.gc) {
+        global.gc();
+      }
 
       this.logger.log(
         `Successfully processed document: ${file.originalname} with ${chunks.length} chunks`,
@@ -84,6 +103,14 @@ export class DocumentService {
         error,
       );
       throw new Error(`Failed to process document: ${error.message}`);
+    } finally {
+      // Ensure cleanup
+      if (pdfData) {
+        pdfData = null;
+      }
+      if (file.buffer) {
+        file.buffer = null;
+      }
     }
   }
 
@@ -103,16 +130,33 @@ export class DocumentService {
     }
 
     try {
-      // Combine all chunks for context (you might want to implement smarter chunking/retrieval)
-      const fullContext = document.chunks
-        .map((chunk) => chunk.content)
-        .join("\n\n");
+      // Instead of combining all chunks, use a smarter approach for large documents
+      const maxContextSize = 8000; // Limit context size to prevent token limits and memory issues
+      let fullContext = "";
+      let usedChunks = 0;
+
+      // Sort chunks by relevance (you could implement similarity search here)
+      // For now, we'll use the first chunks up to the context limit
+      for (const chunk of document.chunks) {
+        if (fullContext.length + chunk.content.length > maxContextSize) {
+          break;
+        }
+        fullContext += (fullContext ? "\n\n" : "") + chunk.content;
+        usedChunks++;
+      }
+
+      this.logger.log(
+        `Using ${usedChunks}/${document.chunks.length} chunks for question answering`,
+      );
 
       // Use Azure OpenAI to answer the question
       const answer = await this.azureOpenAIService.answerQuestionWithContext(
         question,
         fullContext,
       );
+
+      // Clear context from memory
+      fullContext = null;
 
       return answer;
     } catch (error) {
@@ -174,50 +218,104 @@ export class DocumentService {
     text: string,
     filename: string,
     partitionKey: string,
-    maxChunkSize: number = 2000,
+    maxChunkSize: number = 3000, // Increased from 2000 for better context
   ): DocumentChunk[] {
     const chunks: DocumentChunk[] = [];
-    const paragraphs = text.split(/\n\s*\n/);
+
+    // Use a more memory-efficient approach for large texts
+    if (!text || text.length === 0) {
+      return chunks;
+    }
+
+    // Split by paragraphs first, then by sentences if needed
+    const paragraphs = text.split(/\n\s*\n/).filter((p) => p.trim().length > 0);
 
     let currentChunk = "";
     let chunkIndex = 0;
 
     for (const paragraph of paragraphs) {
+      const trimmedParagraph = paragraph.trim();
+
+      // If adding this paragraph would exceed the limit and we have content
       if (
-        currentChunk.length + paragraph.length > maxChunkSize &&
+        currentChunk.length + trimmedParagraph.length > maxChunkSize &&
         currentChunk.length > 0
       ) {
         // Save current chunk
-        chunks.push({
-          id: `${filename}_chunk_${chunkIndex}`,
-          content: currentChunk.trim(),
-          metadata: {
-            filename,
-            uploadedAt: new Date(),
-          },
-          partitionKey,
-        });
-
-        currentChunk = paragraph;
+        chunks.push(
+          this.createChunk(currentChunk, filename, partitionKey, chunkIndex),
+        );
+        currentChunk = trimmedParagraph;
         chunkIndex++;
+      }
+      // If the paragraph itself is too large, split it by sentences
+      else if (trimmedParagraph.length > maxChunkSize) {
+        // Save current chunk if it has content
+        if (currentChunk.length > 0) {
+          chunks.push(
+            this.createChunk(currentChunk, filename, partitionKey, chunkIndex),
+          );
+          chunkIndex++;
+        }
+
+        // Split large paragraph by sentences
+        const sentences = trimmedParagraph
+          .split(/[.!?]+/)
+          .filter((s) => s.trim().length > 0);
+        let sentenceChunk = "";
+
+        for (const sentence of sentences) {
+          const trimmedSentence = sentence.trim() + ".";
+          if (
+            sentenceChunk.length + trimmedSentence.length > maxChunkSize &&
+            sentenceChunk.length > 0
+          ) {
+            chunks.push(
+              this.createChunk(
+                sentenceChunk,
+                filename,
+                partitionKey,
+                chunkIndex,
+              ),
+            );
+            sentenceChunk = trimmedSentence;
+            chunkIndex++;
+          } else {
+            sentenceChunk += (sentenceChunk ? " " : "") + trimmedSentence;
+          }
+        }
+
+        currentChunk = sentenceChunk;
       } else {
-        currentChunk += (currentChunk ? "\n\n" : "") + paragraph;
+        currentChunk += (currentChunk ? "\n\n" : "") + trimmedParagraph;
       }
     }
 
     // Add the last chunk if it has content
     if (currentChunk.trim()) {
-      chunks.push({
-        id: `${filename}_chunk_${chunkIndex}`,
-        content: currentChunk.trim(),
-        metadata: {
-          filename,
-          uploadedAt: new Date(),
-        },
-        partitionKey,
-      });
+      chunks.push(
+        this.createChunk(currentChunk, filename, partitionKey, chunkIndex),
+      );
     }
 
+    this.logger.log(`Created ${chunks.length} chunks for document ${filename}`);
     return chunks;
+  }
+
+  private createChunk(
+    content: string,
+    filename: string,
+    partitionKey: string,
+    index: number,
+  ): DocumentChunk {
+    return {
+      id: `${filename.replace(/[^a-zA-Z0-9]/g, "_")}_chunk_${index}`,
+      content: content.trim(),
+      metadata: {
+        filename,
+        uploadedAt: new Date(),
+      },
+      partitionKey,
+    };
   }
 }
