@@ -157,3 +157,20 @@ variable "user_assigned_identity_id" {
   type        = string
   nullable    = false
 }
+
+#cosmosdb variables
+variable "cosmosdb_endpoint" {
+  description = "The endpoint URL for the Cosmos DB instance."
+  type        = string
+  nullable    = false
+}
+variable "cosmosdb_db_name" {
+  description = "The name of the Cosmos DB database."
+  type        = string
+  nullable    = false
+}
+variable "cosmosdb_container_name" {
+  description = "The name of the Cosmos DB container."
+  type        = string
+  nullable    = false
+}

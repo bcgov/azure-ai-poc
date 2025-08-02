@@ -1,5 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { AzureOpenAIService } from "./azure-openai.service";
+import { CosmosDbService } from "./cosmosdb.service";
 import pdf from "pdf-parse";
 
 export interface DocumentChunk {
@@ -10,6 +11,7 @@ export interface DocumentChunk {
     filename: string;
     uploadedAt: Date;
   };
+  partitionKey: string; // Required for Cosmos DB
 }
 
 export interface ProcessedDocument {
@@ -18,6 +20,8 @@ export interface ProcessedDocument {
   chunks: DocumentChunk[];
   uploadedAt: Date;
   totalPages?: number;
+  partitionKey: string; // Required for Cosmos DB
+  userId?: string; // To support multi-tenant scenarios
 }
 
 interface UploadedFile {
@@ -30,22 +34,32 @@ interface UploadedFile {
 @Injectable()
 export class DocumentService {
   private readonly logger = new Logger(DocumentService.name);
-  private documents: Map<string, ProcessedDocument> = new Map();
 
-  constructor(private azureOpenAIService: AzureOpenAIService) {}
+  constructor(
+    private azureOpenAIService: AzureOpenAIService,
+    private cosmosDbService: CosmosDbService,
+  ) {}
 
-  async processDocument(file: UploadedFile): Promise<ProcessedDocument> {
+  async processDocument(
+    file: UploadedFile,
+    userId?: string,
+  ): Promise<ProcessedDocument> {
     try {
       this.logger.log(`Processing document: ${file.originalname}`);
 
       // Parse PDF
       const pdfData = await pdf(file.buffer);
 
-      // Create document ID
+      // Create document ID and partition key
       const documentId = this.generateDocumentId(file.originalname);
+      const partitionKey = userId || "default";
 
       // Split text into chunks (for better context management)
-      const chunks = this.chunkText(pdfData.text, file.originalname);
+      const chunks = this.chunkText(
+        pdfData.text,
+        file.originalname,
+        partitionKey,
+      );
 
       const processedDoc: ProcessedDocument = {
         id: documentId,
@@ -53,10 +67,12 @@ export class DocumentService {
         chunks,
         uploadedAt: new Date(),
         totalPages: pdfData.numpages,
+        partitionKey,
+        userId,
       };
 
-      // Store in memory (in production, you'd want to use a database)
-      this.documents.set(documentId, processedDoc);
+      // Store in Cosmos DB
+      await this.cosmosDbService.createItem(processedDoc, partitionKey);
 
       this.logger.log(
         `Successfully processed document: ${file.originalname} with ${chunks.length} chunks`,
@@ -71,8 +87,17 @@ export class DocumentService {
     }
   }
 
-  async answerQuestion(documentId: string, question: string): Promise<string> {
-    const document = this.documents.get(documentId);
+  async answerQuestion(
+    documentId: string,
+    question: string,
+    userId?: string,
+  ): Promise<string> {
+    const partitionKey = userId || "default";
+    const document = await this.cosmosDbService.getItem<ProcessedDocument>(
+      documentId,
+      partitionKey,
+    );
+
     if (!document) {
       throw new Error("Document not found");
     }
@@ -99,16 +124,44 @@ export class DocumentService {
     }
   }
 
-  getDocument(documentId: string): ProcessedDocument | undefined {
-    return this.documents.get(documentId);
+  async getDocument(
+    documentId: string,
+    userId?: string,
+  ): Promise<ProcessedDocument | null> {
+    const partitionKey = userId || "default";
+    return await this.cosmosDbService.getItem<ProcessedDocument>(
+      documentId,
+      partitionKey,
+    );
   }
 
-  getAllDocuments(): ProcessedDocument[] {
-    return Array.from(this.documents.values());
+  async getAllDocuments(userId?: string): Promise<ProcessedDocument[]> {
+    const partitionKey = userId || "default";
+    const querySpec = {
+      query: "SELECT * FROM c WHERE c.partitionKey = @partitionKey",
+      parameters: [
+        {
+          name: "@partitionKey",
+          value: partitionKey,
+        },
+      ],
+    };
+
+    return await this.cosmosDbService.queryItems<ProcessedDocument>(querySpec);
   }
 
-  deleteDocument(documentId: string): boolean {
-    return this.documents.delete(documentId);
+  async deleteDocument(documentId: string, userId?: string): Promise<boolean> {
+    try {
+      const partitionKey = userId || "default";
+      await this.cosmosDbService.deleteItem(documentId, partitionKey);
+      return true;
+    } catch (error) {
+      if (error.code === 404) {
+        return false;
+      }
+      this.logger.error(`Error deleting document ${documentId}`, error);
+      throw error;
+    }
   }
 
   private generateDocumentId(filename: string): string {
@@ -120,6 +173,7 @@ export class DocumentService {
   private chunkText(
     text: string,
     filename: string,
+    partitionKey: string,
     maxChunkSize: number = 2000,
   ): DocumentChunk[] {
     const chunks: DocumentChunk[] = [];
@@ -141,6 +195,7 @@ export class DocumentService {
             filename,
             uploadedAt: new Date(),
           },
+          partitionKey,
         });
 
         currentChunk = paragraph;
@@ -159,6 +214,7 @@ export class DocumentService {
           filename,
           uploadedAt: new Date(),
         },
+        partitionKey,
       });
     }
 

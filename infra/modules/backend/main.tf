@@ -90,6 +90,11 @@ resource "azurerm_linux_web_app" "backend" {
     AZURE_OPENAI_DEPLOYMENT_NAME      = var.azure_openai_deployment_name
     AZURE_OPENAI_EMBEDDING_DEPLOYMENT = var.azure_openai_embedding_deployment
 
+    # CosmosDB Configuration
+    COSMOS_DB_ENDPOINT       = var.cosmosdb_endpoint
+    COSMOS_DB_DATABASE_NAME  = var.cosmosdb_db_name
+    COSMOS_DB_CONTAINER_NAME = var.cosmosdb_container_name
+
   }
   logs {
     detailed_error_messages = true

@@ -13,6 +13,7 @@ import { AuthModule } from "./auth/auth.module";
 import { DocumentController } from "./document.controller";
 import { DocumentService } from "./services/document.service";
 import { AzureOpenAIService } from "./services/azure-openai.service";
+import { CosmosDbService } from "./services/cosmosdb.service";
 
 @Module({
   imports: [ConfigModule.forRoot(), TerminusModule, AuthModule],
@@ -23,7 +24,13 @@ import { AzureOpenAIService } from "./services/azure-openai.service";
     ChatController,
     DocumentController,
   ],
-  providers: [AppService, ChatService, DocumentService, AzureOpenAIService],
+  providers: [
+    AppService,
+    ChatService,
+    DocumentService,
+    AzureOpenAIService,
+    CosmosDbService,
+  ],
 })
 export class AppModule {
   // let's add a middleware on all routes
