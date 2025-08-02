@@ -80,8 +80,8 @@ const ChatInterface: FC = () => {
       return
     }
 
-    if (file.size > 10 * 1024 * 1024) {
-      setError('File size must be less than 10MB')
+    if (file.size > 100 * 1024 * 1024) {
+      setError('File size must be less than 100MB')
       return
     }
 
@@ -506,7 +506,7 @@ const ChatInterface: FC = () => {
               <div>
                 <i className="bi bi-file-pdf display-4 text-primary mb-3"></i>
                 <h5>Select a PDF file to upload</h5>
-                <p className="text-muted">Maximum file size: 10MB</p>
+                <p className="text-muted">Maximum file size: 100MB</p>
                 <Button
                   variant="primary"
                   onClick={() => fileInputRef.current?.click()}
