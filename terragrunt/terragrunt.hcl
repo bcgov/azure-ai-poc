@@ -53,7 +53,7 @@ vnet_name                 = "${local.vnet_name}"
 vnet_resource_group_name  = "${local.vnet_resource_group_name}"
 api_image                 = "${local.api_image}"
 frontend_image            = "${local.frontend_image}"
-
+image_tag                 = "${get_env("image_tag", "latest")}" # Default to 'latest' if not set
 # Azure OpenAI Configuration
 azure_openai_endpoint                = "${get_env("azure_openai_endpoint")}"
 azure_openai_api_key                 = "${get_env("azure_openai_api_key")}"

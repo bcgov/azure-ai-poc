@@ -12,14 +12,6 @@ resource "azurerm_resource_group" "main" {
     ]
   }
 }
-# User Assigned Managed Identity
-resource "azurerm_user_assigned_identity" "app_service_identity" {
-  depends_on          = [azurerm_resource_group.main]
-  location            = var.location
-  name                = "${var.app_name}-as-identity"
-  resource_group_name = var.resource_group_name
-  tags                = var.common_tags
-}
 
 # -------------
 # Modules based on Dependency
@@ -122,9 +114,7 @@ module "backend" {
   private_endpoint_subnet_id              = module.network.private_endpoint_subnet_id
   repo_name                               = var.repo_name
   resource_group_name                     = azurerm_resource_group.main.name
-  user_assigned_identity_client_id        = azurerm_user_assigned_identity.app_service_identity.client_id
-  user_assigned_identity_id               = azurerm_user_assigned_identity.app_service_identity.id
-
+  image_tag                               = var.image_tag
   # CosmosDB
   cosmosdb_endpoint       = module.cosmos.cosmosdb_endpoint
   cosmosdb_db_name        = module.cosmos.cosmosdb_sql_database_name

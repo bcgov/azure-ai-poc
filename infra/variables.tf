@@ -76,6 +76,11 @@ variable "frontdoor_sku_name" {
   type        = string
   default     = "Standard_AzureFrontDoor"
 }
+variable "image_tag" {
+  description = "Tag for the container images"
+  type        = string
+  default     = "latest"
+}
 
 variable "location" {
   description = "Azure region for resources"

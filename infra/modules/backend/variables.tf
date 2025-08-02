@@ -108,7 +108,11 @@ variable "frontend_possible_outbound_ip_addresses" {
   type        = string
   nullable    = false
 }
-
+variable "image_tag" {
+  description = "Tag for the container images"
+  type        = string
+  nullable    = false
+}
 variable "location" {
   description = "The Azure region where resources will be created."
   type        = string
@@ -146,17 +150,6 @@ variable "resource_group_name" {
   nullable    = false
 }
 
-variable "user_assigned_identity_client_id" {
-  description = "The client ID of the user-assigned managed identity for the backend."
-  type        = string
-  nullable    = false
-}
-
-variable "user_assigned_identity_id" {
-  description = "The resource ID of the user-assigned managed identity for the backend."
-  type        = string
-  nullable    = false
-}
 
 #cosmosdb variables
 variable "cosmosdb_endpoint" {
