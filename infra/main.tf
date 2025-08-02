@@ -56,38 +56,24 @@ module "cosmos" {
 }
 
 
-module "frontdoor" {
-  source = "./modules/frontdoor"
-
-  app_name            = var.app_name
-  common_tags         = var.common_tags
-  frontdoor_sku_name  = var.frontdoor_sku_name
-  resource_group_name = azurerm_resource_group.main.name
-
-  depends_on = [azurerm_resource_group.main, module.network]
-}
-
 
 module "frontend" {
   source = "./modules/frontend"
 
-  app_env                               = var.app_env
-  app_name                              = var.app_name
-  app_service_sku_name_frontend         = var.app_service_sku_name_frontend
-  appinsights_connection_string         = module.monitoring.appinsights_connection_string
-  appinsights_instrumentation_key       = module.monitoring.appinsights_instrumentation_key
-  common_tags                           = var.common_tags
-  frontend_frontdoor_resource_guid      = module.frontdoor.frontdoor_resource_guid
-  frontend_image                        = var.frontend_image
-  frontend_subnet_id                    = module.network.app_service_subnet_id
-  frontdoor_frontend_firewall_policy_id = module.frontdoor.firewall_policy_id
-  frontend_frontdoor_id                 = module.frontdoor.frontdoor_id
-  location                              = var.location
-  log_analytics_workspace_id            = module.monitoring.log_analytics_workspace_id
-  repo_name                             = var.repo_name
-  resource_group_name                   = azurerm_resource_group.main.name
+  app_env                         = var.app_env
+  app_name                        = var.app_name
+  app_service_sku_name_frontend   = var.app_service_sku_name_frontend
+  appinsights_connection_string   = module.monitoring.appinsights_connection_string
+  appinsights_instrumentation_key = module.monitoring.appinsights_instrumentation_key
+  common_tags                     = var.common_tags
+  frontend_image                  = var.frontend_image
+  frontend_subnet_id              = module.network.app_service_subnet_id
+  location                        = var.location
+  log_analytics_workspace_id      = module.monitoring.log_analytics_workspace_id
+  repo_name                       = var.repo_name
+  resource_group_name             = azurerm_resource_group.main.name
 
-  depends_on = [module.frontdoor, module.monitoring, module.network]
+  depends_on = [module.monitoring, module.network]
 }
 
 module "backend" {
@@ -106,7 +92,6 @@ module "backend" {
   azure_openai_embedding_deployment       = var.azure_openai_embedding_deployment
   backend_subnet_id                       = module.network.app_service_subnet_id
   common_tags                             = var.common_tags
-  frontend_frontdoor_resource_guid        = module.frontdoor.frontdoor_resource_guid
   frontend_possible_outbound_ip_addresses = module.frontend.possible_outbound_ip_addresses
   location                                = var.location
   log_analytics_workspace_id              = module.monitoring.log_analytics_workspace_id

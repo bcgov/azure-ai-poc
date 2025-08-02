@@ -97,12 +97,6 @@ variable "container_registry_url" {
 }
 
 
-variable "frontend_frontdoor_resource_guid" {
-  description = "The resource GUID for the Front Door service associated with the frontend App Service."
-  type        = string
-  nullable    = false
-}
-
 variable "frontend_possible_outbound_ip_addresses" {
   description = "Possible outbound IP addresses for the frontend App Service."
   type        = string
