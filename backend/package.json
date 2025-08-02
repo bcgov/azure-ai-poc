@@ -20,6 +20,7 @@
     "test:e2e": "vitest --dir test"
   },
   "dependencies": {
+    "@azure/cosmos": "^4.5.0",
     "@azure/identity": "^4.10.2",
     "@azure/monitor-opentelemetry": "^1.11.1",
     "@nestjs/cli": "^11.0.0",

@@ -58,13 +58,13 @@ export class DocumentController {
       throw new BadRequestException("Only PDF files are supported");
     }
 
-    if (file.size > 10 * 1024 * 1024) {
-      // 10MB limit
-      throw new BadRequestException("File size must be less than 10MB");
+    if (file.size > 100 * 1024 * 1024) {
+      // 100MB limit (increased from 10MB)
+      throw new BadRequestException("File size must be less than 100MB");
     }
 
     try {
-      return await this.documentService.processDocument(file);
+      return await this.documentService.processDocument(file, user.sub);
     } catch (error) {
       throw new BadRequestException(
         `Failed to process document: ${error.message}`,
@@ -87,6 +87,7 @@ export class DocumentController {
       const answer = await this.documentService.answerQuestion(
         documentId,
         question,
+        user.sub,
       );
 
       return {
@@ -109,7 +110,7 @@ export class DocumentController {
   async getAllDocuments(
     @CurrentUser() user: KeycloakUser,
   ): Promise<ProcessedDocument[]> {
-    return this.documentService.getAllDocuments();
+    return this.documentService.getAllDocuments(user.sub);
   }
 
   @Get(":id")
@@ -117,7 +118,7 @@ export class DocumentController {
     @Param("id") id: string,
     @CurrentUser() user: KeycloakUser,
   ): Promise<ProcessedDocument> {
-    const document = this.documentService.getDocument(id);
+    const document = await this.documentService.getDocument(id, user.sub);
     if (!document) {
       throw new NotFoundException("Document not found");
     }
@@ -129,7 +130,7 @@ export class DocumentController {
     @Param("id") id: string,
     @CurrentUser() user: KeycloakUser,
   ): Promise<{ message: string }> {
-    const deleted = this.documentService.deleteDocument(id);
+    const deleted = await this.documentService.deleteDocument(id, user.sub);
     if (!deleted) {
       throw new NotFoundException("Document not found");
     }
