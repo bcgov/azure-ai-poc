@@ -16,6 +16,7 @@ locals {
   storage_account_name       = "qacatfstate${local.target_env}"    # Created by initial setup script.
   statefile_key              = "${local.stack_prefix}/${local.app_env}/terraform.tfstate"
   container_name             = "tfstate"
+  repo_name                  = get_env("repo_name")
 }
 
 # Remote Azure Storage backend for Terraform
@@ -54,6 +55,7 @@ vnet_resource_group_name  = "${local.vnet_resource_group_name}"
 api_image                 = "${local.api_image}"
 frontend_image            = "${local.frontend_image}"
 image_tag                 = "${get_env("image_tag", "latest")}" # Default to 'latest' if not set
+repo_name                = "${local.repo_name}"
 # Azure OpenAI Configuration
 azure_openai_endpoint                = "${get_env("azure_openai_endpoint")}"
 azure_openai_api_key                 = "${get_env("azure_openai_api_key")}"
