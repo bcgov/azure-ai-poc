@@ -45,10 +45,15 @@ const ChatInterface: FC = () => {
     null,
   )
   const [isDeleting, setIsDeleting] = useState(false)
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false)
+  const [showScrollToTop, setShowScrollToTop] = useState(false)
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const messagesContainerRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const previousMessageCount = useRef(0)
+  const shouldAutoScrollOnNewMessage = useRef(true)
   const loadDocuments = async () => {
     try {
       const response = await apiService
@@ -64,10 +69,75 @@ const ChatInterface: FC = () => {
     loadDocuments()
   }, [])
 
-  // Auto-scroll to bottom when new messages are added
+  // Auto-scroll to bottom when new messages are added - SMART VERSION
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    // Check if we have new messages (increased count)
+    if (messages.length > previousMessageCount.current) {
+      // Only auto-scroll if enabled and we're adding new messages
+      if (shouldAutoScrollOnNewMessage.current) {
+        const scrollToBottom = () => {
+          if (messagesContainerRef.current) {
+            // Scroll only the chat container, not the entire page
+            messagesContainerRef.current.scrollTop =
+              messagesContainerRef.current.scrollHeight
+          }
+        }
+
+        // Small delay to ensure DOM has updated
+        setTimeout(scrollToBottom, 100)
+      }
+
+      // Update the count
+      previousMessageCount.current = messages.length
+    }
   }, [messages])
+
+  // Handle scroll detection within chat container
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLDivElement
+    const { scrollTop, scrollHeight, clientHeight } = target
+
+    // Check if user is near the bottom of the chat container (within 50px)
+    const isNearBottom = scrollHeight - scrollTop - clientHeight < 50
+    // Check if user is near the top of the chat container (within 50px)
+    const isNearTop = scrollTop < 50
+
+    // Enable auto-scroll when near bottom, disable when scrolled up
+    shouldAutoScrollOnNewMessage.current = isNearBottom
+
+    // Show appropriate scroll buttons based on position
+    setShowScrollToBottom(!isNearBottom && messages.length > 0)
+    setShowScrollToTop(!isNearTop && messages.length > 0)
+  }
+
+  // Manual scroll to bottom function
+  const scrollToBottom = () => {
+    if (messagesContainerRef.current) {
+      // Scroll only the chat container to bottom
+      messagesContainerRef.current.scrollTop =
+        messagesContainerRef.current.scrollHeight
+
+      // Re-enable auto-scroll since user manually went to bottom
+      shouldAutoScrollOnNewMessage.current = true
+
+      // Hide the scroll button since we're now at bottom
+      setShowScrollToBottom(false)
+    }
+  }
+
+  // Manual scroll to top function
+  const scrollToTop = () => {
+    if (messagesContainerRef.current) {
+      // Scroll only the chat container to top
+      messagesContainerRef.current.scrollTop = 0
+
+      // Disable auto-scroll since user manually went to top
+      shouldAutoScrollOnNewMessage.current = false
+
+      // Hide the scroll to top button since we're now at top
+      setShowScrollToTop(false)
+    }
+  }
 
   // Auto-resize textarea
   useEffect(() => {
@@ -366,12 +436,33 @@ const ChatInterface: FC = () => {
 
           {/* Messages Container - Made responsive with proper scrolling */}
           <div
-            className="flex-grow-1 overflow-auto py-3 chat-messages"
+            ref={messagesContainerRef}
+            className="flex-grow-1 overflow-auto py-3 chat-messages position-relative"
             style={{
               minHeight: '200px',
               maxHeight: 'calc(100vh - 300px)',
             }}
+            onScroll={handleScroll}
           >
+            {/* Scroll to top button - Show when not at top and there are messages */}
+            {showScrollToTop && messages.length > 0 && (
+              <Button
+                variant="primary"
+                size="sm"
+                className="position-absolute top-0 end-0 me-3 mt-2 rounded-circle"
+                style={{
+                  width: '40px',
+                  height: '40px',
+                  zIndex: 1000,
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+                }}
+                onClick={scrollToTop}
+                title="Scroll to top"
+              >
+                <i className="bi bi-arrow-up"></i>
+              </Button>
+            )}
+
             {messages.length === 0 ? (
               <div className="text-center text-muted py-5">
                 <i className="bi bi-chat-quote display-4 mb-3"></i>
@@ -499,6 +590,30 @@ const ChatInterface: FC = () => {
 
                 <div ref={messagesEndRef} />
               </div>
+            )}
+          </div>
+
+          {/* Scroll buttons container */}
+          <div className="position-relative">
+            {/* Scroll to bottom button - Show when not at bottom and there are messages */}
+            {showScrollToBottom && messages.length > 0 && (
+              <Button
+                variant="primary"
+                size="sm"
+                className="position-absolute rounded-circle"
+                style={{
+                  width: '40px',
+                  height: '40px',
+                  zIndex: 1000,
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+                  right: '20px',
+                  bottom: '80px',
+                }}
+                onClick={scrollToBottom}
+                title="Scroll to bottom"
+              >
+                <i className="bi bi-arrow-down"></i>
+              </Button>
             )}
           </div>
 

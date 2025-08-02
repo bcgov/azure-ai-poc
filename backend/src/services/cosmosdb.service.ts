@@ -17,22 +17,30 @@ export class CosmosDbService implements OnModuleDestroy {
     const endpoint = process.env.COSMOS_DB_ENDPOINT;
     const databaseName = process.env.COSMOS_DB_DATABASE_NAME;
     const containerName = process.env.COSMOS_DB_CONTAINER_NAME;
-
-    if (!endpoint || !databaseName || !containerName) {
-      this.logger.error(
-        "Missing Cosmos DB configuration in environment variables",
-      );
-      throw new Error("Cosmos DB configuration is incomplete");
+    const nodeEnv = process.env.NODE_ENV;
+    if (nodeEnv !== "local") {
+      if (!endpoint || !databaseName || !containerName) {
+        this.logger.error(
+          "Missing Cosmos DB configuration in environment variables",
+        );
+        throw new Error("Cosmos DB configuration is incomplete");
+      }
     }
 
     try {
       // Use managed identity for authentication
       const credential = new DefaultAzureCredential();
-
-      this.client = new CosmosClient({
-        endpoint,
-        aadCredentials: credential,
-      });
+      if (nodeEnv === "local") {
+        this.client = new CosmosClient({
+          endpoint: "https://localhost",
+          key: "C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw==", // Default emulator key
+        });
+      } else {
+        this.client = new CosmosClient({
+          endpoint,
+          aadCredentials: credential,
+        });
+      }
 
       this.database = this.client.database(databaseName);
       this.container = this.database.container(containerName);
