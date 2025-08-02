@@ -48,6 +48,15 @@ export class AnswerDto {
   timestamp: Date;
 }
 
+export class DocumentResponseDto {
+  id: string;
+  filename: string;
+  userId?: string;
+  totalChunks: number;
+  uploadedAt: Date;
+  totalPages?: number;
+}
+
 export class SearchDto {
   query: string;
   topK?: number;
@@ -94,17 +103,8 @@ export class DocumentController {
         id: { type: "string" },
         filename: { type: "string" },
         userId: { type: "string" },
-        chunks: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              id: { type: "string" },
-              content: { type: "string" },
-              embedding: { type: "array", items: { type: "number" } },
-            },
-          },
-        },
+        totalChunks: { type: "number" },
+        totalPages: { type: "number" },
         uploadedAt: { type: "string", format: "date-time" },
       },
     },
@@ -137,7 +137,7 @@ export class DocumentController {
   async uploadDocument(
     @UploadedFile() file: UploadedFile,
     @CurrentUser() user: KeycloakUser,
-  ): Promise<ProcessedDocument> {
+  ): Promise<DocumentResponseDto> {
     if (!file) {
       throw new BadRequestException("No file uploaded");
     }
@@ -156,7 +156,15 @@ export class DocumentController {
         global.gc();
       }
 
-      return result;
+      // Return a clean response without exposing internal chunk data
+      return {
+        id: result.id,
+        filename: result.filename,
+        userId: result.userId,
+        totalChunks: result.chunkIds.length,
+        totalPages: result.totalPages,
+        uploadedAt: result.uploadedAt,
+      };
     } catch (error) {
       throw new BadRequestException(
         `Failed to process document: ${error.message}`,
@@ -272,8 +280,18 @@ export class DocumentController {
   })
   async getAllDocuments(
     @CurrentUser() user: KeycloakUser,
-  ): Promise<ProcessedDocument[]> {
-    return this.documentService.getAllDocuments(user.sub);
+  ): Promise<DocumentResponseDto[]> {
+    const documents = await this.documentService.getAllDocuments(user.sub);
+
+    // Return clean responses without exposing internal chunk data
+    return documents.map((doc) => ({
+      id: doc.id,
+      filename: doc.filename,
+      userId: doc.userId,
+      totalChunks: doc.chunkIds.length,
+      totalPages: doc.totalPages,
+      uploadedAt: doc.uploadedAt,
+    }));
   }
 
   @Get(":id")
@@ -292,17 +310,8 @@ export class DocumentController {
         id: { type: "string" },
         filename: { type: "string" },
         userId: { type: "string" },
-        chunks: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              id: { type: "string" },
-              content: { type: "string" },
-              embedding: { type: "array", items: { type: "number" } },
-            },
-          },
-        },
+        totalChunks: { type: "number" },
+        totalPages: { type: "number" },
         uploadedAt: { type: "string", format: "date-time" },
       },
     },
@@ -318,12 +327,21 @@ export class DocumentController {
   async getDocument(
     @Param("id") id: string,
     @CurrentUser() user: KeycloakUser,
-  ): Promise<ProcessedDocument> {
+  ): Promise<DocumentResponseDto> {
     const document = await this.documentService.getDocument(id, user.sub);
     if (!document) {
       throw new NotFoundException("Document not found");
     }
-    return document;
+
+    // Return a clean response without exposing internal chunk data
+    return {
+      id: document.id,
+      filename: document.filename,
+      userId: document.userId,
+      totalChunks: document.chunkIds.length,
+      totalPages: document.totalPages,
+      uploadedAt: document.uploadedAt,
+    };
   }
 
   @Delete(":id")

@@ -46,8 +46,32 @@ export class CosmosDbService implements OnModuleDestroy {
 
   async createItem<T>(item: T, partitionKey: string): Promise<ItemResponse<T>> {
     try {
+      const itemSizeBytes = Buffer.byteLength(JSON.stringify(item), "utf8");
+
+      // Log warning for large items (approaching 2MB limit)
+      if (itemSizeBytes > 1500000) {
+        // 1.5MB warning threshold
+        this.logger.warn(
+          `Item size is ${Math.round(itemSizeBytes / 1024)}KB, approaching Cosmos DB 2MB limit`,
+        );
+      }
+
+      this.logger.debug(
+        `Creating item with size: ${Math.round(itemSizeBytes / 1024)}KB`,
+      );
+
       return await this.container.items.create(item);
     } catch (error) {
+      if (error.code === 413) {
+        const itemSizeBytes = Buffer.byteLength(JSON.stringify(item), "utf8");
+        this.logger.error(
+          `Cosmos DB request size too large: ${Math.round(itemSizeBytes / 1024)}KB exceeds 2MB limit`,
+          error,
+        );
+        throw new Error(
+          `Document too large for Cosmos DB storage (${Math.round(itemSizeBytes / 1024)}KB). Consider breaking it into smaller chunks.`,
+        );
+      }
       this.logger.error("Error creating item in Cosmos DB", error);
       throw error;
     }
