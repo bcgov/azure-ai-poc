@@ -85,8 +85,6 @@ module "frontend" {
   log_analytics_workspace_id            = module.monitoring.log_analytics_workspace_id
   repo_name                             = var.repo_name
   resource_group_name                   = azurerm_resource_group.main.name
-  user_assigned_identity_client_id      = azurerm_user_assigned_identity.app_service_identity.client_id
-  user_assigned_identity_id             = azurerm_user_assigned_identity.app_service_identity.id
 
   depends_on = [module.frontdoor, module.monitoring, module.network]
 }
