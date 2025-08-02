@@ -1,6 +1,6 @@
 output "frontend_url" {
   description = "The URL of the frontend application"
-  value       = "https://${azurerm_cdn_frontdoor_endpoint.frontend_fd_endpoint.host_name}"
+  value       = "https://${azurerm_linux_web_app.frontend.default_hostname}"
 }
 
 output "possible_outbound_ip_addresses" {
