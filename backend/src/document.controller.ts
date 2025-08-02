@@ -45,7 +45,23 @@ export class DocumentController {
   constructor(private readonly documentService: DocumentService) {}
 
   @Post("upload")
-  @UseInterceptors(FileInterceptor("file"))
+  @UseInterceptors(
+    FileInterceptor("file", {
+      limits: {
+        fileSize: 100 * 1024 * 1024, // 100MB limit
+        files: 1,
+      },
+      fileFilter: (req, file, callback) => {
+        if (file.mimetype !== "application/pdf") {
+          return callback(
+            new BadRequestException("Only PDF files are supported"),
+            false,
+          );
+        }
+        callback(null, true);
+      },
+    }),
+  )
   async uploadDocument(
     @UploadedFile() file: UploadedFile,
     @CurrentUser() user: KeycloakUser,
@@ -54,21 +70,30 @@ export class DocumentController {
       throw new BadRequestException("No file uploaded");
     }
 
-    if (file.mimetype !== "application/pdf") {
-      throw new BadRequestException("Only PDF files are supported");
-    }
-
     if (file.size > 100 * 1024 * 1024) {
-      // 100MB limit (increased from 10MB)
+      // 100MB limit
       throw new BadRequestException("File size must be less than 100MB");
     }
 
     try {
-      return await this.documentService.processDocument(file, user.sub);
+      // Process document with memory optimization
+      const result = await this.documentService.processDocument(file, user.sub);
+
+      // Force garbage collection after processing
+      if (global.gc) {
+        global.gc();
+      }
+
+      return result;
     } catch (error) {
       throw new BadRequestException(
         `Failed to process document: ${error.message}`,
       );
+    } finally {
+      // Clear file buffer from memory
+      if (file.buffer) {
+        file.buffer = null;
+      }
     }
   }
 

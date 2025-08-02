@@ -28,5 +28,4 @@ COPY --from=build /app/dist ./dist
 EXPOSE 3001
 HEALTHCHECK --start-period=2s --start-interval=5s --interval=30s --timeout=3s CMD curl -f http://localhost:30001/api
 
-
-CMD ["--max-old-space-size=50", "/app/dist/main"]
+CMD ["--max-old-space-size=1000", "--expose-gc", "/app/dist/main"]
