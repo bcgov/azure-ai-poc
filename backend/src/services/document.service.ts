@@ -5,6 +5,7 @@ import pdf from "pdf-parse";
 
 export interface DocumentChunk {
   id: string;
+  documentId: string; // Reference to parent document
   content: string;
   embedding?: number[]; // Vector embeddings for semantic search
   metadata: {
@@ -14,16 +15,18 @@ export interface DocumentChunk {
     chunkIndex: number;
   };
   partitionKey: string; // Required for Cosmos DB
+  type: "chunk"; // Document type for querying
 }
 
 export interface ProcessedDocument {
   id: string;
   filename: string;
-  chunks: DocumentChunk[];
+  chunkIds: string[]; // References to chunk documents instead of embedded chunks
   uploadedAt: Date;
   totalPages?: number;
   partitionKey: string; // Required for Cosmos DB
   userId?: string; // To support multi-tenant scenarios
+  type: "document"; // Document type for querying
 }
 
 interface UploadedFile {
@@ -61,19 +64,28 @@ export class DocumentService {
         pdfData.text,
         file.originalname,
         partitionKey,
+        documentId,
       );
+
+      // Store each chunk separately in Cosmos DB
+      const chunkIds: string[] = [];
+      for (const chunk of chunks) {
+        await this.cosmosDbService.createItem(chunk, partitionKey);
+        chunkIds.push(chunk.id);
+      }
 
       const processedDoc: ProcessedDocument = {
         id: documentId,
         filename: file.originalname,
-        chunks,
+        chunkIds,
         uploadedAt: new Date(),
         totalPages: pdfData.numpages,
         partitionKey,
         userId,
+        type: "document",
       };
 
-      // Store in Cosmos DB
+      // Store document metadata separately
       await this.cosmosDbService.createItem(processedDoc, partitionKey);
 
       this.logger.log(
@@ -105,29 +117,24 @@ export class DocumentService {
     }
 
     try {
+      // Retrieve chunks for this document
+      const chunks = await this.getDocumentChunks(documentId, partitionKey);
+
       // Use semantic search to find most relevant chunks if embeddings are available
       let relevantContext: string;
-      const chunksWithEmbeddings = document.chunks.filter(
-        (chunk) => chunk.embedding,
-      );
+      const chunksWithEmbeddings = chunks.filter((chunk) => chunk.embedding);
 
       if (chunksWithEmbeddings.length > 0) {
         this.logger.log(
           `Using semantic search with ${chunksWithEmbeddings.length} chunks with embeddings`,
         );
-        relevantContext = await this.findRelevantContext(
-          question,
-          document.chunks,
-          3,
-        );
+        relevantContext = await this.findRelevantContext(question, chunks, 3);
       } else {
         this.logger.log(
           "No embeddings available, using all chunks for context",
         );
         // Fallback to using all chunks if no embeddings are available
-        relevantContext = document.chunks
-          .map((chunk) => chunk.content)
-          .join("\n\n");
+        relevantContext = chunks.map((chunk) => chunk.content).join("\n\n");
       }
 
       // Use Azure OpenAI to answer the question
@@ -144,6 +151,35 @@ export class DocumentService {
       );
       throw new Error(`Failed to answer question: ${error.message}`);
     }
+  }
+
+  /**
+   * Retrieve all chunks for a specific document
+   */
+  private async getDocumentChunks(
+    documentId: string,
+    partitionKey: string,
+  ): Promise<DocumentChunk[]> {
+    const querySpec = {
+      query:
+        "SELECT * FROM c WHERE c.documentId = @documentId AND c.partitionKey = @partitionKey AND c.type = @type",
+      parameters: [
+        {
+          name: "@documentId",
+          value: documentId,
+        },
+        {
+          name: "@partitionKey",
+          value: partitionKey,
+        },
+        {
+          name: "@type",
+          value: "chunk",
+        },
+      ],
+    };
+
+    return await this.cosmosDbService.queryItems<DocumentChunk>(querySpec);
   }
 
   /**
@@ -242,11 +278,16 @@ export class DocumentService {
   async getAllDocuments(userId?: string): Promise<ProcessedDocument[]> {
     const partitionKey = userId || "default";
     const querySpec = {
-      query: "SELECT * FROM c WHERE c.partitionKey = @partitionKey",
+      query:
+        "SELECT * FROM c WHERE c.partitionKey = @partitionKey AND c.type = @type",
       parameters: [
         {
           name: "@partitionKey",
           value: partitionKey,
+        },
+        {
+          name: "@type",
+          value: "document",
         },
       ],
     };
@@ -257,7 +298,20 @@ export class DocumentService {
   async deleteDocument(documentId: string, userId?: string): Promise<boolean> {
     try {
       const partitionKey = userId || "default";
+
+      // First, delete all chunks associated with this document
+      const chunks = await this.getDocumentChunks(documentId, partitionKey);
+
+      for (const chunk of chunks) {
+        await this.cosmosDbService.deleteItem(chunk.id, partitionKey);
+      }
+
+      // Then delete the document metadata
       await this.cosmosDbService.deleteItem(documentId, partitionKey);
+
+      this.logger.log(
+        `Deleted document ${documentId} and ${chunks.length} associated chunks`,
+      );
       return true;
     } catch (error) {
       if (error.code === 404) {
@@ -297,7 +351,8 @@ export class DocumentService {
         [];
 
       for (const document of documents) {
-        for (const chunk of document.chunks) {
+        const chunks = await this.getDocumentChunks(document.id, partitionKey);
+        for (const chunk of chunks) {
           if (chunk.embedding && chunk.embedding.length > 0) {
             allChunks.push({ chunk, document });
           }
@@ -338,10 +393,57 @@ export class DocumentService {
     return `${filename.replace(/[^a-zA-Z0-9]/g, "_")}_${timestamp}_${random}`;
   }
 
+  /**
+   * Get statistics about document storage sizes
+   */
+  async getDocumentStats(
+    documentId: string,
+    userId?: string,
+  ): Promise<{
+    document: ProcessedDocument;
+    chunks: DocumentChunk[];
+    totalChunks: number;
+    averageChunkSizeKB: number;
+    largestChunkSizeKB: number;
+    totalStorageSizeKB: number;
+  }> {
+    const partitionKey = userId || "default";
+    const document = await this.cosmosDbService.getItem<ProcessedDocument>(
+      documentId,
+      partitionKey,
+    );
+
+    if (!document) {
+      throw new Error("Document not found");
+    }
+
+    const chunks = await this.getDocumentChunks(documentId, partitionKey);
+
+    const chunkSizes = chunks.map((chunk) =>
+      Buffer.byteLength(JSON.stringify(chunk), "utf8"),
+    );
+
+    const documentSize = Buffer.byteLength(JSON.stringify(document), "utf8");
+    const totalStorageSize =
+      documentSize + chunkSizes.reduce((sum, size) => sum + size, 0);
+
+    return {
+      document,
+      chunks,
+      totalChunks: chunks.length,
+      averageChunkSizeKB: Math.round(
+        chunkSizes.reduce((sum, size) => sum + size, 0) / chunks.length / 1024,
+      ),
+      largestChunkSizeKB: Math.round(Math.max(...chunkSizes) / 1024),
+      totalStorageSizeKB: Math.round(totalStorageSize / 1024),
+    };
+  }
+
   private async chunkText(
     text: string,
     filename: string,
     partitionKey: string,
+    documentId: string,
     maxChunkSize: number = 2000,
   ): Promise<DocumentChunk[]> {
     const chunks: DocumentChunk[] = [];
@@ -373,7 +475,8 @@ export class DocumentService {
 
         // Save current chunk
         chunks.push({
-          id: `${filename}_chunk_${chunkIndex}`,
+          id: `${documentId}_chunk_${chunkIndex}`,
+          documentId,
           content: currentChunk.trim(),
           embedding,
           metadata: {
@@ -382,6 +485,7 @@ export class DocumentService {
             chunkIndex,
           },
           partitionKey,
+          type: "chunk",
         });
 
         currentChunk = paragraph;
@@ -409,7 +513,8 @@ export class DocumentService {
       }
 
       chunks.push({
-        id: `${filename}_chunk_${chunkIndex}`,
+        id: `${documentId}_chunk_${chunkIndex}`,
+        documentId,
         content: currentChunk.trim(),
         embedding,
         metadata: {
@@ -418,6 +523,7 @@ export class DocumentService {
           chunkIndex,
         },
         partitionKey,
+        type: "chunk",
       });
     }
 
