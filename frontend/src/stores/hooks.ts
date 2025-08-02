@@ -9,12 +9,18 @@ export const useAuthInit = () => {
   const isInitialized = useAuthStore((state) => state.isInitialized)
   const isLoading = useAuthStore((state) => state.isLoading)
   const error = useAuthStore((state) => state.error)
+  const stopTokenRefresh = useAuthStore((state) => state.stopTokenRefresh)
 
   useEffect(() => {
     if (!isInitialized) {
       initKeycloak()
     }
-  }, [initKeycloak, isInitialized])
+
+    // Cleanup function to stop token refresh when component unmounts
+    return () => {
+      stopTokenRefresh()
+    }
+  }, [initKeycloak, isInitialized, stopTokenRefresh])
 
   return {
     isInitialized,
@@ -49,5 +55,7 @@ export const useAuth = () => {
     hasRole: store.hasRole,
     getToken: store.getToken,
     checkSSO: store.checkSSO,
+    startTokenRefresh: store.startTokenRefresh,
+    stopTokenRefresh: store.stopTokenRefresh,
   }
 }

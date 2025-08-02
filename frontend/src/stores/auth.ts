@@ -20,6 +20,7 @@ interface AuthState {
   refreshToken: string | null
   userInfo: UserInfo
   error: string | null
+  refreshIntervalId: NodeJS.Timeout | null
 
   // Computed getters
   isLoggedIn: () => boolean
@@ -39,6 +40,8 @@ interface AuthState {
   setLoading: (loading: boolean) => void
   setError: (error: string | null) => void
   validateAudience: () => boolean
+  startTokenRefresh: () => void
+  stopTokenRefresh: () => void
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -52,6 +55,7 @@ export const useAuthStore = create<AuthState>()(
       refreshToken: null,
       userInfo: {},
       error: null,
+      refreshIntervalId: null,
 
       // Computed getters
       isLoggedIn: () => {
@@ -100,6 +104,8 @@ export const useAuthStore = create<AuthState>()(
       },
 
       clearAuthState: () => {
+        // Stop token refresh when clearing auth state
+        get().stopTokenRefresh()
         set({
           token: null,
           refreshToken: null,
@@ -119,7 +125,7 @@ export const useAuthStore = create<AuthState>()(
         try {
           // Try different initialization approaches
           const initOptions = {
-            onLoad: 'login-required' as const,
+            onLoad: 'check-sso' as const,
             checkLoginIframe: false,
             enableLogging: true,
             pkceMethod: 'S256',
@@ -143,7 +149,7 @@ export const useAuthStore = create<AuthState>()(
             isAuthenticated: authenticated,
           })
 
-          // Setup token refresh handler
+          // Setup token refresh handler for critical failures
           _kc.onTokenExpired = async () => {
             console.log('Token expired, attempting to refresh...')
             try {
@@ -159,6 +165,11 @@ export const useAuthStore = create<AuthState>()(
               console.error('Token refresh error:', error)
               await get().logout()
             }
+          }
+
+          // Start background token refresh if authenticated
+          if (authenticated) {
+            get().startTokenRefresh()
           }
 
           return authenticated
@@ -307,6 +318,8 @@ export const useAuthStore = create<AuthState>()(
           if (authenticated) {
             get().updateAuthState()
             set({ isAuthenticated: true })
+            // Start background token refresh
+            get().startTokenRefresh()
           }
 
           set({ isInitialized: true })
@@ -320,6 +333,51 @@ export const useAuthStore = create<AuthState>()(
           return false
         } finally {
           set({ isLoading: false })
+        }
+      },
+
+      startTokenRefresh: () => {
+        // Clear any existing interval
+        get().stopTokenRefresh()
+
+        console.log('Starting background token refresh (every 60 seconds)')
+
+        const intervalId = setInterval(async () => {
+          const state = get()
+
+          // Only refresh if we're authenticated and have a token
+          if (!state.isAuthenticated || !state.token) {
+            console.log('Skipping token refresh - not authenticated')
+            return
+          }
+
+          try {
+            console.log('Performing background token refresh...')
+            // Refresh token if it expires within 5 minutes (300 seconds)
+            const refreshed = await _kc.updateToken(300)
+
+            if (refreshed) {
+              console.log('Background token refresh successful')
+              get().updateAuthState()
+            } else {
+              console.log('Token is still valid, no refresh needed')
+            }
+          } catch (error) {
+            console.error('Background token refresh failed:', error)
+            // Don't logout on background refresh failure to avoid interrupting user experience
+            // The onTokenExpired handler will handle critical failures
+          }
+        }, 60000) // 60 seconds = 60,000 milliseconds
+
+        set({ refreshIntervalId: intervalId })
+      },
+
+      stopTokenRefresh: () => {
+        const state = get()
+        if (state.refreshIntervalId) {
+          console.log('Stopping background token refresh')
+          clearInterval(state.refreshIntervalId)
+          set({ refreshIntervalId: null })
         }
       },
     }),
