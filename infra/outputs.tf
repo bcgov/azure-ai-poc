@@ -1,4 +1,4 @@
-output "cdn_frontdoor_endpoint_url" {
-  description = "The URL of the CDN Front Door endpoint"
+output "app_url" {
+  description = "The URL of the application"
   value       = module.frontend.frontend_url
 }
