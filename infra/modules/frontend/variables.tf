@@ -35,17 +35,6 @@ variable "container_registry_url" {
   default     = "https://ghcr.io"
 }
 
-variable "frontend_frontdoor_id" {
-  description = "The ID of the Front Door profile for the frontend."
-  type        = string
-  nullable    = false
-}
-
-variable "frontend_frontdoor_resource_guid" {
-  description = "The resource GUID of the Front Door profile for the frontend."
-  type        = string
-  nullable    = false
-}
 
 variable "frontend_image" {
   description = "The Docker image for the frontend application."
@@ -59,11 +48,6 @@ variable "frontend_subnet_id" {
   nullable    = false
 }
 
-variable "frontdoor_frontend_firewall_policy_id" {
-  description = "The resource ID of the Front Door firewall policy for the frontend."
-  type        = string
-  nullable    = false
-}
 
 variable "location" {
   description = "The Azure region where resources will be created."

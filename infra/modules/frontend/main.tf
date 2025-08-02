@@ -38,21 +38,7 @@ resource "azurerm_linux_web_app" "frontend" {
       allowed_origins     = ["*"]
       support_credentials = false
     }
-    ip_restriction {
-      service_tag               = "AzureFrontDoor.Backend"
-      ip_address                = null
-      virtual_network_subnet_id = null
-      action                    = "Allow"
-      priority                  = 100
-      headers {
-        x_azure_fdid      = [var.frontend_frontdoor_resource_guid]
-        x_fd_health_probe = []
-        x_forwarded_for   = []
-        x_forwarded_host  = []
-      }
-      name = "Allow traffic from Front Door"
-    }
-    ip_restriction_default_action = "Deny"
+    ip_restriction_default_action = "Allow"
   }
   app_settings = {
     PORT                                  = "80"
@@ -106,66 +92,5 @@ resource "azurerm_monitor_diagnostic_setting" "frontend_diagnostics" {
   }
   enabled_log {
     category = "AppServicePlatformLogs"
-  }
-}
-
-resource "azurerm_cdn_frontdoor_endpoint" "frontend_fd_endpoint" {
-  name                     = "${var.repo_name}-${var.app_env}-frontend-fd"
-  cdn_frontdoor_profile_id = var.frontend_frontdoor_id
-}
-
-resource "azurerm_cdn_frontdoor_origin_group" "frontend_origin_group" {
-  name                     = "${var.repo_name}-${var.app_env}-frontend-origin-group"
-  cdn_frontdoor_profile_id = var.frontend_frontdoor_id
-  session_affinity_enabled = true
-
-  load_balancing {
-    sample_size                 = 4
-    successful_samples_required = 3
-  }
-
-}
-
-resource "azurerm_cdn_frontdoor_origin" "frontend_app_service_origin" {
-  name                          = "${var.repo_name}-${var.app_env}-frontend-origin"
-  cdn_frontdoor_origin_group_id = azurerm_cdn_frontdoor_origin_group.frontend_origin_group.id
-
-  enabled                        = true
-  host_name                      = azurerm_linux_web_app.frontend.default_hostname
-  http_port                      = 80
-  https_port                     = 443
-  origin_host_header             = azurerm_linux_web_app.frontend.default_hostname
-  priority                       = 1
-  weight                         = 1000
-  certificate_name_check_enabled = true
-}
-
-resource "azurerm_cdn_frontdoor_route" "frontend_route" {
-  name                          = "${var.repo_name}-${var.app_env}-frontend-fd"
-  cdn_frontdoor_endpoint_id     = azurerm_cdn_frontdoor_endpoint.frontend_fd_endpoint.id
-  cdn_frontdoor_origin_group_id = azurerm_cdn_frontdoor_origin_group.frontend_origin_group.id
-  cdn_frontdoor_origin_ids      = [azurerm_cdn_frontdoor_origin.frontend_app_service_origin.id]
-
-  supported_protocols    = ["Http", "Https"]
-  patterns_to_match      = ["/*"]
-  forwarding_protocol    = "HttpsOnly"
-  link_to_default_domain = true
-  https_redirect_enabled = true
-}
-resource "azurerm_cdn_frontdoor_security_policy" "frontend_fd_security_policy" {
-  name                     = "${var.app_name}-frontend-fd-waf-security-policy"
-  cdn_frontdoor_profile_id = var.frontend_frontdoor_id
-
-  security_policies {
-    firewall {
-      cdn_frontdoor_firewall_policy_id = var.frontdoor_frontend_firewall_policy_id
-
-      association {
-        domain {
-          cdn_frontdoor_domain_id = azurerm_cdn_frontdoor_endpoint.frontend_fd_endpoint.id
-        }
-        patterns_to_match = ["/*"]
-      }
-    }
   }
 }
