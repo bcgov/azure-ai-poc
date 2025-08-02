@@ -77,7 +77,7 @@ resource "azurerm_cosmosdb_sql_container" "cosmosdb_sql_db_container" {
     }
 
     excluded_path {
-      path = "/embedding/?*"
+      path = "/embedding/?"
     }
   }
 }
