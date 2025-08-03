@@ -1,9 +1,11 @@
 import { Controller, Get } from "@nestjs/common";
 import { HealthCheckService, HealthCheck } from "@nestjs/terminus";
 import { ApiTags, ApiOperation, ApiResponse } from "@nestjs/swagger";
+import { SkipThrottle } from "@nestjs/throttler";
 
 @ApiTags("health")
 @Controller("health")
+@SkipThrottle()
 export class HealthController {
   constructor(private health: HealthCheckService) {}
 

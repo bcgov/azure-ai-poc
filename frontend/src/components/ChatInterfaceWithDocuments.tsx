@@ -620,30 +620,6 @@ const ChatInterface: FC = () => {
             )}
           </div>
 
-          {/* Single scroll button that changes direction based on position */}
-          {(showScrollToTop || showScrollToBottom) && messages.length > 0 && (
-            <Button
-              variant="primary"
-              size="sm"
-              className="position-absolute rounded-circle"
-              style={{
-                width: '2.5rem',
-                height: '2.5rem',
-                zIndex: 1000,
-                boxShadow: '0 0.125rem 0.5rem rgba(0,0,0,0.3)',
-                right: '0.75rem',
-                bottom: 'clamp(8rem, 9rem, 10rem)',
-              }}
-              onClick={showScrollToTop ? scrollToTop : scrollToBottom}
-              title={showScrollToTop ? 'Scroll to top' : 'Scroll to bottom'}
-            >
-              <i
-                className={`bi ${showScrollToTop ? 'bi-arrow-up' : 'bi-arrow-down'}`}
-              ></i>
-            </Button>
-          )}
-
-          {/* Error Alert */}
           {error && (
             <Alert
               variant="danger"
