@@ -38,9 +38,17 @@ interface UploadedFile {
   size: number;
 }
 
-@Injectable()
 export class DocumentService {
   private readonly logger = new Logger(DocumentService.name);
+  private readonly documentCache = new Map<
+    string,
+    {
+      data: ProcessedDocument[];
+      timestamp: number;
+      ttl: number;
+    }
+  >();
+  private readonly CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes cache
 
   constructor(
     private azureOpenAIService: AzureOpenAIService,
@@ -89,6 +97,9 @@ export class DocumentService {
 
       // Store document metadata separately
       await this.cosmosDbService.createItem(processedDoc, partitionKey);
+
+      // Invalidate cache for this partition
+      this.invalidateDocumentCache(partitionKey);
 
       this.logger.log(
         `Successfully processed document: ${file.originalname} with ${chunks.length} chunks`,
@@ -257,15 +268,22 @@ export class DocumentService {
   }
 
   /**
-   * Retrieve all chunks for a specific document
+   * Retrieve all chunks for a specific document (optimized with better query structure)
    */
   private async getDocumentChunks(
     documentId: string,
     partitionKey: string,
   ): Promise<DocumentChunk[]> {
     const querySpec = {
-      query:
-        "SELECT * FROM c WHERE c.documentId = @documentId AND c.partitionKey = @partitionKey AND c.type = @type",
+      query: `
+        SELECT c.id, c.documentId, c.content, c.embedding, c.metadata, 
+               c.partitionKey, c.type
+        FROM c 
+        WHERE c.documentId = @documentId 
+        AND c.partitionKey = @partitionKey 
+        AND c.type = @type
+        ORDER BY c.metadata.chunkIndex ASC
+      `,
       parameters: [
         {
           name: "@documentId",
@@ -282,7 +300,21 @@ export class DocumentService {
       ],
     };
 
-    return await this.cosmosDbService.queryItems<DocumentChunk>(querySpec);
+    const startTime = Date.now();
+    const results = await this.cosmosDbService.queryItems<DocumentChunk>(
+      querySpec,
+      {
+        partitionKey: partitionKey,
+        maxItemCount: 500, // Reasonable limit for chunks per document
+      },
+    );
+
+    const queryTime = Date.now() - startTime;
+    this.logger.debug(
+      `Retrieved ${results.length} chunks for document ${documentId} in ${queryTime}ms`,
+    );
+
+    return results;
   }
 
   /**
@@ -380,9 +412,27 @@ export class DocumentService {
 
   async getAllDocuments(userId?: string): Promise<ProcessedDocument[]> {
     const partitionKey = userId || "default";
+    const cacheKey = `documents_${partitionKey}`;
+
+    // Check cache first
+    const cached = this.documentCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < cached.ttl) {
+      this.logger.debug(
+        `Returning cached documents for partition: ${partitionKey}`,
+      );
+      return cached.data;
+    }
+
+    // Optimized query with better structure and parameters
     const querySpec = {
-      query:
-        "SELECT * FROM c WHERE c.partitionKey = @partitionKey AND c.type = @type",
+      query: `
+        SELECT c.id, c.filename, c.chunkIds, c.uploadedAt, c.totalPages, 
+               c.partitionKey, c.userId, c.type 
+        FROM c 
+        WHERE c.partitionKey = @partitionKey 
+        AND c.type = @type 
+        ORDER BY c.uploadedAt DESC
+      `,
       parameters: [
         {
           name: "@partitionKey",
@@ -395,7 +445,38 @@ export class DocumentService {
       ],
     };
 
-    return await this.cosmosDbService.queryItems<ProcessedDocument>(querySpec);
+    try {
+      const startTime = Date.now();
+
+      // Use optimized query with partition key hint
+      const results = await this.cosmosDbService.queryItems<ProcessedDocument>(
+        querySpec,
+        {
+          partitionKey: partitionKey,
+          maxItemCount: 1000, // Reasonable limit
+        },
+      );
+
+      const queryTime = Date.now() - startTime;
+      this.logger.log(
+        `Document query completed in ${queryTime}ms for partition: ${partitionKey}, found ${results.length} documents`,
+      );
+
+      // Cache the results
+      this.documentCache.set(cacheKey, {
+        data: results,
+        timestamp: Date.now(),
+        ttl: this.CACHE_TTL_MS,
+      });
+
+      return results;
+    } catch (error) {
+      this.logger.error(
+        `Error retrieving documents for partition: ${partitionKey}`,
+        error,
+      );
+      throw error;
+    }
   }
 
   async deleteDocument(documentId: string, userId?: string): Promise<boolean> {
@@ -411,6 +492,9 @@ export class DocumentService {
 
       // Then delete the document metadata
       await this.cosmosDbService.deleteItem(documentId, partitionKey);
+
+      // Invalidate cache for this partition
+      this.invalidateDocumentCache(partitionKey);
 
       this.logger.log(
         `Deleted document ${documentId} and ${chunks.length} associated chunks`,
@@ -717,5 +801,49 @@ export class DocumentService {
     }
 
     return chunks;
+  }
+
+  /**
+   * Cache management methods
+   */
+  private invalidateDocumentCache(partitionKey: string): void {
+    const cacheKey = `documents_${partitionKey}`;
+    this.documentCache.delete(cacheKey);
+    this.logger.debug(
+      `Invalidated document cache for partition: ${partitionKey}`,
+    );
+  }
+
+  /**
+   * Clear all cached documents (useful for testing or memory management)
+   */
+  public clearDocumentCache(): void {
+    this.documentCache.clear();
+    this.logger.debug("Cleared all document cache");
+  }
+
+  /**
+   * Get cache statistics for monitoring
+   */
+  public getCacheStats(): {
+    size: number;
+    keys: string[];
+    oldestEntry?: { key: string; age: number };
+  } {
+    const keys = Array.from(this.documentCache.keys());
+    let oldestEntry: { key: string; age: number } | undefined;
+
+    for (const [key, value] of this.documentCache.entries()) {
+      const age = Date.now() - value.timestamp;
+      if (!oldestEntry || age > oldestEntry.age) {
+        oldestEntry = { key, age };
+      }
+    }
+
+    return {
+      size: this.documentCache.size,
+      keys,
+      oldestEntry,
+    };
   }
 }
