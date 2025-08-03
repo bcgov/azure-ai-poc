@@ -97,9 +97,9 @@ const ChatInterface: FC = () => {
     const target = e.target as HTMLDivElement
     const { scrollTop, scrollHeight, clientHeight } = target
 
-    // Check if user is near the bottom of the chat container (within 50px)
+    // Check if user is near the bottom of the chat container (within 3.125rem)
     const isNearBottom = scrollHeight - scrollTop - clientHeight < 50
-    // Check if user is near the top of the chat container (within 50px)
+    // Check if user is near the top of the chat container (within 3.125rem)
     const isNearTop = scrollTop < 50
 
     // Enable auto-scroll when near bottom, disable when scrolled up
@@ -341,23 +341,26 @@ const ChatInterface: FC = () => {
     : null
 
   return (
-    <Container fluid className="vh-100 d-flex flex-column">
-      <Row className="flex-grow-1 overflow-hidden">
+    <Container fluid className="vh-100 d-flex flex-column p-0">
+      <Row className="flex-grow-1 overflow-hidden g-0">
         <Col
           xs={12}
+          sm={12}
+          md={11}
           lg={10}
           xl={8}
-          className="mx-auto d-flex flex-column h-100 position-relative"
+          xxl={7}
+          className="mx-auto d-flex flex-column h-100 position-relative px-2 px-md-3"
         >
           {/* Chat Header */}
-          <div className="py-3 border-bottom">
+          <div className="py-2 py-md-3 border-bottom flex-shrink-0">
             <div className="d-flex justify-content-between align-items-center mb-2">
               <h4 className="mb-0">
                 <i className="bi bi-chat-dots me-2"></i>
                 AI Document Assistant
               </h4>
               <Button
-                variant="outline-primary"
+                variant="primary"
                 size="sm"
                 onClick={() => setShowUploadModal(true)}
               >
@@ -388,7 +391,9 @@ const ChatInterface: FC = () => {
                       className="d-flex align-items-center border rounded p-1"
                       style={{
                         backgroundColor:
-                          selectedDocument === doc.id ? '#e3f2fd' : '#f8f9fa',
+                          selectedDocument === doc.id
+                            ? 'var(--bs-info-bg-subtle, #e3f2fd)'
+                            : 'var(--bs-gray-100, #f8f9fa)',
                       }}
                     >
                       <Button
@@ -400,7 +405,9 @@ const ChatInterface: FC = () => {
                         size="sm"
                         onClick={() => setSelectedDocument(doc.id)}
                         className="text-truncate border-0 me-1"
-                        style={{ maxWidth: '180px' }}
+                        style={{
+                          maxWidth: 'clamp(8rem, 11.25rem, 15rem)',
+                        }}
                       >
                         <i className="bi bi-file-pdf me-1"></i>
                         {doc.filename}
@@ -410,7 +417,7 @@ const ChatInterface: FC = () => {
                         size="sm"
                         onClick={() => handleDeleteDocument(doc)}
                         className="border-0 p-1 d-flex align-items-center justify-content-center"
-                        style={{ width: '28px', height: '28px' }}
+                        style={{ width: '1.75rem', height: '1.75rem' }}
                         title={`Remove ${doc.filename}`}
                       >
                         <i
@@ -437,10 +444,10 @@ const ChatInterface: FC = () => {
           {/* Messages Container - Made responsive with proper scrolling */}
           <div
             ref={messagesContainerRef}
-            className="flex-grow-1 overflow-auto py-3 chat-messages"
+            className="flex-grow-1 overflow-auto py-2 py-md-3 chat-messages"
             style={{
-              minHeight: '200px',
-              maxHeight: 'calc(100vh - 300px)',
+              minHeight: '0',
+              height: '100%',
             }}
             onScroll={handleScroll}
           >
@@ -470,13 +477,15 @@ const ChatInterface: FC = () => {
                       message.type === 'user'
                         ? 'justify-content-end'
                         : 'justify-content-start'
-                    } mb-3`}
+                    } mb-2 mb-md-3`}
                   >
                     <div
                       className={`position-relative ${
-                        message.type === 'user' ? 'ms-5' : 'me-5'
+                        message.type === 'user'
+                          ? 'ms-3 ms-md-5'
+                          : 'me-3 me-md-5'
                       }`}
-                      style={{ maxWidth: '80%' }}
+                      style={{ maxWidth: 'min(80%, 50rem)' }}
                     >
                       <Card
                         className={`${
@@ -546,8 +555,11 @@ const ChatInterface: FC = () => {
 
                 {/* Loading indicator */}
                 {isLoading && (
-                  <div className="d-flex justify-content-start mb-3">
-                    <div className="me-5" style={{ maxWidth: '80%' }}>
+                  <div className="d-flex justify-content-start mb-2 mb-md-3">
+                    <div
+                      className="me-3 me-md-5"
+                      style={{ maxWidth: 'min(80%, 50rem)' }}
+                    >
                       <Card className="bg-light">
                         <Card.Body className="py-2 px-3">
                           <div className="d-flex align-items-center">
@@ -581,12 +593,12 @@ const ChatInterface: FC = () => {
               size="sm"
               className="position-absolute rounded-circle"
               style={{
-                width: '40px',
-                height: '40px',
+                width: '2.5rem',
+                height: '2.5rem',
                 zIndex: 1000,
-                boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
-                right: '15px',
-                bottom: '180px',
+                boxShadow: '0 0.125rem 0.5rem rgba(0,0,0,0.3)',
+                right: '0.75rem',
+                bottom: 'clamp(8rem, 9rem, 10rem)',
               }}
               onClick={showScrollToTop ? scrollToTop : scrollToBottom}
               title={showScrollToTop ? 'Scroll to top' : 'Scroll to bottom'}
@@ -611,49 +623,59 @@ const ChatInterface: FC = () => {
           )}
 
           {/* Input Form */}
-          <div className="border-top pt-3 chat-input-container">
+          <div className="border-top pt-2 pt-md-3 chat-input-container flex-shrink-0">
             <Form onSubmit={handleSubmit}>
-              <div className="d-flex align-items-end gap-2">
-                <div className="flex-grow-1">
-                  <Form.Control
-                    as="textarea"
-                    ref={textareaRef}
-                    value={currentQuestion}
-                    onChange={(e) => setCurrentQuestion(e.target.value)}
-                    onKeyDown={handleKeyPress}
-                    placeholder={
-                      selectedDocument
-                        ? `Ask a question about ${selectedDocumentName}...`
-                        : 'Ask a general question or upload a document first...'
-                    }
-                    disabled={isLoading}
-                    style={{
-                      minHeight: '44px',
-                      maxHeight: '200px',
-                      resize: 'none',
-                      overflow: 'hidden',
-                    }}
-                    className="form-control"
-                  />
-                </div>
+              <div className="position-relative">
+                <Form.Control
+                  as="textarea"
+                  ref={textareaRef}
+                  value={currentQuestion}
+                  onChange={(e) => setCurrentQuestion(e.target.value)}
+                  onKeyDown={handleKeyPress}
+                  placeholder={
+                    selectedDocument
+                      ? `Ask a question about ${selectedDocumentName}...`
+                      : 'Ask a general question or upload a document first...'
+                  }
+                  disabled={isLoading}
+                  style={{
+                    minHeight: 'clamp(2.5rem, 2.75rem, 3rem)',
+                    maxHeight: 'clamp(6rem, 8rem, 10rem)',
+                    resize: 'none',
+                    overflow: 'hidden',
+                    paddingRight: 'clamp(3rem, 3.5rem, 4rem)',
+                  }}
+                  className="form-control"
+                />
                 <Button
                   type="submit"
                   variant="primary"
                   disabled={!currentQuestion.trim() || isLoading}
-                  className="d-flex align-items-center justify-content-center px-3"
+                  className="position-absolute d-flex align-items-center justify-content-center p-0 border-0"
                   style={{
-                    height: '44px',
-                    minWidth: '80px',
-                    borderRadius: '22px',
+                    right: '0.75rem',
+                    bottom: '0.5rem',
+                    width: 'clamp(2rem, 2.25rem, 2.5rem)',
+                    height: 'clamp(2rem, 2.25rem, 2.5rem)',
+                    borderRadius: '50%',
+                    transition: 'all 0.2s ease',
                   }}
+                  title="Send message (Enter)"
                 >
                   {isLoading ? (
-                    <Spinner animation="border" size="sm" />
+                    <Spinner
+                      animation="border"
+                      size="sm"
+                      style={{ width: '1rem', height: '1rem' }}
+                    />
                   ) : (
-                    <>
-                      <i className="bi bi-send me-1"></i>
-                      Send
-                    </>
+                    <i
+                      className="bi bi-send"
+                      style={{
+                        fontSize: 'clamp(0.875rem, 1rem, 1.125rem)',
+                        fontWeight: 'bold',
+                      }}
+                    ></i>
                   )}
                 </Button>
               </div>
