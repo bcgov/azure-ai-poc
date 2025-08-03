@@ -79,6 +79,46 @@ resource "azurerm_cosmosdb_sql_container" "cosmosdb_sql_db_container" {
     excluded_path {
       path = "/embedding/?"
     }
+
+    # Composite index for partitionKey + type queries (optimizes getAllDocuments performance)
+    composite_index {
+      index {
+        path  = "/partitionKey"
+        order = "ascending"
+      }
+      index {
+        path  = "/type"
+        order = "ascending"
+      }
+    }
+
+    # Composite index for documentId + partitionKey + type queries (optimizes chunk retrieval)
+    composite_index {
+      index {
+        path  = "/documentId"
+        order = "ascending"
+      }
+      index {
+        path  = "/partitionKey"
+        order = "ascending"
+      }
+      index {
+        path  = "/type"
+        order = "ascending"
+      }
+    }
+
+    # Index for uploadedAt for sorting (optional but recommended for admin queries)
+    composite_index {
+      index {
+        path  = "/uploadedAt"
+        order = "descending"
+      }
+      index {
+        path  = "/type"
+        order = "ascending"
+      }
+    }
   }
 }
 
