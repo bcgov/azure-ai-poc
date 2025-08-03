@@ -137,6 +137,63 @@ export class CosmosDbService implements OnModuleDestroy {
     }
   }
 
+  async queryItemsCrossPartition<T>(querySpec: any): Promise<T[]> {
+    try {
+      const { resources } = await this.container.items
+        .query<T>(querySpec, {
+          enableCrossPartitionQuery: true,
+          maxItemCount:
+            querySpec.parameters?.find((p: any) => p.name === "@limit")
+              ?.value || 100,
+        } as any)
+        .fetchAll();
+      return resources;
+    } catch (error) {
+      this.logger.error(
+        "Error querying items cross-partition from Cosmos DB",
+        error,
+      );
+      throw error;
+    }
+  }
+
+  async queryItemsCrossPartitionWithPagination<T>(
+    querySpec: any,
+    pageSize: number = 50,
+    continuationToken?: string,
+  ): Promise<{
+    resources: T[];
+    continuationToken?: string;
+    hasMore: boolean;
+  }> {
+    try {
+      const queryOptions = {
+        enableCrossPartitionQuery: true,
+        maxItemCount: pageSize,
+        continuationToken,
+      } as any;
+
+      const queryIterator = this.container.items.query<T>(
+        querySpec,
+        queryOptions,
+      );
+      const { resources, continuationToken: nextToken } =
+        await queryIterator.fetchNext();
+
+      return {
+        resources: resources || [],
+        continuationToken: nextToken,
+        hasMore: !!nextToken,
+      };
+    } catch (error) {
+      this.logger.error(
+        "Error querying items cross-partition with pagination from Cosmos DB",
+        error,
+      );
+      throw error;
+    }
+  }
+
   onModuleDestroy(): void {
     if (this.client) {
       this.client.dispose();

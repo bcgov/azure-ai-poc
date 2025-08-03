@@ -54,6 +54,23 @@ const ChatInterface: FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const previousMessageCount = useRef(0)
   const shouldAutoScrollOnNewMessage = useRef(true)
+
+  // Helper function to get appropriate icon for file type
+  const getFileIcon = (filename: string): string => {
+    const extension = filename.toLowerCase().split('.').pop() || ''
+    switch (extension) {
+      case 'pdf':
+        return 'bi-file-pdf'
+      case 'md':
+      case 'markdown':
+        return 'bi-file-text'
+      case 'html':
+      case 'htm':
+        return 'bi-file-code'
+      default:
+        return 'bi-file-text'
+    }
+  }
   const loadDocuments = async () => {
     try {
       const response = await apiService
@@ -150,8 +167,24 @@ const ChatInterface: FC = () => {
   const handleFileUpload = async (file: File) => {
     if (!file) return
 
-    if (file.type !== 'application/pdf') {
-      setError('Only PDF files are supported')
+    const allowedTypes = [
+      'application/pdf',
+      'text/markdown',
+      'text/x-markdown',
+      'text/html',
+      'text/plain',
+    ]
+    const allowedExtensions = ['.pdf', '.md', '.markdown', '.html', '.htm']
+    const fileExtension = '.' + file.name.toLowerCase().split('.').pop()
+
+    const isValidType =
+      allowedTypes.includes(file.type) ||
+      allowedExtensions.includes(fileExtension)
+
+    if (!isValidType) {
+      setError(
+        'Only PDF, Markdown (.md), and HTML (.html, .htm) files are supported',
+      )
       return
     }
 
@@ -365,7 +398,7 @@ const ChatInterface: FC = () => {
                 onClick={() => setShowUploadModal(true)}
               >
                 <i className="bi bi-cloud-upload me-1"></i>
-                Upload PDF
+                Upload Document
               </Button>
             </div>
 
@@ -409,7 +442,7 @@ const ChatInterface: FC = () => {
                           maxWidth: 'clamp(8rem, 11.25rem, 15rem)',
                         }}
                       >
-                        <i className="bi bi-file-pdf me-1"></i>
+                        <i className={`${getFileIcon(doc.filename)} me-1`}></i>
                         {doc.filename}
                       </Button>
                       <Button
@@ -434,7 +467,9 @@ const ChatInterface: FC = () => {
             {selectedDocumentName && (
               <div className="mt-2">
                 <Badge bg="info">
-                  <i className="bi bi-file-pdf me-1"></i>
+                  <i
+                    className={`${getFileIcon(selectedDocumentName)} me-1`}
+                  ></i>
                   Currently asking about: {selectedDocumentName}
                 </Badge>
               </div>
@@ -456,8 +491,8 @@ const ChatInterface: FC = () => {
                 <i className="bi bi-chat-quote display-4 mb-3"></i>
                 <h5>Welcome to AI Document Assistant</h5>
                 <p>
-                  Upload a PDF document and ask questions about it, or ask
-                  general questions.
+                  Upload a document (PDF, Markdown, or HTML) and ask questions
+                  about it, or ask general questions.
                 </p>
                 <Button
                   variant="primary"
@@ -523,7 +558,14 @@ const ChatInterface: FC = () => {
                                       message.type === 'user' ? 'dark' : 'light'
                                     }
                                   >
-                                    <i className="bi bi-file-pdf me-1"></i>
+                                    <i
+                                      className={`${getFileIcon(
+                                        documents.find(
+                                          (doc) =>
+                                            doc.id === message.documentId,
+                                        )?.filename || '',
+                                      )} me-1`}
+                                    ></i>
                                     {documents.find(
                                       (doc) => doc.id === message.documentId,
                                     )?.filename || 'Document'}
@@ -683,7 +725,7 @@ const ChatInterface: FC = () => {
                 <i className="bi bi-info-circle me-1"></i>
                 {selectedDocument
                   ? `Questions will be answered based on the selected document`
-                  : 'Upload a PDF to ask questions about it, or ask general questions'}
+                  : 'Upload a document (PDF, Markdown, HTML) to ask questions about it, or ask general questions'}
               </small>
             </Form>
           </div>
@@ -699,7 +741,7 @@ const ChatInterface: FC = () => {
         <Modal.Header closeButton>
           <Modal.Title>
             <i className="bi bi-cloud-upload me-2"></i>
-            Upload PDF Document
+            Upload Document
           </Modal.Title>
         </Modal.Header>
         <Modal.Body>
@@ -711,15 +753,19 @@ const ChatInterface: FC = () => {
                 const file = e.target.files?.[0]
                 if (file) handleFileUpload(file)
               }}
-              accept=".pdf"
+              accept=".pdf,.md,.markdown,.html,.htm"
               style={{ display: 'none' }}
             />
 
             {!isUploading ? (
               <div>
-                <i className="bi bi-file-pdf display-4 text-primary mb-3"></i>
-                <h5>Select a PDF file to upload</h5>
-                <p className="text-muted">Maximum file size: 100MB</p>
+                <i className="bi bi-files display-4 text-primary mb-3"></i>
+                <h5>Select a document to upload</h5>
+                <p className="text-muted">
+                  Supported formats: PDF, Markdown (.md), HTML (.html, .htm)
+                  <br />
+                  Maximum file size: 100MB
+                </p>
                 <Button
                   variant="primary"
                   onClick={() => fileInputRef.current?.click()}
@@ -754,7 +800,13 @@ const ChatInterface: FC = () => {
         </Modal.Header>
         <Modal.Body>
           <div className="text-center py-3">
-            <i className="bi bi-file-pdf display-4 text-danger mb-3"></i>
+            <i
+              className={`${
+                documentToDelete
+                  ? getFileIcon(documentToDelete.filename)
+                  : 'bi-file-text'
+              } display-4 text-danger mb-3`}
+            ></i>
             <h5>Delete Document</h5>
             <p className="text-muted">
               Are you sure you want to delete "{documentToDelete?.filename}"?

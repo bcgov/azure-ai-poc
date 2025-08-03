@@ -2,6 +2,8 @@ import { Injectable, Logger } from "@nestjs/common";
 import { AzureOpenAIService } from "./azure-openai.service";
 import { CosmosDbService } from "./cosmosdb.service";
 import pdf from "pdf-parse";
+import { marked } from "marked";
+import { JSDOM } from "jsdom";
 
 export interface DocumentChunk {
   id: string;
@@ -52,8 +54,8 @@ export class DocumentService {
     try {
       this.logger.log(`Processing document: ${file.originalname}`);
 
-      // Parse PDF
-      const pdfData = await pdf(file.buffer);
+      // Extract text based on file type
+      const extractedData = await this.extractTextFromFile(file);
 
       // Create document ID and partition key
       const documentId = this.generateDocumentId(file.originalname);
@@ -61,7 +63,7 @@ export class DocumentService {
 
       // Split text into chunks and generate embeddings (for better context management and semantic search)
       const chunks = await this.chunkText(
-        pdfData.text,
+        extractedData.text,
         file.originalname,
         partitionKey,
         documentId,
@@ -79,7 +81,7 @@ export class DocumentService {
         filename: file.originalname,
         chunkIds,
         uploadedAt: new Date(),
-        totalPages: pdfData.numpages,
+        totalPages: extractedData.totalPages,
         partitionKey,
         userId,
         type: "document",
@@ -98,6 +100,107 @@ export class DocumentService {
         error,
       );
       throw new Error(`Failed to process document: ${error.message}`);
+    }
+  }
+
+  /**
+   * Extract text from different file types
+   */
+  private async extractTextFromFile(file: UploadedFile): Promise<{
+    text: string;
+    totalPages?: number;
+  }> {
+    const { mimetype, buffer, originalname } = file;
+
+    switch (mimetype) {
+      case "application/pdf":
+        const pdfData = await pdf(buffer);
+        return {
+          text: pdfData.text,
+          totalPages: pdfData.numpages,
+        };
+
+      case "text/markdown":
+      case "text/x-markdown":
+        const markdownText = buffer.toString("utf-8");
+        // Convert markdown to plain text by parsing it first
+        const htmlFromMarkdown = await marked(markdownText);
+        const textFromMarkdown = this.stripHtmlTags(htmlFromMarkdown);
+        return {
+          text: textFromMarkdown,
+        };
+
+      case "text/html":
+        const htmlText = buffer.toString("utf-8");
+        const textFromHtml = this.stripHtmlTags(htmlText);
+        return {
+          text: textFromHtml,
+        };
+
+      default:
+        // Try to detect file type by extension if mimetype is not specific
+        const extension = originalname.toLowerCase().split(".").pop();
+        if (extension === "md" || extension === "markdown") {
+          const markdownText = buffer.toString("utf-8");
+          const htmlFromMarkdown = await marked(markdownText);
+          const textFromMarkdown = this.stripHtmlTags(htmlFromMarkdown);
+          return {
+            text: textFromMarkdown,
+          };
+        } else if (extension === "html" || extension === "htm") {
+          const htmlText = buffer.toString("utf-8");
+          const textFromHtml = this.stripHtmlTags(htmlText);
+          return {
+            text: textFromHtml,
+          };
+        }
+
+        throw new Error(
+          `Unsupported file type: ${mimetype}. Supported types: PDF, Markdown (.md), HTML (.html)`,
+        );
+    }
+  }
+
+  /**
+   * Strip HTML tags and extract clean text content
+   */
+  private stripHtmlTags(html: string): string {
+    try {
+      const dom = new JSDOM(html);
+      const document = dom.window.document;
+
+      // Remove script and style elements
+      const scripts = document.querySelectorAll("script, style");
+      scripts.forEach((el) => el.remove());
+
+      // Get text content and clean it up
+      const text = document.body
+        ? document.body.textContent || ""
+        : document.textContent || "";
+
+      // Clean up whitespace and normalize line breaks
+      return text
+        .replace(/\s+/g, " ") // Replace multiple whitespace with single space
+        .replace(/\n\s*\n/g, "\n\n") // Preserve paragraph breaks
+        .trim();
+    } catch (error) {
+      this.logger.warn(
+        `Failed to parse HTML with JSDOM, falling back to regex: ${error.message}`,
+      );
+
+      // Fallback to regex-based HTML tag removal
+      return html
+        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+        .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "")
+        .replace(/<[^>]+>/g, "")
+        .replace(/&nbsp;/g, " ")
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/\s+/g, " ")
+        .trim();
     }
   }
 
@@ -384,6 +487,92 @@ export class DocumentService {
     } catch (error) {
       this.logger.error("Error in cross-document search", error);
       throw new Error(`Failed to search documents: ${error.message}`);
+    }
+  }
+
+  /**
+   * Admin-only: Search document metadata across all partitions with pagination
+   * This method bypasses the normal partition isolation for administrative purposes
+   */
+  async searchAllDocumentMetadata(
+    searchTerm?: string,
+    pageSize: number = 50,
+    continuationToken?: string,
+  ): Promise<{
+    documents: ProcessedDocument[];
+    continuationToken?: string;
+    hasMore: boolean;
+    totalFound?: number;
+  }> {
+    try {
+      // Validate page size
+      if (pageSize < 1 || pageSize > 100) {
+        throw new Error("Page size must be between 1 and 100");
+      }
+
+      let querySpec;
+
+      if (searchTerm && searchTerm.trim()) {
+        const trimmedTerm = searchTerm.trim();
+        // Search across filename and document ID, case-insensitive
+        querySpec = {
+          query: `
+            SELECT * FROM c 
+            WHERE c.type = @type 
+            AND (
+              CONTAINS(UPPER(c.filename), UPPER(@searchTerm)) 
+              OR CONTAINS(UPPER(c.id), UPPER(@searchTerm))
+            )
+            ORDER BY c.uploadedAt DESC
+          `,
+          parameters: [
+            {
+              name: "@type",
+              value: "document",
+            },
+            {
+              name: "@searchTerm",
+              value: trimmedTerm,
+            },
+          ],
+        };
+      } else {
+        // Get all documents across partitions
+        querySpec = {
+          query: `
+            SELECT * FROM c 
+            WHERE c.type = @type 
+            ORDER BY c.uploadedAt DESC
+          `,
+          parameters: [
+            {
+              name: "@type",
+              value: "document",
+            },
+          ],
+        };
+      }
+
+      // Use paginated cross-partition query
+      const result =
+        await this.cosmosDbService.queryItemsCrossPartitionWithPagination<ProcessedDocument>(
+          querySpec,
+          pageSize,
+          continuationToken,
+        );
+
+      this.logger.log(
+        `Admin search returned ${result.resources.length} documents${searchTerm ? ` matching "${searchTerm}"` : " total"} (hasMore: ${result.hasMore})`,
+      );
+
+      return {
+        documents: result.resources,
+        continuationToken: result.continuationToken,
+        hasMore: result.hasMore,
+      };
+    } catch (error) {
+      this.logger.error("Error in admin document metadata search", error);
+      throw new Error(`Failed to search document metadata: ${error.message}`);
     }
   }
 
