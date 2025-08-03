@@ -624,7 +624,7 @@ const ChatInterface: FC = () => {
 
           {/* Input Form */}
           <div className="border-top pt-2 pt-md-3 chat-input-container flex-shrink-0">
-            <Form onSubmit={handleSubmit}>
+            <Form onSubmit={handleSubmit} style={{ marginBottom: '5em' }}>
               <div className="position-relative">
                 <Form.Control
                   as="textarea"
