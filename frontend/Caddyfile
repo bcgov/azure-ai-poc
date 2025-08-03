@@ -29,6 +29,8 @@
 	reverse_proxy /api* {$VITE_BACKEND_URL} {
 		header_up Host {http.reverse_proxy.upstream.hostport}
 		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
 	}
 	header {
 		-Server

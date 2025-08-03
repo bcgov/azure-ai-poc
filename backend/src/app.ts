@@ -28,12 +28,16 @@ export async function bootstrap() {
   const config = new DocumentBuilder()
     .setTitle("Azure AI POC API")
     .setDescription(
-      "API for Azure AI POC with document management and chat functionality",
+      `API for Azure AI POC with document management and chat functionality.
+      
+      Rate Limiting: This API implements rate limiting to ensure fair usage. 
+      Default limits: ${process.env.RATE_LIMIT_MAX_REQUESTS || 100} requests per ${parseInt(process.env.RATE_LIMIT_TTL || "60000", 10) / 1000} seconds.
+      Health check endpoints are excluded from rate limiting.`,
     )
     .setVersion(process.env.IMAGE_TAG || "latest")
     .addTag("documents", "Document management endpoints")
     .addTag("chat", "Chat functionality endpoints")
-    .addTag("health", "Health check endpoints")
+    .addTag("health", "Health check endpoints (no rate limiting)")
     .addBearerAuth(
       {
         type: "http",
