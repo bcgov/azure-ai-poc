@@ -67,7 +67,6 @@ resource "azurerm_linux_web_app" "backend" {
     WEBSITE_SKIP_RUNNING_KUDUAGENT        = "false"
     WEBSITES_ENABLE_APP_SERVICE_STORAGE   = "false"
     WEBSITE_ENABLE_SYNC_UPDATE_SITE       = "1"
-    FORCE_REDEPLOY                        = null_resource.trigger_backend.id
     IMAGE_TAG                             = var.image_tag
     # Azure OpenAI Configuration
     AZURE_OPENAI_ENDPOINT             = var.azure_openai_endpoint
@@ -148,11 +147,6 @@ resource "azurerm_monitor_autoscale_setting" "backend_autoscale" {
         cooldown  = "PT1M"
       }
     }
-  }
-}
-resource "null_resource" "trigger_backend" {
-  triggers = {
-    always_run = timestamp()
   }
 }
 # Backend Diagnostics
