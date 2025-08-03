@@ -100,7 +100,7 @@ export class DocumentController {
   constructor(private readonly documentService: DocumentService) {}
 
   @Post("upload")
-  @Roles("azure-ai-poc-super-admin", "azure-ai-poc-participant")
+  @Roles("azure-ai-poc-super-admin", "ai-poc-participant")
   @ApiOperation({
     summary: "Upload and process a document (PDF, Markdown, or HTML)",
   })
@@ -220,7 +220,7 @@ export class DocumentController {
   }
 
   @Post("ask")
-  @Roles("azure-ai-poc-super-admin", "azure-ai-poc-participant")
+  @Roles("azure-ai-poc-super-admin", "ai-poc-participant")
   @ApiOperation({ summary: "Ask a question about a specific document" })
   @ApiBody({
     description: "Question and document ID",
@@ -300,7 +300,7 @@ export class DocumentController {
   }
 
   @Get()
-  @Roles("azure-ai-poc-super-admin", "azure-ai-poc-participant")
+  @Roles("azure-ai-poc-super-admin", "ai-poc-participant")
   @ApiOperation({ summary: "Get all documents for the authenticated user" })
   @ApiResponse({
     status: 200,
@@ -389,7 +389,7 @@ export class DocumentController {
     };
   }
 
-  @Roles("azure-ai-poc-super-admin", "azure-ai-poc-participant")
+  @Roles("azure-ai-poc-super-admin", "ai-poc-participant")
   @Delete(":id")
   @ApiOperation({ summary: "Delete a specific document by ID" })
   @ApiParam({
