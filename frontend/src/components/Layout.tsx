@@ -18,19 +18,18 @@ const Layout: FC<Props> = ({ children }) => {
   return (
     <div className="d-flex flex-column min-vh-100">
       <div className="mb-3">
-        <Header title={'AI Chat'}>
+        <Header title={'AI Chat'} titleElement="h1">
           <div className="d-flex align-items-center gap-3">
-            <Link to="/">
-              <Button variant="light" size="lg">
-                <i className="bi bi-house-door-fill" />
-              </Button>
-            </Link>
             {isLoggedIn && (
               <div className="d-flex align-items-center gap-3">
                 <span className="text-dark fw-semibold">
-                  Welcome, {username || 'User'}
+                  {username || 'User'}
                 </span>
-                <Button variant="outline-dark" size="sm" onClick={handleLogout}>
+                <Button variant="primary" size="sm" onClick={handleLogout}>
+                  <i
+                    className="bi bi-box-arrow-right"
+                    style={{ fontSize: '1rem', marginRight: '0.25rem' }}
+                  ></i>
                   Sign Out
                 </Button>
               </div>

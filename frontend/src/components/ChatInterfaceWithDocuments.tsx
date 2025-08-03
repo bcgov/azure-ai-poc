@@ -494,14 +494,6 @@ const ChatInterface: FC = () => {
                   Upload a document (PDF, Markdown, or HTML) and ask questions
                   about it, or ask general questions.
                 </p>
-                <Button
-                  variant="primary"
-                  onClick={() => setShowUploadModal(true)}
-                  className="mt-2"
-                >
-                  <i className="bi bi-cloud-upload me-2"></i>
-                  Upload Your First Document
-                </Button>
               </div>
             ) : (
               <div className="space-y-3">
