@@ -5,6 +5,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   UseGuards,
   UseInterceptors,
   UploadedFile,
@@ -20,12 +21,13 @@ import {
   ApiConsumes,
   ApiBody,
   ApiParam,
+  ApiQuery,
 } from "@nestjs/swagger";
 import {
   DocumentService,
   ProcessedDocument,
 } from "./services/document.service";
-import { JwtAuthGuard } from "./auth/jwt-auth.guard";
+import { JwtAuthGuard, Roles } from "./auth/jwt-auth.guard";
 import { CurrentUser } from "./auth/current-user.decorator";
 import { KeycloakUser } from "./auth/auth.service";
 
@@ -71,6 +73,25 @@ export class SearchResultDto {
   uploadedAt: Date;
 }
 
+export class AdminDocumentSearchDto {
+  id: string;
+  filename: string;
+  userId?: string;
+  totalChunks: number;
+  uploadedAt: Date;
+  totalPages?: number;
+  partitionKey: string;
+}
+
+export class AdminDocumentSearchResponseDto {
+  documents: AdminDocumentSearchDto[];
+  pagination: {
+    hasMore: boolean;
+    continuationToken?: string;
+    pageSize: number;
+  };
+}
+
 @ApiTags("documents")
 @ApiBearerAuth("JWT-auth")
 @Controller("v1/documents")
@@ -79,17 +100,21 @@ export class DocumentController {
   constructor(private readonly documentService: DocumentService) {}
 
   @Post("upload")
-  @ApiOperation({ summary: "Upload and process a PDF document" })
+  @Roles("azure-ai-poc-super-admin", "azure-ai-poc-participant")
+  @ApiOperation({
+    summary: "Upload and process a document (PDF, Markdown, or HTML)",
+  })
   @ApiConsumes("multipart/form-data")
   @ApiBody({
-    description: "PDF file to upload",
+    description: "Document file to upload",
     schema: {
       type: "object",
       properties: {
         file: {
           type: "string",
           format: "binary",
-          description: "PDF file (max 100MB)",
+          description:
+            "Document file (PDF, Markdown .md, or HTML .html/.htm) - max 100MB",
         },
       },
     },
@@ -111,7 +136,8 @@ export class DocumentController {
   })
   @ApiResponse({
     status: 400,
-    description: "Bad request - Invalid file or file too large",
+    description:
+      "Bad request - Invalid file type or file too large. Supported: PDF, Markdown (.md), HTML (.html, .htm)",
   })
   @ApiResponse({
     status: 401,
@@ -124,9 +150,25 @@ export class DocumentController {
         files: 1,
       },
       fileFilter: (req, file, callback) => {
-        if (file.mimetype !== "application/pdf") {
+        const allowedMimeTypes = [
+          "application/pdf",
+          "text/markdown",
+          "text/x-markdown",
+          "text/html",
+          "text/plain", // Sometimes markdown files come as text/plain
+        ];
+
+        const allowedExtensions = [".pdf", ".md", ".markdown", ".html", ".htm"];
+        const fileExtension = file.originalname.toLowerCase().split(".").pop();
+        const hasValidExtension = allowedExtensions.some(
+          (ext) => ext === `.${fileExtension}`,
+        );
+
+        if (!allowedMimeTypes.includes(file.mimetype) && !hasValidExtension) {
           return callback(
-            new BadRequestException("Only PDF files are supported"),
+            new BadRequestException(
+              "Only PDF, Markdown (.md), and HTML (.html, .htm) files are supported",
+            ),
             false,
           );
         }
@@ -178,6 +220,7 @@ export class DocumentController {
   }
 
   @Post("ask")
+  @Roles("azure-ai-poc-super-admin", "azure-ai-poc-participant")
   @ApiOperation({ summary: "Ask a question about a specific document" })
   @ApiBody({
     description: "Question and document ID",
@@ -257,6 +300,7 @@ export class DocumentController {
   }
 
   @Get()
+  @Roles("azure-ai-poc-super-admin", "azure-ai-poc-participant")
   @ApiOperation({ summary: "Get all documents for the authenticated user" })
   @ApiResponse({
     status: 200,
@@ -295,6 +339,7 @@ export class DocumentController {
   }
 
   @Get(":id")
+  @Roles("azure-ai-poc-super-admin", "azure-ai-poc-participant")
   @ApiOperation({ summary: "Get a specific document by ID" })
   @ApiParam({
     name: "id",
@@ -344,6 +389,7 @@ export class DocumentController {
     };
   }
 
+  @Roles("azure-ai-poc-super-admin", "azure-ai-poc-participant")
   @Delete(":id")
   @ApiOperation({ summary: "Delete a specific document by ID" })
   @ApiParam({
@@ -383,85 +429,116 @@ export class DocumentController {
     return { message: "Document deleted successfully" };
   }
 
-  @Post("search")
+  @Get("admin/search")
+  @Roles("azure-ai-poc-super-admin")
   @ApiOperation({
-    summary: "Search across all user documents using semantic similarity",
+    summary:
+      "Admin: Search document metadata across all partitions with pagination",
   })
-  @ApiBody({
-    description: "Search query and optional parameters",
-    schema: {
-      type: "object",
-      properties: {
-        query: {
-          type: "string",
-          description: "The search query",
-          example: "What are the main findings in the research papers?",
-        },
-        topK: {
-          type: "number",
-          description: "Number of top results to return (default: 5)",
-          example: 5,
-          minimum: 1,
-          maximum: 20,
-        },
-      },
-      required: ["query"],
-    },
+  @ApiQuery({
+    name: "searchTerm",
+    required: false,
+    type: String,
+    description: "Search term to filter documents by filename or ID",
+  })
+  @ApiQuery({
+    name: "pageSize",
+    required: false,
+    type: Number,
+    description: "Number of documents per page (default: 50, max: 100)",
+  })
+  @ApiQuery({
+    name: "continuationToken",
+    required: false,
+    type: String,
+    description:
+      "Continuation token for next page (returned from previous request)",
   })
   @ApiResponse({
     status: 200,
-    description: "Search results returned successfully",
+    description: "Successfully retrieved document metadata with pagination",
     schema: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          content: { type: "string" },
-          filename: { type: "string" },
-          documentId: { type: "string" },
-          chunkIndex: { type: "number" },
-          similarity: { type: "number", format: "float" },
-          uploadedAt: { type: "string", format: "date-time" },
+      type: "object",
+      properties: {
+        documents: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+              filename: { type: "string" },
+              userId: { type: "string" },
+              totalChunks: { type: "number" },
+              uploadedAt: { type: "string", format: "date-time" },
+              totalPages: { type: "number" },
+              partitionKey: { type: "string" },
+            },
+          },
+        },
+        pagination: {
+          type: "object",
+          properties: {
+            hasMore: { type: "boolean" },
+            continuationToken: { type: "string" },
+            pageSize: { type: "number" },
+          },
         },
       },
     },
+  })
+  @ApiResponse({
+    status: 400,
+    description: "Bad request - Invalid pagination parameters",
+  })
+  @ApiResponse({
+    status: 403,
+    description: "Forbidden - User does not have super admin role",
   })
   @ApiResponse({
     status: 401,
     description: "Unauthorized - Invalid or missing JWT token",
   })
-  async searchDocuments(
-    @Body() searchDto: SearchDto,
-    @CurrentUser() user: KeycloakUser,
-  ): Promise<SearchResultDto[]> {
-    const { query, topK = 5 } = searchDto;
+  async adminSearchDocuments(
+    @Query("searchTerm") searchTerm?: string,
+    @Query("pageSize") pageSize?: number,
+    @Query("continuationToken") continuationToken?: string,
+    @CurrentUser() user?: KeycloakUser,
+  ): Promise<AdminDocumentSearchResponseDto> {
+    // Validate and set default page size
+    const validatedPageSize = Math.min(Math.max(pageSize || 50, 1), 100);
 
-    if (!query || query.trim().length === 0) {
-      throw new BadRequestException("Search query cannot be empty");
-    }
-
-    if (topK && (topK < 1 || topK > 20)) {
-      throw new BadRequestException("topK must be between 1 and 20");
+    if (pageSize && (pageSize < 1 || pageSize > 100)) {
+      throw new BadRequestException("Page size must be between 1 and 100");
     }
 
     try {
-      const results = await this.documentService.searchDocuments(
-        query,
-        user.sub,
-        topK,
+      const result = await this.documentService.searchAllDocumentMetadata(
+        searchTerm,
+        validatedPageSize,
+        continuationToken,
       );
 
-      return results.map(({ chunk, document, similarity }) => ({
-        content: chunk.content,
-        filename: document.filename,
-        documentId: document.id,
-        chunkIndex: chunk.metadata.chunkIndex,
-        similarity: Math.round(similarity * 1000) / 1000, // Round to 3 decimal places
-        uploadedAt: document.uploadedAt,
+      const documents = result.documents.map((doc) => ({
+        id: doc.id,
+        filename: doc.filename,
+        userId: doc.userId,
+        totalChunks: doc.chunkIds.length,
+        uploadedAt: doc.uploadedAt,
+        totalPages: doc.totalPages,
+        partitionKey: doc.partitionKey,
       }));
+
+      return {
+        documents,
+        pagination: {
+          hasMore: result.hasMore,
+          continuationToken: result.continuationToken,
+          pageSize: validatedPageSize,
+        },
+      };
     } catch (error) {
       throw new BadRequestException(
-        `Failed to search documents: ${error.message}`,
+        `Failed to search document metadata: ${error.message}`,
       );
     }
   }

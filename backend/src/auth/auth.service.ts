@@ -78,9 +78,6 @@ export class AuthService {
       if (!payload.client_roles) {
         throw new ForbiddenException("Token missing client roles");
       }
-      if (!this.hasRole(payload, "ai-poc-participant")) {
-        throw new ForbiddenException("User does not have the required role");
-      }
       return payload;
     } catch (error) {
       console.error("Token validation error:", error);
