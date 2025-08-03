@@ -347,7 +347,7 @@ const ChatInterface: FC = () => {
           xs={12}
           lg={10}
           xl={8}
-          className="mx-auto d-flex flex-column h-100"
+          className="mx-auto d-flex flex-column h-100 position-relative"
         >
           {/* Chat Header */}
           <div className="py-3 border-bottom">
@@ -437,32 +437,13 @@ const ChatInterface: FC = () => {
           {/* Messages Container - Made responsive with proper scrolling */}
           <div
             ref={messagesContainerRef}
-            className="flex-grow-1 overflow-auto py-3 chat-messages position-relative"
+            className="flex-grow-1 overflow-auto py-3 chat-messages"
             style={{
               minHeight: '200px',
               maxHeight: 'calc(100vh - 300px)',
             }}
             onScroll={handleScroll}
           >
-            {/* Scroll to top button - Show when not at top and there are messages */}
-            {showScrollToTop && messages.length > 0 && (
-              <Button
-                variant="primary"
-                size="sm"
-                className="position-absolute top-0 end-0 me-3 mt-2 rounded-circle"
-                style={{
-                  width: '40px',
-                  height: '40px',
-                  zIndex: 1000,
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
-                }}
-                onClick={scrollToTop}
-                title="Scroll to top"
-              >
-                <i className="bi bi-arrow-up"></i>
-              </Button>
-            )}
-
             {messages.length === 0 ? (
               <div className="text-center text-muted py-5">
                 <i className="bi bi-chat-quote display-4 mb-3"></i>
@@ -593,29 +574,28 @@ const ChatInterface: FC = () => {
             )}
           </div>
 
-          {/* Scroll buttons container */}
-          <div className="position-relative">
-            {/* Scroll to bottom button - Show when not at bottom and there are messages */}
-            {showScrollToBottom && messages.length > 0 && (
-              <Button
-                variant="primary"
-                size="sm"
-                className="position-absolute rounded-circle"
-                style={{
-                  width: '40px',
-                  height: '40px',
-                  zIndex: 1000,
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
-                  right: '20px',
-                  bottom: '80px',
-                }}
-                onClick={scrollToBottom}
-                title="Scroll to bottom"
-              >
-                <i className="bi bi-arrow-down"></i>
-              </Button>
-            )}
-          </div>
+          {/* Single scroll button that changes direction based on position */}
+          {(showScrollToTop || showScrollToBottom) && messages.length > 0 && (
+            <Button
+              variant="primary"
+              size="sm"
+              className="position-absolute rounded-circle"
+              style={{
+                width: '40px',
+                height: '40px',
+                zIndex: 1000,
+                boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+                right: '15px',
+                bottom: '180px',
+              }}
+              onClick={showScrollToTop ? scrollToTop : scrollToBottom}
+              title={showScrollToTop ? 'Scroll to top' : 'Scroll to bottom'}
+            >
+              <i
+                className={`bi ${showScrollToTop ? 'bi-arrow-up' : 'bi-arrow-down'}`}
+              ></i>
+            </Button>
+          )}
 
           {/* Error Alert */}
           {error && (
