@@ -1,14 +1,11 @@
 import {
   Controller,
   Get,
-  Post,
-  Put,
-  Delete,
-  Patch,
   All,
   UseGuards,
   Req,
   Res,
+  Next,
   HttpException,
   HttpStatus,
 } from "@nestjs/common";
@@ -18,7 +15,8 @@ import {
   ApiResponse,
   ApiBearerAuth,
 } from "@nestjs/swagger";
-import { Request, Response } from "express";
+import { Request, Response, NextFunction } from "express";
+import { createProxyMiddleware } from "http-proxy-middleware";
 import { AppService } from "./app.service";
 import { JwtAuthGuard, Roles } from "./auth/jwt-auth.guard";
 import { CurrentUser } from "./auth/current-user.decorator";
@@ -29,7 +27,78 @@ import { KeycloakUser } from "./auth/auth.service";
 @Controller()
 @UseGuards(JwtAuthGuard)
 export class AppController {
-  constructor(private readonly appService: AppService) {}
+  private openaiProxy: any;
+  private cosmosdbProxy: any;
+
+  constructor(private readonly appService: AppService) {
+    // Initialize OpenAI proxy middleware
+    this.openaiProxy = createProxyMiddleware({
+      target: process.env.AZURE_OPENAI_ENDPOINT,
+      changeOrigin: true,
+      pathRewrite: {
+        "^/proxy/openai": "", // remove /proxy/openai from the path
+      },
+      on: {
+        proxyReq: (proxyReq, req, res) => {
+          // Add Azure OpenAI authentication
+          const apiKey = process.env.AZURE_OPENAI_API_KEY;
+          if (apiKey) {
+            proxyReq.setHeader("api-key", apiKey);
+          }
+
+          // Set proper headers
+          proxyReq.setHeader("User-Agent", "Azure-AI-POC-Proxy/1.0");
+
+          // Remove authorization header to prevent conflicts
+          proxyReq.removeHeader("authorization");
+        },
+        error: (err, req, res) => {
+          console.error("OpenAI Proxy Error:", err);
+          (res as Response).status(500).json({
+            error: "Failed to proxy request to Azure OpenAI",
+            message: err.message,
+          });
+        },
+      },
+    });
+
+    // Initialize Cosmos DB proxy middleware
+    this.cosmosdbProxy = createProxyMiddleware({
+      target: process.env.COSMOS_DB_ENDPOINT,
+      changeOrigin: true,
+      pathRewrite: {
+        "^/proxy/cosmosdb": "", // remove /proxy/cosmosdb from the path
+      },
+      on: {
+        proxyReq: (proxyReq, req, res) => {
+          // Add Cosmos DB authentication
+          const cosmosKey = process.env.COSMOS_DB_KEY;
+          if (cosmosKey) {
+            proxyReq.setHeader("Authorization", cosmosKey);
+          }
+
+          // Set Cosmos DB specific headers
+          proxyReq.setHeader("x-ms-version", "2020-11-05");
+          proxyReq.setHeader("User-Agent", "Azure-AI-POC-Proxy/1.0");
+
+          // Remove the JWT authorization header to prevent conflicts
+          proxyReq.removeHeader("authorization");
+
+          // Re-add Cosmos DB authorization
+          if (cosmosKey) {
+            proxyReq.setHeader("Authorization", cosmosKey);
+          }
+        },
+        error: (err, req, res) => {
+          console.error("Cosmos DB Proxy Error:", err);
+          (res as Response).status(500).json({
+            error: "Failed to proxy request to Cosmos DB",
+            message: err.message,
+          });
+        },
+      },
+    });
+  }
 
   @Get()
   @ApiOperation({ summary: "Get welcome message" })
@@ -67,70 +136,18 @@ export class AppController {
   async proxyToOpenAI(
     @Req() req: Request,
     @Res() res: Response,
+    @Next() next: NextFunction,
     @CurrentUser() user: KeycloakUser,
   ): Promise<void> {
-    try {
-      const openaiEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
-      const apiKey = process.env.AZURE_OPENAI_API_KEY;
-
-      if (!openaiEndpoint) {
-        throw new HttpException(
-          "Azure OpenAI endpoint not configured",
-          HttpStatus.INTERNAL_SERVER_ERROR,
-        );
-      }
-
-      // Extract the path after /proxy/openai/
-      const proxyPath = req.url.replace(/^\/proxy\/openai\//, "");
-      const targetUrl = `${openaiEndpoint}/${proxyPath}`;
-
-      // Prepare headers for the proxy request
-      const headers: Record<string, string> = {
-        "Content-Type": req.headers["content-type"] || "application/json",
-        "User-Agent": "Azure-AI-POC-Proxy/1.0",
-      };
-
-      // Add API key authentication
-      if (apiKey) {
-        headers["api-key"] = apiKey;
-      }
-
-      // Remove host and other problematic headers
-      const excludeHeaders = ["host", "connection", "authorization"];
-      Object.keys(req.headers).forEach((key) => {
-        if (!excludeHeaders.includes(key.toLowerCase()) && !headers[key]) {
-          headers[key] = req.headers[key] as string;
-        }
-      });
-
-      const proxyOptions: RequestInit = {
-        method: req.method,
-        headers,
-      };
-
-      // Add body for non-GET requests
-      if (req.method !== "GET" && req.method !== "HEAD") {
-        proxyOptions.body = JSON.stringify(req.body);
-      }
-
-      const response = await fetch(targetUrl, proxyOptions);
-
-      // Copy response headers
-      response.headers.forEach((value, key) => {
-        res.setHeader(key, value);
-      });
-
-      res.status(response.status);
-
-      // Stream the response
-      const responseBody = await response.text();
-      res.send(responseBody);
-    } catch (error) {
+    if (!process.env.AZURE_OPENAI_ENDPOINT) {
       throw new HttpException(
-        `Failed to proxy request to OpenAI: ${error.message}`,
+        "Azure OpenAI endpoint not configured",
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
+
+    // Use the proxy middleware
+    this.openaiProxy(req, res, next);
   }
 
   @All("proxy/cosmosdb/*")
@@ -155,70 +172,17 @@ export class AppController {
   async proxyToCosmosDB(
     @Req() req: Request,
     @Res() res: Response,
+    @Next() next: NextFunction,
     @CurrentUser() user: KeycloakUser,
   ): Promise<void> {
-    try {
-      const cosmosEndpoint = process.env.COSMOS_DB_ENDPOINT;
-      const cosmosKey = process.env.COSMOS_DB_KEY;
-
-      if (!cosmosEndpoint) {
-        throw new HttpException(
-          "Cosmos DB endpoint not configured",
-          HttpStatus.INTERNAL_SERVER_ERROR,
-        );
-      }
-
-      // Extract the path after /proxy/cosmosdb/
-      const proxyPath = req.url.replace(/^\/proxy\/cosmosdb\//, "");
-      const targetUrl = `${cosmosEndpoint}/${proxyPath}`;
-
-      // Prepare headers for the proxy request
-      const headers: Record<string, string> = {
-        "Content-Type": req.headers["content-type"] || "application/json",
-        "User-Agent": "Azure-AI-POC-Proxy/1.0",
-        "x-ms-version": "2020-11-05", // Cosmos DB API version
-      };
-
-      // Add Cosmos DB authentication
-      if (cosmosKey) {
-        headers["Authorization"] = cosmosKey;
-      }
-
-      // Remove host and other problematic headers
-      const excludeHeaders = ["host", "connection", "authorization"];
-      Object.keys(req.headers).forEach((key) => {
-        if (!excludeHeaders.includes(key.toLowerCase()) && !headers[key]) {
-          headers[key] = req.headers[key] as string;
-        }
-      });
-
-      const proxyOptions: RequestInit = {
-        method: req.method,
-        headers,
-      };
-
-      // Add body for non-GET requests
-      if (req.method !== "GET" && req.method !== "HEAD") {
-        proxyOptions.body = JSON.stringify(req.body);
-      }
-
-      const response = await fetch(targetUrl, proxyOptions);
-
-      // Copy response headers
-      response.headers.forEach((value, key) => {
-        res.setHeader(key, value);
-      });
-
-      res.status(response.status);
-
-      // Stream the response
-      const responseBody = await response.text();
-      res.send(responseBody);
-    } catch (error) {
+    if (!process.env.COSMOS_DB_ENDPOINT) {
       throw new HttpException(
-        `Failed to proxy request to Cosmos DB: ${error.message}`,
+        "Cosmos DB endpoint not configured",
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
+
+    // Use the proxy middleware
+    this.cosmosdbProxy(req, res, next);
   }
 }
