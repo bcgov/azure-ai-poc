@@ -6,11 +6,6 @@ resource "azurerm_cosmosdb_account" "cosmosdb_sql" {
   kind                          = "GlobalDocumentDB"
   public_network_access_enabled = false
 
-  # Enable serverless capacity mode for cost optimization
-  capabilities {
-    name = "EnableServerless"
-  }
-
   # Enable vector search capability
   capabilities {
     name = "EnableNoSQLVectorSearch"
@@ -58,7 +53,7 @@ resource "azurerm_cosmosdb_sql_database" "cosmosdb_sql_db" {
   name                = var.cosmosdb_sql_database_name
   account_name        = azurerm_cosmosdb_account.cosmosdb_sql.name
   resource_group_name = var.resource_group_name
-  # Remove throughput for serverless mode - not supported
+  throughput          = 400
 }
 
 resource "azurerm_cosmosdb_sql_container" "cosmosdb_sql_db_container" {
