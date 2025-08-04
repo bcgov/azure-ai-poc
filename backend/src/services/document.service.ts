@@ -1,4 +1,4 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import { AzureOpenAIService } from "./azure-openai.service";
 import { CosmosDbService } from "./cosmosdb.service";
 import pdf from "pdf-parse";
@@ -38,7 +38,8 @@ interface UploadedFile {
   size: number;
 }
 
-export class DocumentService {
+@Injectable()
+export class DocumentService implements OnModuleInit {
   private readonly logger = new Logger(DocumentService.name);
   private readonly documentCache = new Map<
     string,
@@ -53,7 +54,44 @@ export class DocumentService {
   constructor(
     private azureOpenAIService: AzureOpenAIService,
     private cosmosDbService: CosmosDbService,
-  ) {}
+  ) {
+    // Add constructor validation for Azure services
+    if (!this.azureOpenAIService) {
+      this.logger.error("AzureOpenAIService not properly injected");
+      throw new Error("AzureOpenAIService is required for DocumentService");
+    }
+
+    if (!this.cosmosDbService) {
+      this.logger.error("CosmosDbService not properly injected");
+      throw new Error("CosmosDbService is required for DocumentService");
+    }
+  }
+  async onModuleInit() {
+    // Validate Azure services are ready on module initialization
+    try {
+      this.logger.log(
+        "Initializing DocumentService with Azure dependencies...",
+      );
+
+      // Verify Cosmos DB service is available
+      if (
+        !this.cosmosDbService ||
+        typeof this.cosmosDbService.queryItems !== "function"
+      ) {
+        throw new Error("CosmosDbService is not properly initialized");
+      }
+
+      this.logger.log(
+        "DocumentService successfully initialized with Azure dependencies",
+      );
+    } catch (error) {
+      this.logger.error(
+        "Failed to initialize DocumentService with Azure dependencies",
+        error,
+      );
+      throw error;
+    }
+  }
 
   async processDocument(
     file: UploadedFile,
