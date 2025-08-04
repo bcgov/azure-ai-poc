@@ -105,6 +105,7 @@ module "backend" {
   cosmosdb_endpoint       = module.cosmos.cosmosdb_endpoint
   cosmosdb_db_name        = module.cosmos.cosmosdb_sql_database_name
   cosmosdb_container_name = module.cosmos.cosmosdb_sql_database_container_name
+  cosmosdb_key            = var.cosmosdb_key
 
   depends_on = [module.frontend]
 }

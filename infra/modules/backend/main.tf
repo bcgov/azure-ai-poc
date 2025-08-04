@@ -81,6 +81,7 @@ resource "azurerm_linux_web_app" "backend" {
     COSMOS_DB_CONTAINER_NAME         = var.cosmosdb_container_name
     AZURE_COSMOSDB_DIAGNOSTICS_LEVEL = "debug"
     AZURE_LOG_LEVEL                  = "debug"
+    COSMOS_DB_KEY                    = var.cosmosdb_key
 
   }
   logs {

@@ -153,3 +153,8 @@ variable "azure_openai_embedding_endpoint" {
   type        = string
   nullable    = false
 }
+variable "cosmosdb_key" {
+  description = "The key for the Cosmos DB instance."
+  type        = string
+  nullable    = false
+}
