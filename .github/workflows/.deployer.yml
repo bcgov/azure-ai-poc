@@ -96,6 +96,7 @@ jobs:
           image_tag: ${{ inputs.tag }}
           azure_openai_llm_endpoint: ${{ secrets.AZURE_OPENAI_LLM_ENDPOINT }}
           azure_openai_embedding_endpoint: ${{ secrets.AZURE_OPENAI_EMBEDDING_ENDPOINT }}
+          cosmosdb_key: ${{ secrets.COSMOSDB_KEY }}
       run: |
           # Run terraform
           terragrunt run-all ${{inputs.command}} --terragrunt-non-interactive

@@ -63,6 +63,8 @@ azure_openai_deployment_name         = "${get_env("azure_openai_deployment_name"
 azure_openai_embedding_deployment    = "${get_env("azure_openai_embedding_deployment", "")}"
 azure_openai_llm_endpoint          = "${get_env("azure_openai_llm_endpoint")}"
 azure_openai_embedding_endpoint    = "${get_env("azure_openai_embedding_endpoint")}"
+
+cosmosdb_key                       = "${get_env("cosmosdb_key")}"
 common_tags = {
   "Environment" = "${local.target_env}"
   "AppEnv"      = "${local.app_env}"
