@@ -8,7 +8,7 @@ import {
 } from "@nestjs/swagger";
 import { ChatService } from "./chat.service";
 import { KeycloakUser } from "./auth/auth.service";
-import { JwtAuthGuard } from "./auth/jwt-auth.guard";
+import { JwtAuthGuard, Roles } from "./auth/jwt-auth.guard";
 import { CurrentUser } from "./auth/current-user.decorator";
 
 export class ChatQuestionDto {
@@ -65,6 +65,7 @@ export class ChatController {
     status: 401,
     description: "Unauthorized - Invalid or missing JWT token",
   })
+  @Roles("azure-ai-poc-super-admin", "ai-poc-participant")
   async askQuestion(
     @Body() chatQuestionDto: ChatQuestionDto,
     @CurrentUser() user: KeycloakUser,

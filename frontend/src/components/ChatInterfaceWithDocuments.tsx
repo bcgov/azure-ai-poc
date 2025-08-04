@@ -46,6 +46,9 @@ const ChatInterface: FC = () => {
   )
   const [isDeleting, setIsDeleting] = useState(false)
   const [isLoadingDocuments, setIsLoadingDocuments] = useState(true)
+  const [pendingDocumentSelection, setPendingDocumentSelection] = useState<
+    string | null
+  >(null)
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -87,6 +90,23 @@ const ChatInterface: FC = () => {
   useEffect(() => {
     loadDocuments()
   }, [])
+
+  // Handle pending document selection after documents are loaded
+  useEffect(() => {
+    if (
+      pendingDocumentSelection &&
+      !isLoadingDocuments &&
+      documents.length > 0
+    ) {
+      const documentExists = documents.some(
+        (doc) => doc.id === pendingDocumentSelection,
+      )
+      if (documentExists) {
+        setSelectedDocument(pendingDocumentSelection)
+        setPendingDocumentSelection(null)
+      }
+    }
+  }, [documents, isLoadingDocuments, pendingDocumentSelection])
 
   // Auto-scroll to bottom when new messages are added - SMART VERSION
   useEffect(() => {
@@ -198,8 +218,8 @@ const ChatInterface: FC = () => {
       // Reload documents list
       await loadDocuments()
 
-      // Select the newly uploaded document
-      setSelectedDocument(response.data.id)
+      // Set pending selection - will be applied after documents are loaded
+      setPendingDocumentSelection(response.data.id)
       setShowUploadModal(false)
     } catch (err: any) {
       console.error('Upload error:', err)
@@ -337,9 +357,20 @@ const ChatInterface: FC = () => {
   }
 
   const selectedDocumentName = selectedDocument
-    ? documents.find((doc) => doc.id === selectedDocument)?.filename ||
-      'Unknown Document'
+    ? documents.find((doc) => doc.id === selectedDocument)?.filename
     : null
+
+  // Debug logging for selectedDocumentName
+  useEffect(() => {
+    if (selectedDocument) {
+      console.log('Selected document ID:', selectedDocument)
+      console.log(
+        'Available documents:',
+        documents.map((d) => ({ id: d.id, filename: d.filename })),
+      )
+      console.log('Selected document name:', selectedDocumentName)
+    }
+  }, [selectedDocument, documents, selectedDocumentName])
 
   return (
     <Container fluid className="vh-100 d-flex flex-column p-0">
@@ -626,9 +657,11 @@ const ChatInterface: FC = () => {
                   onChange={(e) => setCurrentQuestion(e.target.value)}
                   onKeyDown={handleKeyPress}
                   placeholder={
-                    selectedDocument
+                    selectedDocument && selectedDocumentName
                       ? `Ask a question about ${selectedDocumentName}...`
-                      : 'Ask a general question or upload a document first...'
+                      : selectedDocument
+                        ? 'Ask a question about the selected document...'
+                        : 'Ask a general question or upload a document first...'
                   }
                   disabled={isLoading}
                   style={{
