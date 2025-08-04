@@ -1,6 +1,5 @@
 import React, { type FC } from 'react'
 import { Footer, Header } from '@bcgov/design-system-react-components'
-import { Link } from '@tanstack/react-router'
 import { Button } from 'react-bootstrap'
 import { useAuth } from '../stores'
 
