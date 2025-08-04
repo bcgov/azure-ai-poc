@@ -31,7 +31,7 @@ export async function bootstrap() {
       `API for Azure AI POC with document management and chat functionality.
       
       Rate Limiting: This API implements rate limiting to ensure fair usage. 
-      Default limits: ${process.env.RATE_LIMIT_MAX_REQUESTS || 100} requests per ${parseInt(process.env.RATE_LIMIT_TTL || "60000", 10) / 1000} seconds.
+      Default limits: ${process.env.RATE_LIMIT_MAX_REQUESTS || 30} requests per ${parseInt(process.env.RATE_LIMIT_TTL || "60000", 10) / 1000} seconds.
       Health check endpoints are excluded from rate limiting.`,
     )
     .setVersion(process.env.IMAGE_TAG || "latest")

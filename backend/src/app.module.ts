@@ -9,6 +9,7 @@ import { AppController } from "./app.controller";
 import { MetricsController } from "./metrics.controller";
 import { TerminusModule } from "@nestjs/terminus";
 import { HealthController } from "./health.controller";
+import { CosmosDbHealthIndicator } from "./health/cosmos-db.health";
 import { ChatController } from "./chat.controller";
 import { ChatService } from "./chat.service";
 import { AuthModule } from "./auth/auth.module";
@@ -39,6 +40,7 @@ import { ProxyAwareThrottlerGuard } from "./common/proxy-aware-throttler.guard";
     DocumentService,
     AzureOpenAIService,
     CosmosDbService,
+    CosmosDbHealthIndicator,
     {
       provide: APP_GUARD,
       useClass: ProxyAwareThrottlerGuard,

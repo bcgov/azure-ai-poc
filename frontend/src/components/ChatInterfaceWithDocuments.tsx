@@ -1,19 +1,19 @@
+import apiService from '@/service/api-service'
 import type { FC } from 'react'
-import { useState, useRef, useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
-  Container,
-  Row,
-  Col,
-  Form,
+  Alert,
+  Badge,
   Button,
   Card,
-  Alert,
-  Spinner,
+  Col,
+  Container,
+  Form,
   Modal,
-  Badge,
   ProgressBar,
+  Row,
+  Spinner,
 } from 'react-bootstrap'
-import apiService from '@/service/api-service'
 
 interface ChatMessage {
   id: string
@@ -45,8 +45,7 @@ const ChatInterface: FC = () => {
     null,
   )
   const [isDeleting, setIsDeleting] = useState(false)
-  const [showScrollToBottom, setShowScrollToBottom] = useState(false)
-  const [showScrollToTop, setShowScrollToTop] = useState(false)
+  const [isLoadingDocuments, setIsLoadingDocuments] = useState(true)
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -72,6 +71,7 @@ const ChatInterface: FC = () => {
     }
   }
   const loadDocuments = async () => {
+    setIsLoadingDocuments(true)
     try {
       const response = await apiService
         .getAxiosInstance()
@@ -79,6 +79,8 @@ const ChatInterface: FC = () => {
       setDocuments(response.data)
     } catch (err: any) {
       console.error('Error loading documents:', err)
+    } finally {
+      setIsLoadingDocuments(false)
     }
   }
   // Load documents on component mount
@@ -117,43 +119,9 @@ const ChatInterface: FC = () => {
     // Check if user is near the bottom of the chat container (within 3.125rem)
     const isNearBottom = scrollHeight - scrollTop - clientHeight < 50
     // Check if user is near the top of the chat container (within 3.125rem)
-    const isNearTop = scrollTop < 50
 
     // Enable auto-scroll when near bottom, disable when scrolled up
     shouldAutoScrollOnNewMessage.current = isNearBottom
-
-    // Show appropriate scroll buttons based on position
-    setShowScrollToBottom(!isNearBottom && messages.length > 0)
-    setShowScrollToTop(!isNearTop && messages.length > 0)
-  }
-
-  // Manual scroll to bottom function
-  const scrollToBottom = () => {
-    if (messagesContainerRef.current) {
-      // Scroll only the chat container to bottom
-      messagesContainerRef.current.scrollTop =
-        messagesContainerRef.current.scrollHeight
-
-      // Re-enable auto-scroll since user manually went to bottom
-      shouldAutoScrollOnNewMessage.current = true
-
-      // Hide the scroll button since we're now at bottom
-      setShowScrollToBottom(false)
-    }
-  }
-
-  // Manual scroll to top function
-  const scrollToTop = () => {
-    if (messagesContainerRef.current) {
-      // Scroll only the chat container to top
-      messagesContainerRef.current.scrollTop = 0
-
-      // Disable auto-scroll since user manually went to top
-      shouldAutoScrollOnNewMessage.current = false
-
-      // Hide the scroll to top button since we're now at top
-      setShowScrollToTop(false)
-    }
   }
 
   // Auto-resize textarea
@@ -416,7 +384,12 @@ const ChatInterface: FC = () => {
               </div>
 
               {/* Uploaded Documents */}
-              {documents.length > 0 && (
+              {isLoadingDocuments ? (
+                <div className="d-flex align-items-center text-muted">
+                  <Spinner animation="border" size="sm" className="me-2" />
+                  <small>Loading documents...</small>
+                </div>
+              ) : documents.length > 0 ? (
                 <div className="d-flex flex-wrap gap-2">
                   {documents.map((doc) => (
                     <div
@@ -461,7 +434,7 @@ const ChatInterface: FC = () => {
                     </div>
                   ))}
                 </div>
-              )}
+              ) : null}
             </div>
 
             {selectedDocumentName && (
@@ -488,12 +461,22 @@ const ChatInterface: FC = () => {
           >
             {messages.length === 0 ? (
               <div className="text-center text-muted py-5">
-                <i className="bi bi-chat-quote display-4 mb-3"></i>
-                <h5>Welcome to AI Document Assistant</h5>
-                <p>
-                  Upload a document (PDF, Markdown, or HTML) and ask questions
-                  about it, or ask general questions.
-                </p>
+                {isLoadingDocuments ? (
+                  <>
+                    <Spinner animation="border" className="mb-3" />
+                    <h5>Loading documents...</h5>
+                    <p>Please wait while we fetch your documents.</p>
+                  </>
+                ) : (
+                  <>
+                    <i className="bi bi-chat-quote display-4 mb-3"></i>
+                    <h5>Welcome to AI Document Assistant</h5>
+                    <p>
+                      Upload a document (PDF, Markdown, or HTML) and ask
+                      questions about it, or ask general questions.
+                    </p>
+                  </>
+                )}
               </div>
             ) : (
               <div className="space-y-3">
