@@ -218,6 +218,195 @@ export class CosmosDbService implements OnModuleDestroy {
     }
   }
 
+  /**
+   * Perform vector similarity search using Cosmos DB's native vector search capability
+   * This leverages diskANN indexing for high-performance semantic search
+   */
+  async vectorSearch<T>(
+    embedding: number[],
+    options: {
+      partitionKey?: string;
+      documentId?: string;
+      topK?: number;
+      minSimilarity?: number;
+      enableCrossPartitionQuery?: boolean;
+    } = {},
+  ): Promise<T[]> {
+    try {
+      const {
+        partitionKey,
+        documentId,
+        topK = 3,
+        minSimilarity = 0.0,
+        enableCrossPartitionQuery = false,
+      } = options;
+
+      // Build the vector search query using Cosmos DB's VectorDistance function
+      let whereClause = "c.type = @type AND c.embedding != null";
+      const parameters = [
+        {
+          name: "@type",
+          value: "chunk",
+        },
+        {
+          name: "@embedding",
+          value: embedding,
+        },
+        {
+          name: "@topK",
+          value: topK,
+        },
+      ];
+
+      // Add filters based on options
+      if (partitionKey && !enableCrossPartitionQuery) {
+        whereClause += " AND c.partitionKey = @partitionKey";
+        parameters.push({
+          name: "@partitionKey",
+          value: partitionKey,
+        });
+      }
+
+      if (documentId) {
+        whereClause += " AND c.documentId = @documentId";
+        parameters.push({
+          name: "@documentId",
+          value: documentId,
+        });
+      }
+
+      if (minSimilarity > 0) {
+        whereClause +=
+          " AND VectorDistance(c.embedding, @embedding) >= @minSimilarity";
+        parameters.push({
+          name: "@minSimilarity",
+          value: minSimilarity,
+        });
+      }
+
+      const querySpec = {
+        query: `
+          SELECT TOP @topK c.id, c.documentId, c.content, c.embedding, c.metadata, 
+                 c.partitionKey, c.type,
+                 VectorDistance(c.embedding, @embedding) AS similarity
+          FROM c 
+          WHERE ${whereClause}
+          ORDER BY VectorDistance(c.embedding, @embedding)
+        `,
+        parameters,
+      };
+
+      const queryOptions: any = {
+        enableCrossPartitionQuery,
+        maxItemCount: topK,
+      };
+
+      // For single partition queries, use partition key for better performance
+      if (partitionKey && !enableCrossPartitionQuery) {
+        queryOptions.partitionKey = partitionKey;
+      }
+
+      const startTime = Date.now();
+      const { resources } = await this.container.items
+        .query<T>(querySpec, queryOptions)
+        .fetchAll();
+
+      const queryTime = Date.now() - startTime;
+      this.logger.debug(
+        `Vector search completed in ${queryTime}ms, found ${resources.length} results`,
+      );
+
+      return resources;
+    } catch (error) {
+      this.logger.error("Error performing vector search in Cosmos DB", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Perform cross-partition vector search across all user documents
+   * This is useful for searching across multiple documents/partitions
+   */
+  async vectorSearchCrossPartition<T>(
+    embedding: number[],
+    options: {
+      topK?: number;
+      minSimilarity?: number;
+      userId?: string;
+    } = {},
+  ): Promise<T[]> {
+    try {
+      const { topK = 5, minSimilarity = 0.0, userId } = options;
+
+      let whereClause = "c.type = @type AND c.embedding != null";
+      const parameters = [
+        {
+          name: "@type",
+          value: "chunk",
+        },
+        {
+          name: "@embedding",
+          value: embedding,
+        },
+        {
+          name: "@topK",
+          value: topK,
+        },
+      ];
+
+      // Filter by user if specified
+      if (userId) {
+        whereClause += " AND c.partitionKey = @partitionKey";
+        parameters.push({
+          name: "@partitionKey",
+          value: userId,
+        });
+      }
+
+      if (minSimilarity > 0) {
+        whereClause +=
+          " AND VectorDistance(c.embedding, @embedding) >= @minSimilarity";
+        parameters.push({
+          name: "@minSimilarity",
+          value: minSimilarity,
+        });
+      }
+
+      const querySpec = {
+        query: `
+          SELECT TOP @topK c.id, c.documentId, c.content, c.embedding, c.metadata, 
+                 c.partitionKey, c.type,
+                 VectorDistance(c.embedding, @embedding) AS similarity
+          FROM c 
+          WHERE ${whereClause}
+          ORDER BY VectorDistance(c.embedding, @embedding)
+        `,
+        parameters,
+      };
+
+      const startTime = Date.now();
+      const { resources } = await this.container.items
+        .query<T>(querySpec, {
+          enableCrossPartitionQuery: true,
+          maxItemCount: topK,
+        } as any)
+        .fetchAll();
+
+      const queryTime = Date.now() - startTime;
+      this.logger.log(
+        `Cross-partition vector search completed in ${queryTime}ms, found ${resources.length} results`,
+      );
+
+      return resources;
+    } catch (error) {
+      this.logger.error(
+        "Error performing cross-partition vector search in Cosmos DB",
+        error,
+      );
+      throw error;
+    }
+  }
+
   onModuleDestroy(): void {
     if (this.client) {
       this.client.dispose();

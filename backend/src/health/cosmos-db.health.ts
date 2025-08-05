@@ -9,32 +9,7 @@ export class CosmosDbHealthIndicator {
 
   async isHealthy(key: string): Promise<Record<string, any>> {
     try {
-      // Skip health check in local environment if Cosmos DB is not configured
       const nodeEnv = process.env.NODE_ENV;
-      if (nodeEnv === "local") {
-        const endpoint = process.env.COSMOS_DB_ENDPOINT;
-        const databaseName = process.env.COSMOS_DB_DATABASE_NAME;
-        const containerName = process.env.COSMOS_DB_CONTAINER_NAME;
-
-        if (!endpoint || !databaseName || !containerName) {
-          this.logger.warn(
-            "Cosmos DB not configured for local environment, skipping health check",
-          );
-          return {
-            [key]: {
-              status: "up",
-              details: {
-                status: "skipped",
-                reason: "Not configured for local development",
-                timestamp: new Date().toISOString(),
-              },
-            },
-          };
-        }
-      }
-
-      // Perform a simple read operation to check connectivity
-      // Using a lightweight query that doesn't require specific data
       const startTime = Date.now();
 
       // Try to query the container metadata to verify connection

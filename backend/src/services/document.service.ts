@@ -20,6 +20,10 @@ export interface DocumentChunk {
   type: "chunk"; // Document type for querying
 }
 
+export interface DocumentChunkWithSimilarity extends DocumentChunk {
+  similarity: number; // Similarity score from vector search
+}
+
 export interface ProcessedDocument {
   id: string;
   filename: string;
@@ -266,7 +270,7 @@ export class DocumentService implements OnModuleInit {
 
       if (chunksWithEmbeddings.length > 0) {
         this.logger.log(
-          `Using semantic search with ${chunksWithEmbeddings.length} chunks with embeddings`,
+          `Using Cosmos DB vector search with ${chunksWithEmbeddings.length} chunks with embeddings for document: ${document.filename}`,
         );
         relevantContext = await this.findRelevantContext(question, chunks, 3);
       } else {
@@ -281,6 +285,10 @@ export class DocumentService implements OnModuleInit {
       const answer = await this.azureOpenAIService.answerQuestionWithContext(
         question,
         relevantContext,
+      );
+
+      this.logger.log(
+        `Successfully answered question for document: ${document.filename}`,
       );
 
       return answer;
@@ -344,7 +352,8 @@ export class DocumentService implements OnModuleInit {
   }
 
   /**
-   * Find the most relevant chunks using vector similarity search
+   * Find the most relevant chunks using Cosmos DB vector search (primary) with client-side fallback
+   * This leverages Cosmos DB's native vector search with diskANN indexing for optimal performance
    */
   private async findRelevantContext(
     question: string,
@@ -356,9 +365,65 @@ export class DocumentService implements OnModuleInit {
       const questionEmbedding =
         await this.azureOpenAIService.generateEmbeddings(question);
 
-      // Calculate cosine similarity for each chunk that has embeddings
-      const similarities = chunks
-        .filter((chunk) => chunk.embedding && chunk.embedding.length > 0)
+      // Check if we have chunks with embeddings
+      const chunksWithEmbeddings = chunks.filter(
+        (chunk) => chunk.embedding && chunk.embedding.length > 0,
+      );
+
+      if (chunksWithEmbeddings.length === 0) {
+        this.logger.warn("No chunks with embeddings found for semantic search");
+        // Fallback to first few chunks
+        return chunks
+          .slice(0, topK)
+          .map((chunk) => chunk.content)
+          .join("\n\n");
+      }
+
+      // Try Cosmos DB vector search first (primary method)
+      try {
+        const partitionKey = chunks[0]?.partitionKey;
+        const documentId = chunks[0]?.documentId;
+
+        if (partitionKey && documentId) {
+          this.logger.log(
+            `Performing Cosmos DB vector search for ${chunksWithEmbeddings.length} chunks with embeddings`,
+          );
+
+          const vectorResults =
+            await this.cosmosDbService.vectorSearch<DocumentChunkWithSimilarity>(
+              questionEmbedding,
+              {
+                partitionKey,
+                documentId,
+                topK,
+                minSimilarity: 0.1, // Filter out very low similarity results
+              },
+            );
+
+          if (vectorResults.length > 0) {
+            this.logger.log(
+              `Cosmos DB vector search found ${vectorResults.length} relevant chunks with similarities: ${vectorResults
+                .map((r) => r.similarity.toFixed(3))
+                .join(", ")}`,
+            );
+
+            return vectorResults.map((result) => result.content).join("\n\n");
+          } else {
+            this.logger.warn(
+              "Cosmos DB vector search returned no results, falling back to client-side similarity",
+            );
+          }
+        }
+      } catch (vectorSearchError) {
+        this.logger.warn(
+          "Cosmos DB vector search failed, falling back to client-side similarity",
+          vectorSearchError,
+        );
+      }
+
+      // Fallback to client-side cosine similarity calculation
+      this.logger.log("Using client-side similarity calculation as fallback");
+      const similarities = chunksWithEmbeddings
         .map((chunk) => ({
           chunk,
           similarity: this.cosineSimilarity(
@@ -369,17 +434,10 @@ export class DocumentService implements OnModuleInit {
         .sort((a, b) => b.similarity - a.similarity)
         .slice(0, topK);
 
-      if (similarities.length === 0) {
-        this.logger.warn("No chunks with embeddings found for semantic search");
-        // Fallback to first few chunks
-        return chunks
-          .slice(0, topK)
-          .map((chunk) => chunk.content)
-          .join("\n\n");
-      }
-
       this.logger.log(
-        `Found ${similarities.length} relevant chunks with similarities: ${similarities.map((s) => s.similarity.toFixed(3)).join(", ")}`,
+        `Client-side search found ${similarities.length} relevant chunks with similarities: ${similarities
+          .map((s) => s.similarity.toFixed(3))
+          .join(", ")}`,
       );
 
       // Return the most relevant chunks
@@ -389,7 +447,7 @@ export class DocumentService implements OnModuleInit {
         "Error in semantic search, falling back to simple retrieval",
         error,
       );
-      // Fallback to simple chunk retrieval
+      // Ultimate fallback to simple chunk retrieval
       return chunks
         .slice(0, topK)
         .map((chunk) => chunk.content)
@@ -517,7 +575,8 @@ export class DocumentService implements OnModuleInit {
   }
 
   /**
-   * Search across all user documents using semantic similarity
+   * Search across all user documents using Cosmos DB native vector search
+   * This method leverages Cosmos DB's diskANN indexing for high-performance cross-document search
    */
   async searchDocuments(
     query: string,
@@ -529,16 +588,76 @@ export class DocumentService implements OnModuleInit {
     try {
       const partitionKey = userId || "default";
 
+      // Generate embedding for the query
+      const queryEmbedding =
+        await this.azureOpenAIService.generateEmbeddings(query);
+
+      // Try Cosmos DB vector search first (primary method)
+      try {
+        this.logger.log(
+          `Performing Cosmos DB cross-document vector search for user: ${partitionKey}`,
+        );
+
+        const vectorResults =
+          await this.cosmosDbService.vectorSearch<DocumentChunkWithSimilarity>(
+            queryEmbedding,
+            {
+              partitionKey,
+              topK,
+              minSimilarity: 0.1, // Filter out very low similarity results
+            },
+          );
+
+        if (vectorResults.length > 0) {
+          // Get document metadata for each chunk
+          const results: {
+            chunk: DocumentChunk;
+            document: ProcessedDocument;
+            similarity: number;
+          }[] = [];
+
+          for (const chunk of vectorResults) {
+            const document =
+              await this.cosmosDbService.getItem<ProcessedDocument>(
+                chunk.documentId,
+                partitionKey,
+              );
+
+            if (document) {
+              results.push({
+                chunk,
+                document,
+                similarity: chunk.similarity,
+              });
+            }
+          }
+
+          this.logger.log(
+            `Cosmos DB vector search found ${results.length} relevant chunks from cross-document search`,
+          );
+
+          return results;
+        } else {
+          this.logger.warn(
+            "Cosmos DB vector search returned no results, falling back to client-side search",
+          );
+        }
+      } catch (vectorSearchError) {
+        this.logger.warn(
+          "Cosmos DB vector search failed, falling back to client-side search",
+          vectorSearchError,
+        );
+      }
+
+      // Fallback to client-side search
+      this.logger.log("Using client-side cross-document search as fallback");
+
       // Get all user documents
       const documents = await this.getAllDocuments(userId);
 
       if (documents.length === 0) {
         return [];
       }
-
-      // Generate embedding for the query
-      const queryEmbedding =
-        await this.azureOpenAIService.generateEmbeddings(query);
 
       // Collect all chunks with embeddings from all documents
       const allChunks: { chunk: DocumentChunk; document: ProcessedDocument }[] =
@@ -571,13 +690,89 @@ export class DocumentService implements OnModuleInit {
         .slice(0, topK);
 
       this.logger.log(
-        `Cross-document search found ${similarities.length} relevant chunks from ${documents.length} documents`,
+        `Client-side cross-document search found ${similarities.length} relevant chunks from ${documents.length} documents`,
       );
 
       return similarities;
     } catch (error) {
       this.logger.error("Error in cross-document search", error);
       throw new Error(`Failed to search documents: ${error.message}`);
+    }
+  }
+
+  /**
+   * Direct vector search method that exclusively uses Cosmos DB vector search
+   * This method bypasses fallbacks and demonstrates pure vector search performance
+   */
+  async vectorSearchDocuments(
+    query: string,
+    userId?: string,
+    options: {
+      topK?: number;
+      minSimilarity?: number;
+      documentId?: string;
+    } = {},
+  ): Promise<
+    { chunk: DocumentChunkWithSimilarity; document: ProcessedDocument }[]
+  > {
+    try {
+      const partitionKey = userId || "default";
+      const { topK = 5, minSimilarity = 0.1, documentId } = options;
+
+      // Generate embedding for the query
+      const queryEmbedding =
+        await this.azureOpenAIService.generateEmbeddings(query);
+
+      this.logger.log(
+        `Performing direct Cosmos DB vector search with options: topK=${topK}, minSimilarity=${minSimilarity}${documentId ? `, documentId=${documentId}` : ""}`,
+      );
+
+      const vectorResults =
+        await this.cosmosDbService.vectorSearch<DocumentChunkWithSimilarity>(
+          queryEmbedding,
+          {
+            partitionKey,
+            documentId,
+            topK,
+            minSimilarity,
+          },
+        );
+
+      if (vectorResults.length === 0) {
+        this.logger.log("No results found from vector search");
+        return [];
+      }
+
+      // Get document metadata for each chunk
+      const results: {
+        chunk: DocumentChunkWithSimilarity;
+        document: ProcessedDocument;
+      }[] = [];
+
+      for (const chunk of vectorResults) {
+        const document = await this.cosmosDbService.getItem<ProcessedDocument>(
+          chunk.documentId,
+          partitionKey,
+        );
+
+        if (document) {
+          results.push({
+            chunk,
+            document,
+          });
+        }
+      }
+
+      this.logger.log(
+        `Direct vector search found ${results.length} relevant chunks with similarities: ${vectorResults
+          .map((r) => r.similarity.toFixed(3))
+          .join(", ")}`,
+      );
+
+      return results;
+    } catch (error) {
+      this.logger.error("Error in direct vector search", error);
+      throw new Error(`Failed to perform vector search: ${error.message}`);
     }
   }
 
@@ -737,14 +932,15 @@ export class DocumentService implements OnModuleInit {
         currentChunk.length + paragraph.length > maxChunkSize &&
         currentChunk.length > 0
       ) {
-        // Generate embeddings for the chunk
+        // Generate embeddings for the chunk using text-embedding-3-large (3072 dimensions)
+        // This is optimized for Cosmos DB vector search with diskANN indexing
         let embedding: number[] | undefined;
         try {
           embedding = await this.azureOpenAIService.generateEmbeddings(
             currentChunk.trim(),
           );
           this.logger.log(
-            `Generated embeddings for chunk ${chunkIndex}: ${embedding.length} dimensions`,
+            `Generated embeddings for chunk ${chunkIndex}: ${embedding.length} dimensions (text-embedding-3-large)`,
           );
         } catch (error) {
           this.logger.warn(
@@ -777,14 +973,14 @@ export class DocumentService implements OnModuleInit {
 
     // Add the last chunk if it has content
     if (currentChunk.trim()) {
-      // Generate embeddings for the final chunk
+      // Generate embeddings for the final chunk using text-embedding-3-large (3072 dimensions)
       let embedding: number[] | undefined;
       try {
         embedding = await this.azureOpenAIService.generateEmbeddings(
           currentChunk.trim(),
         );
         this.logger.log(
-          `Generated embeddings for final chunk ${chunkIndex}: ${embedding.length} dimensions`,
+          `Generated embeddings for final chunk ${chunkIndex}: ${embedding.length} dimensions (text-embedding-3-large)`,
         );
       } catch (error) {
         this.logger.warn(
