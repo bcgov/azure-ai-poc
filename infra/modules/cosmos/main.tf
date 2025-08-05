@@ -124,7 +124,7 @@ resource "azapi_update_resource" "cosmosdb_container_vector_policy" {
   type        = "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-05-15"
   resource_id = azurerm_cosmosdb_sql_container.cosmosdb_sql_db_container.id
 
-  body = jsonencode({
+  body = {
     properties = {
       resource = {
         vectorEmbeddingPolicy = {
@@ -195,7 +195,7 @@ resource "azapi_update_resource" "cosmosdb_container_vector_policy" {
         }
       }
     }
-  })
+  }
 
   depends_on = [azurerm_cosmosdb_sql_container.cosmosdb_sql_db_container]
 }
