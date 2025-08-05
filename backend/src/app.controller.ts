@@ -114,7 +114,7 @@ export class AppController {
     return this.appService.getHello();
   }
 
-  @All("proxy/openai/*")
+  @All("proxy/openai")
   @Roles("azure-ai-poc-super-admin", "ai-poc-participant")
   @ApiOperation({ summary: "Proxy requests to Azure OpenAI API" })
   @ApiResponse({
@@ -150,7 +150,7 @@ export class AppController {
     this.openaiProxy(req, res, next);
   }
 
-  @All("proxy/cosmosdb/*")
+  @All("proxy/cosmosdb")
   @Roles("azure-ai-poc-super-admin", "ai-poc-participant")
   @ApiOperation({ summary: "Proxy requests to Azure Cosmos DB API" })
   @ApiResponse({
