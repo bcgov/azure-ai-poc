@@ -318,6 +318,30 @@ export class CosmosDbService implements OnModuleDestroy {
 
       return resources;
     } catch (error) {
+      // Enhanced error handling following Azure best practices
+      if (error.code === "InvalidQuery") {
+        this.logger.error(
+          "Invalid vector search query - check embedding dimensions and query structure",
+          error,
+        );
+        throw new Error(`Vector search query error: ${error.message}`);
+      } else if (error.code === "RequestRateTooLarge") {
+        this.logger.warn(
+          "Cosmos DB request rate exceeded - implementing backoff",
+          error,
+        );
+        throw new Error(`Rate limit exceeded: ${error.message}`);
+      } else if (error.code === "ServiceUnavailable") {
+        this.logger.error("Cosmos DB service unavailable", error);
+        throw new Error(`Service unavailable: ${error.message}`);
+      } else if (error.message?.includes("VectorDistance")) {
+        this.logger.error(
+          "VectorDistance function error - check vector indexing configuration",
+          error,
+        );
+        throw new Error(`Vector indexing error: ${error.message}`);
+      }
+
       this.logger.error("Error performing vector search in Cosmos DB", error);
       throw error;
     }

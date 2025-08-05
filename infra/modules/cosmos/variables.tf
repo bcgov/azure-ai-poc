@@ -52,7 +52,7 @@ variable "log_analytics_workspace_id" {
 variable "embedding_dimensions" {
   description = "Dimensions for the vector embeddings (1536 for text-embedding-3-small, 3072 for text-embedding-3-large)"
   type        = number
-  default     = 1536
+  default     = 3072
   validation {
     condition     = contains([1536, 3072], var.embedding_dimensions)
     error_message = "Embedding dimensions must be either 1536 (text-embedding-3-small) or 3072 (text-embedding-3-large)."
