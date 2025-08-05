@@ -26,8 +26,6 @@ export class CosmosDbHealthIndicator {
 
       const responseTime = Date.now() - startTime;
 
-      this.logger.debug(`Cosmos DB health check passed in ${responseTime}ms`);
-
       return {
         [key]: {
           status: "up",
