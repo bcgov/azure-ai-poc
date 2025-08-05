@@ -93,10 +93,28 @@ export class DocumentService implements OnModuleInit {
     userId?: string,
   ): Promise<ProcessedDocument> {
     try {
-      this.logger.log(`Processing document: ${file.originalname}`);
+      this.logger.log(
+        `Processing document: ${file.originalname} (${Math.round(file.size / 1024)}KB)`,
+      );
+
+      const maxFileSizeBytes = 100 * 1024 * 1024; // 100MB limit
+      if (file.size > maxFileSizeBytes) {
+        throw new Error(
+          `File size ${Math.round(file.size / 1024 / 1024)}MB exceeds maximum allowed size of 100MB`,
+        );
+      }
 
       // Extract text based on file type
       const extractedData = await this.extractTextFromFile(file);
+
+      // Validate extracted text
+      if (!extractedData.text || extractedData.text.trim().length === 0) {
+        throw new Error("No text content could be extracted from the document");
+      }
+
+      this.logger.log(
+        `Extracted ${extractedData.text.length} characters from ${file.originalname}`,
+      );
 
       // Create document ID and partition key
       const documentId = this.generateDocumentId(file.originalname);
@@ -110,11 +128,22 @@ export class DocumentService implements OnModuleInit {
         documentId,
       );
 
+      if (chunks.length === 0) {
+        throw new Error(
+          "Failed to create any chunks from the document content",
+        );
+      }
+
       // Store each chunk separately in Cosmos DB
       const chunkIds: string[] = [];
+      let embeddedChunks = 0;
+
       for (const chunk of chunks) {
         await this.cosmosDbService.createItem(chunk, partitionKey);
         chunkIds.push(chunk.id);
+        if (chunk.embedding) {
+          embeddedChunks++;
+        }
       }
 
       const processedDoc: ProcessedDocument = {
@@ -132,7 +161,7 @@ export class DocumentService implements OnModuleInit {
       await this.cosmosDbService.createItem(processedDoc, partitionKey);
 
       this.logger.log(
-        `Successfully processed document: ${file.originalname} with ${chunks.length} chunks`,
+        `Successfully processed document: ${file.originalname} with ${chunks.length} chunks (${embeddedChunks} with embeddings)`,
       );
       return processedDoc;
     } catch (error) {
@@ -922,87 +951,153 @@ export class DocumentService implements OnModuleInit {
     maxChunkSize: number = 2000,
   ): Promise<DocumentChunk[]> {
     const chunks: DocumentChunk[] = [];
-    const paragraphs = text.split(/\n\s*\n/);
+
+    // 1. Split by paragraphs first, then by sentences if paragraphs are too large
+    let paragraphs = text.split(/\n\s*\n/);
+
+    // If we only get one paragraph (common with PDFs), try sentence splitting
+    if (paragraphs.length === 1 && text.length > maxChunkSize) {
+      // Split by sentences for better chunk boundaries
+      paragraphs = text.split(/(?<=[.!?])\s+/);
+      this.logger.log(
+        `PDF text split into ${paragraphs.length} sentences for better chunking`,
+      );
+    }
+
+    // If still only one large block, force split by character count
+    if (paragraphs.length === 1 && text.length > maxChunkSize) {
+      const words = text.split(/\s+/);
+      paragraphs = [];
+      let currentParagraph = "";
+
+      for (const word of words) {
+        if (
+          currentParagraph.length + word.length + 1 > maxChunkSize &&
+          currentParagraph.length > 0
+        ) {
+          paragraphs.push(currentParagraph.trim());
+          currentParagraph = word;
+        } else {
+          currentParagraph += (currentParagraph ? " " : "") + word;
+        }
+      }
+      if (currentParagraph.trim()) {
+        paragraphs.push(currentParagraph.trim());
+      }
+      this.logger.log(
+        `Force split large text into ${paragraphs.length} word-based chunks`,
+      );
+    }
 
     let currentChunk = "";
     let chunkIndex = 0;
 
-    for (const paragraph of paragraphs) {
-      if (
-        currentChunk.length + paragraph.length > maxChunkSize &&
-        currentChunk.length > 0
-      ) {
-        // Generate embeddings for the chunk using text-embedding-3-large (3072 dimensions)
-        // This is optimized for Cosmos DB vector search with diskANN indexing
-        let embedding: number[] | undefined;
-        try {
-          embedding = await this.azureOpenAIService.generateEmbeddings(
-            currentChunk.trim(),
-          );
-          this.logger.log(
-            `Generated embeddings for chunk ${chunkIndex}: ${embedding.length} dimensions (text-embedding-3-large)`,
-          );
-        } catch (error) {
-          this.logger.warn(
-            `Failed to generate embeddings for chunk ${chunkIndex}: ${error.message}`,
-          );
-          // Continue without embeddings - service will still work for basic document retrieval
-        }
+    this.logger.log(
+      `Processing ${paragraphs.length} text segments for chunking`,
+    );
 
-        // Save current chunk
-        chunks.push({
-          id: `${documentId}_chunk_${chunkIndex}`,
+    for (let i = 0; i < paragraphs.length; i++) {
+      const paragraph = paragraphs[i];
+      const potentialChunkSize =
+        currentChunk.length + paragraph.length + (currentChunk ? 2 : 0); // +2 for \n\n
+
+      if (potentialChunkSize > maxChunkSize && currentChunk.length > 0) {
+        // Save current chunk before starting new one
+        await this.saveChunk(
+          currentChunk.trim(),
+          chunkIndex,
           documentId,
-          content: currentChunk.trim(),
-          embedding,
-          metadata: {
-            filename,
-            uploadedAt: new Date(),
-            chunkIndex,
-          },
+          filename,
           partitionKey,
-          type: "chunk",
-        });
+          chunks,
+        );
 
+        // Start new chunk with current paragraph
         currentChunk = paragraph;
         chunkIndex++;
       } else {
+        // Add paragraph to current chunk
         currentChunk += (currentChunk ? "\n\n" : "") + paragraph;
+      }
+
+      // Log progress for large documents
+      if (i > 0 && i % 50 === 0) {
+        this.logger.log(
+          `Processed ${i}/${paragraphs.length} text segments, created ${chunks.length} chunks so far`,
+        );
       }
     }
 
     // Add the last chunk if it has content
     if (currentChunk.trim()) {
-      // Generate embeddings for the final chunk using text-embedding-3-large (3072 dimensions)
-      let embedding: number[] | undefined;
-      try {
-        embedding = await this.azureOpenAIService.generateEmbeddings(
-          currentChunk.trim(),
-        );
-        this.logger.log(
-          `Generated embeddings for final chunk ${chunkIndex}: ${embedding.length} dimensions (text-embedding-3-large)`,
-        );
-      } catch (error) {
-        this.logger.warn(
-          `Failed to generate embeddings for final chunk ${chunkIndex}: ${error.message}`,
-        );
-      }
-
-      chunks.push({
-        id: `${documentId}_chunk_${chunkIndex}`,
+      await this.saveChunk(
+        currentChunk.trim(),
+        chunkIndex,
         documentId,
-        content: currentChunk.trim(),
-        embedding,
-        metadata: {
-          filename,
-          uploadedAt: new Date(),
-          chunkIndex,
-        },
+        filename,
         partitionKey,
-        type: "chunk",
-      });
+        chunks,
+      );
     }
 
+    this.logger.log(
+      `Text chunking completed: ${chunks.length} chunks created from ${paragraphs.length} text segments`,
+    );
     return chunks;
+  }
+
+  /**
+   * Helper method to save a chunk with embeddings
+   */
+  private async saveChunk(
+    content: string,
+    chunkIndex: number,
+    documentId: string,
+    filename: string,
+    partitionKey: string,
+    chunks: DocumentChunk[],
+  ): Promise<void> {
+    // Generate embeddings for the chunk using text-embedding-3-large (3072 dimensions)
+    // This is optimized for Cosmos DB vector search with diskANN indexing
+    let embedding: number[] | undefined;
+    try {
+      embedding = await this.azureOpenAIService.generateEmbeddings(content);
+      this.logger.log(
+        `Generated embeddings for chunk ${chunkIndex}: ${embedding.length} dimensions (text-embedding-3-large)`,
+      );
+
+      // Validate embedding dimensions for text-embedding-3-large
+      if (embedding.length !== 3072) {
+        this.logger.warn(
+          `Unexpected embedding dimensions: got ${embedding.length}, expected 3072 for text-embedding-3-large`,
+        );
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Failed to generate embeddings for chunk ${chunkIndex}: ${error.message}`,
+      );
+      // Continue without embeddings - service will still work for basic document retrieval
+    }
+
+    // Create and save chunk
+    const chunk: DocumentChunk = {
+      id: `${documentId}_chunk_${chunkIndex}`,
+      documentId,
+      content,
+      embedding,
+      metadata: {
+        filename,
+        uploadedAt: new Date(),
+        chunkIndex,
+      },
+      partitionKey,
+      type: "chunk",
+    };
+
+    chunks.push(chunk);
+
+    this.logger.debug(
+      `Created chunk ${chunkIndex}: ${content.length} characters, ${embedding ? "with" : "without"} embeddings`,
+    );
   }
 }

@@ -51,7 +51,7 @@ variable "azure_openai_deployment_name" {
 variable "azure_openai_embedding_deployment" {
   description = "Azure OpenAI embedding model deployment name"
   type        = string
-  default     = "text-embedding-3-small"
+  default     = "text-embedding-3-large"
 }
 
 variable "client_id" {

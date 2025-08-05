@@ -147,7 +147,7 @@ SECURITY INSTRUCTIONS:
         this.embeddingClient = new OpenAI({
           apiKey,
           baseURL: `${embeddingEndpoint}`,
-          defaultQuery: { "api-version": "2023-05-15" },
+          defaultQuery: { "api-version": "2024-08-01-preview" },
           defaultHeaders: {
             "api-key": apiKey,
           },
@@ -175,7 +175,7 @@ SECURITY INSTRUCTIONS:
         this.embeddingClient = new OpenAI({
           apiKey: token.token,
           baseURL: `${embeddingEndpoint}`,
-          defaultQuery: { "api-version": "2023-05-15" },
+          defaultQuery: { "api-version": "2024-08-01-preview" },
           defaultHeaders: {
             Authorization: `Bearer ${token.token}`,
           },
