@@ -50,6 +50,12 @@ import { ProxyAwareThrottlerGuard } from "./common/proxy-aware-throttler.guard";
 export class AppModule {
   // let's add a middleware on all routes
   configure(consumer: MiddlewareConsumer) {
-    consumer.apply(HTTPLoggerMiddleware).forRoutes("{*path}");
+    consumer
+      .apply(HTTPLoggerMiddleware)
+      .exclude(
+        { path: "metrics", method: RequestMethod.ALL },
+        { path: "health", method: RequestMethod.ALL },
+      )
+      .forRoutes("{*path}");
   }
 }
