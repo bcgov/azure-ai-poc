@@ -11,6 +11,7 @@ import {
   UploadedFile,
   BadRequestException,
   NotFoundException,
+  Res,
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import {
@@ -23,6 +24,7 @@ import {
   ApiParam,
   ApiQuery,
 } from "@nestjs/swagger";
+import { Response } from "express";
 import {
   DocumentService,
   ProcessedDocument,
@@ -296,6 +298,138 @@ export class DocumentController {
       throw new BadRequestException(
         `Failed to answer question: ${error.message}`,
       );
+    }
+  }
+
+  @Post("ask/stream")
+  @Roles("azure-ai-poc-super-admin", "ai-poc-participant")
+  @ApiOperation({
+    summary: "Ask a question about a specific document with streaming response",
+    description: "Returns a Server-Sent Events stream of the AI response",
+  })
+  @ApiBody({
+    description: "Question and document ID for streaming",
+    schema: {
+      type: "object",
+      properties: {
+        question: {
+          type: "string",
+          description: "The question to ask about the document",
+          example: "What is the main topic of this document?",
+        },
+        documentId: {
+          type: "string",
+          description: "ID of the document to query",
+          example: "doc_123456",
+        },
+      },
+      required: ["question", "documentId"],
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: "Streaming document-based response",
+    headers: {
+      "Content-Type": {
+        description: "text/event-stream",
+        schema: { type: "string" },
+      },
+      "Cache-Control": {
+        description: "no-cache",
+        schema: { type: "string" },
+      },
+      Connection: {
+        description: "keep-alive",
+        schema: { type: "string" },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: "Bad request - Missing question or documentId",
+  })
+  @ApiResponse({
+    status: 404,
+    description: "Document not found",
+  })
+  @ApiResponse({
+    status: 401,
+    description: "Unauthorized - Invalid or missing JWT token",
+  })
+  async askQuestionStream(
+    @Body() questionDto: QuestionDto,
+    @CurrentUser() user: KeycloakUser,
+    @Res() res: Response,
+  ): Promise<void> {
+    const { question, documentId } = questionDto;
+
+    if (!question || !documentId) {
+      res.status(400).json({ error: "Question and documentId are required" });
+      return;
+    }
+
+    // Set SSE headers
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Headers", "Cache-Control");
+
+    try {
+      // Send start event
+      res.write(
+        `data: ${JSON.stringify({
+          type: "start",
+          documentId,
+          question,
+          timestamp: new Date().toISOString(),
+        })}\n\n`,
+      );
+
+      // Stream the response
+      for await (const chunk of this.documentService.answerQuestionStreaming(
+        documentId,
+        question,
+        user.sub,
+      )) {
+        if (chunk) {
+          res.write(
+            `data: ${JSON.stringify({ type: "token", content: chunk })}\n\n`,
+          );
+        }
+      }
+
+      // Send completion event
+      res.write(
+        `data: ${JSON.stringify({
+          type: "end",
+          documentId,
+          question,
+          timestamp: new Date().toISOString(),
+        })}\n\n`,
+      );
+      res.end();
+    } catch (error) {
+      if (error.message.includes("Document not found")) {
+        res.write(
+          `data: ${JSON.stringify({
+            type: "error",
+            message: "Document not found",
+            timestamp: new Date().toISOString(),
+          })}\n\n`,
+        );
+      } else {
+        res.write(
+          `data: ${JSON.stringify({
+            type: "error",
+            message:
+              error.message ||
+              "An error occurred while generating the response",
+            timestamp: new Date().toISOString(),
+          })}\n\n`,
+        );
+      }
+      res.end();
     }
   }
 

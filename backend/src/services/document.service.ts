@@ -330,6 +330,60 @@ export class DocumentService implements OnModuleInit {
     }
   }
 
+  async *answerQuestionStreaming(
+    documentId: string,
+    question: string,
+    userId?: string,
+  ): AsyncGenerator<string, void, unknown> {
+    const partitionKey = userId || "default";
+    const document = await this.cosmosDbService.getItem<ProcessedDocument>(
+      documentId,
+      partitionKey,
+    );
+
+    if (!document) {
+      throw new Error("Document not found");
+    }
+
+    try {
+      // Retrieve chunks for this document
+      const chunks = await this.getDocumentChunks(documentId, partitionKey);
+
+      // Use semantic search to find most relevant chunks if embeddings are available
+      let relevantContext: string;
+      const chunksWithEmbeddings = chunks.filter((chunk) => chunk.embedding);
+
+      if (chunksWithEmbeddings.length > 0) {
+        this.logger.log(
+          `Using Cosmos DB vector search with ${chunksWithEmbeddings.length} chunks with embeddings for document: ${document.filename}`,
+        );
+        relevantContext = await this.findRelevantContext(question, chunks, 3);
+      } else {
+        this.logger.log(
+          "No embeddings available, using all chunks for context",
+        );
+        // Fallback to using all chunks if no embeddings are available
+        relevantContext = chunks.map((chunk) => chunk.content).join("\n\n");
+      }
+
+      // Use Azure OpenAI to answer the question with streaming
+      yield* this.azureOpenAIService.answerQuestionWithContextStreaming(
+        question,
+        relevantContext,
+      );
+
+      this.logger.log(
+        `Successfully streamed answer for document: ${document.filename}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error streaming answer for document ${documentId}`,
+        error,
+      );
+      throw new Error(`Failed to stream answer: ${error.message}`);
+    }
+  }
+
   /**
    * Retrieve all chunks for a specific document (optimized with better query structure)
    */
