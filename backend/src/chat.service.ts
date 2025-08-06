@@ -31,4 +31,34 @@ export class ChatService {
       return `I'm having trouble connecting to the AI service right now. Please try uploading a document and asking questions about it, or try again later. Error: ${error.message}`;
     }
   }
+
+  async *processQuestionStreaming(
+    question: string,
+    user: KeycloakUser,
+  ): AsyncGenerator<string, void, unknown> {
+    try {
+      // Use Azure OpenAI for general chat with streaming
+      yield* this.azureOpenAIService.generateStreamingResponse(question);
+    } catch (error) {
+      // Fallback to simple responses if Azure OpenAI is not available
+      const lowerQuestion = question.toLowerCase();
+
+      if (lowerQuestion.includes("hello") || lowerQuestion.includes("hi")) {
+        yield `Hello ${user.preferred_username || user.email}! How can I help you today?`;
+        return;
+      }
+
+      if (
+        lowerQuestion.includes("who am i") ||
+        lowerQuestion.includes("my profile")
+      ) {
+        const roles = user.client_roles || [];
+        yield `You are logged in as ${user.email}. Your user ID is ${user.sub}. You have the following roles: ${roles.join(", ") || "none"}.`;
+        return;
+      }
+
+      // Default response with error info
+      yield `I'm having trouble connecting to the AI service right now. Please try uploading a document and asking questions about it, or try again later. Error: ${error.message}`;
+    }
+  }
 }

@@ -1,4 +1,5 @@
 import apiService from '@/service/api-service'
+import streamingService from '@/services/streamingService'
 import type { FC } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import {
@@ -34,6 +35,8 @@ const ChatInterface: FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [currentQuestion, setCurrentQuestion] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [isStreaming, setIsStreaming] = useState(false)
+  const [streamingEnabled, setStreamingEnabled] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [documents, setDocuments] = useState<Document[]>([])
   const [selectedDocument, setSelectedDocument] = useState<string | null>(null)
@@ -283,7 +286,7 @@ const ChatInterface: FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (!currentQuestion.trim() || isLoading) {
+    if (!currentQuestion.trim() || isLoading || isStreaming) {
       return
     }
 
@@ -299,46 +302,101 @@ const ChatInterface: FC = () => {
     // Add user message to chat
     setMessages((prev) => [...prev, userMessage])
     setCurrentQuestion('')
-    setIsLoading(true)
     setError(null)
 
-    try {
-      let response
+    if (streamingEnabled) {
+      // Handle streaming response
+      setIsStreaming(true)
 
-      if (selectedDocument) {
-        // Ask question about specific document
-        response = await apiService
-          .getAxiosInstance()
-          .post('/api/v1/documents/ask', {
-            question: questionText,
-            documentId: selectedDocument,
-          })
-      } else {
-        // General chat
-        response = await apiService
-          .getAxiosInstance()
-          .post('/api/v1/chat/ask', {
-            question: questionText,
-          })
-      }
-
-      const assistantMessage: ChatMessage = {
-        id: (Date.now() + 1).toString(),
+      // Create placeholder assistant message for streaming
+      const assistantMessageId = (Date.now() + 1).toString()
+      const placeholderMessage: ChatMessage = {
+        id: assistantMessageId,
         type: 'assistant',
-        content: response.data.answer || 'No response received',
+        content: '',
         timestamp: new Date(),
         documentId: selectedDocument || undefined,
       }
+      setMessages((prev) => [...prev, placeholderMessage])
 
-      setMessages((prev) => [...prev, assistantMessage])
-    } catch (err: any) {
-      console.error('Chat API error:', err)
-      setError(
-        err.response?.data?.message ||
-          'Failed to get response. Please try again.',
-      )
-    } finally {
-      setIsLoading(false)
+      try {
+        let streamingContent = ''
+        const streamGenerator = selectedDocument
+          ? streamingService.streamDocumentQuestion(
+              questionText,
+              selectedDocument,
+            )
+          : streamingService.streamChatQuestion(questionText)
+
+        for await (const event of streamGenerator) {
+          if (event.type === 'token' && event.content) {
+            streamingContent += event.content
+
+            // Update the placeholder message with accumulated content
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === assistantMessageId
+                  ? { ...msg, content: streamingContent }
+                  : msg,
+              ),
+            )
+          } else if (event.type === 'error') {
+            throw new Error(event.message || 'Streaming error occurred')
+          }
+        }
+      } catch (err: any) {
+        console.error('Streaming error:', err)
+        setError(err.message || 'Failed to stream response. Please try again.')
+
+        // Remove the placeholder message on error
+        setMessages((prev) =>
+          prev.filter((msg) => msg.id !== assistantMessageId),
+        )
+      } finally {
+        setIsStreaming(false)
+      }
+    } else {
+      // Handle traditional non-streaming response
+      setIsLoading(true)
+
+      try {
+        let response
+
+        if (selectedDocument) {
+          // Ask question about specific document
+          response = await apiService
+            .getAxiosInstance()
+            .post('/api/v1/documents/ask', {
+              question: questionText,
+              documentId: selectedDocument,
+            })
+        } else {
+          // General chat
+          response = await apiService
+            .getAxiosInstance()
+            .post('/api/v1/chat/ask', {
+              question: questionText,
+            })
+        }
+
+        const assistantMessage: ChatMessage = {
+          id: (Date.now() + 1).toString(),
+          type: 'assistant',
+          content: response.data.answer || 'No response received',
+          timestamp: new Date(),
+          documentId: selectedDocument || undefined,
+        }
+
+        setMessages((prev) => [...prev, assistantMessage])
+      } catch (err: any) {
+        console.error('Chat API error:', err)
+        setError(
+          err.response?.data?.message ||
+            'Failed to get response. Please try again.',
+        )
+      } finally {
+        setIsLoading(false)
+      }
     }
   }
 
@@ -391,14 +449,24 @@ const ChatInterface: FC = () => {
                 <i className="bi bi-chat-dots me-2"></i>
                 AI Document Assistant
               </h4>
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => setShowUploadModal(true)}
-              >
-                <i className="bi bi-cloud-upload me-1"></i>
-                Upload Document
-              </Button>
+              <div className="d-flex gap-2">
+                <Form.Check
+                  type="switch"
+                  id="streaming-toggle"
+                  label="Streaming"
+                  checked={streamingEnabled}
+                  onChange={(e) => setStreamingEnabled(e.target.checked)}
+                  className="d-flex align-items-center"
+                />
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => setShowUploadModal(true)}
+                >
+                  <i className="bi bi-cloud-upload me-1"></i>
+                  Upload Document
+                </Button>
+              </div>
             </div>
 
             {/* Document Selection */}
@@ -602,7 +670,7 @@ const ChatInterface: FC = () => {
                 ))}
 
                 {/* Loading indicator */}
-                {isLoading && (
+                {(isLoading || isStreaming) && (
                   <div className="d-flex justify-content-start mb-2 mb-md-3">
                     <div
                       className="me-3 me-md-5"
@@ -612,16 +680,37 @@ const ChatInterface: FC = () => {
                         <Card.Body className="py-2 px-3">
                           <div className="d-flex align-items-center">
                             <i className="bi bi-robot me-2"></i>
-                            <Spinner
-                              animation="grow"
-                              size="sm"
-                              className="me-2"
-                            />
-                            <span className="text-muted">
-                              {selectedDocument
-                                ? 'Analyzing document...'
-                                : 'Thinking...'}
-                            </span>
+                            {isStreaming ? (
+                              <>
+                                <div
+                                  className="spinner-grow spinner-grow-sm me-2"
+                                  role="status"
+                                  aria-hidden="true"
+                                  style={{
+                                    width: '0.75rem',
+                                    height: '0.75rem',
+                                  }}
+                                ></div>
+                                <span className="text-muted">
+                                  {selectedDocument
+                                    ? 'Streaming response...'
+                                    : 'Streaming response...'}
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <Spinner
+                                  animation="grow"
+                                  size="sm"
+                                  className="me-2"
+                                />
+                                <span className="text-muted">
+                                  {selectedDocument
+                                    ? 'Analyzing document...'
+                                    : 'Thinking...'}
+                                </span>
+                              </>
+                            )}
                           </div>
                         </Card.Body>
                       </Card>
@@ -641,8 +730,34 @@ const ChatInterface: FC = () => {
               dismissible
               onClose={() => setError(null)}
             >
-              <i className="bi bi-exclamation-triangle me-2"></i>
-              {error}
+              <div className="d-flex justify-content-between align-items-start">
+                <div>
+                  <i className="bi bi-exclamation-triangle me-2"></i>
+                  {error}
+                </div>
+                {streamingEnabled && (
+                  <Button
+                    variant="outline-danger"
+                    size="sm"
+                    onClick={() => {
+                      setError(null)
+                      // Retry the last question if available
+                      if (messages.length > 0) {
+                        const lastUserMessage = [...messages]
+                          .reverse()
+                          .find((msg) => msg.type === 'user')
+                        if (lastUserMessage) {
+                          setCurrentQuestion(lastUserMessage.content)
+                        }
+                      }
+                    }}
+                    className="ms-2"
+                  >
+                    <i className="bi bi-arrow-clockwise me-1"></i>
+                    Retry
+                  </Button>
+                )}
+              </div>
             </Alert>
           )}
 
@@ -676,7 +791,7 @@ const ChatInterface: FC = () => {
                 <Button
                   type="submit"
                   variant="primary"
-                  disabled={!currentQuestion.trim() || isLoading}
+                  disabled={!currentQuestion.trim() || isLoading || isStreaming}
                   className="position-absolute d-flex align-items-center justify-content-center p-0 border-0"
                   style={{
                     right: '0.75rem',
@@ -688,7 +803,7 @@ const ChatInterface: FC = () => {
                   }}
                   title="Send message (Enter)"
                 >
-                  {isLoading ? (
+                  {isLoading || isStreaming ? (
                     <Spinner
                       animation="border"
                       size="sm"
@@ -708,8 +823,8 @@ const ChatInterface: FC = () => {
               <small className="text-muted">
                 <i className="bi bi-info-circle me-1"></i>
                 {selectedDocument
-                  ? `Questions will be answered based on the selected document`
-                  : 'Upload a document (PDF, Markdown, HTML) to ask questions about it, or ask general questions'}
+                  ? `Questions will be answered based on the selected document${streamingEnabled ? ' with streaming' : ''}`
+                  : `Upload a document (PDF, Markdown, HTML) to ask questions about it, or ask general questions${streamingEnabled ? ' with streaming' : ''}`}
               </small>
             </Form>
           </div>
