@@ -175,7 +175,6 @@ docker-compose*.yml
 
 # UV specific
 .uv/
-uv.lock
 
 # Development files
 *.dev

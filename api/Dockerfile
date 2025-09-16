@@ -44,7 +44,7 @@ RUN apt-get update && \
 
 # Copy virtual environment and application
 COPY --from=build /app/.venv /app/.venv
-COPY --from=build /app/src ./src
+COPY --from=build /app/app ./app
 COPY start-server.sh ./
 
 # Make the script executable
