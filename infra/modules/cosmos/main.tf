@@ -6,11 +6,6 @@ resource "azurerm_cosmosdb_account" "cosmosdb_sql" {
   kind                          = "GlobalDocumentDB"
   public_network_access_enabled = false
 
-  # Enable vector search capability
-  capabilities {
-    name = "EnableNoSQLVectorSearch"
-  }
-
   consistency_policy {
     consistency_level = "Session"
   }
@@ -117,86 +112,5 @@ resource "azurerm_cosmosdb_sql_container" "cosmosdb_sql_db_container" {
       }
     }
   }
-}
-
-# Vector indexing policy using AzAPI provider for advanced vector search capabilities
-resource "azapi_update_resource" "cosmosdb_container_vector_policy" {
-  type        = "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-05-15"
-  resource_id = azurerm_cosmosdb_sql_container.cosmosdb_sql_db_container.id
-
-  body = {
-    properties = {
-      resource = {
-        vectorEmbeddingPolicy = {
-          vectorEmbeddings = [
-            {
-              path             = "/embedding"
-              dataType         = "float32"
-              dimensions       = 3072
-              distanceFunction = "cosine"
-            }
-          ]
-        }
-        indexingPolicy = {
-          indexingMode = "consistent"
-          automatic    = true
-          includedPaths = [
-            {
-              path = "/*"
-            }
-          ]
-          excludedPaths = [
-            {
-              path = "/embedding/?"
-            }
-          ]
-          compositeIndexes = [
-            [
-              {
-                path  = "/partitionKey"
-                order = "ascending"
-              },
-              {
-                path  = "/type"
-                order = "ascending"
-              }
-            ],
-            [
-              {
-                path  = "/documentId"
-                order = "ascending"
-              },
-              {
-                path  = "/partitionKey"
-                order = "ascending"
-              },
-              {
-                path  = "/type"
-                order = "ascending"
-              }
-            ],
-            [
-              {
-                path  = "/uploadedAt"
-                order = "descending"
-              },
-              {
-                path  = "/type"
-                order = "ascending"
-              }
-            ]
-          ]
-          vectorIndexes = [
-            {
-              path = "/embedding"
-              type = "diskANN"
-            }
-          ]
-        }
-      }
-    }
-  }
-
-  depends_on = [azurerm_cosmosdb_sql_container.cosmosdb_sql_db_container]
 }
 

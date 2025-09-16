@@ -1,4 +1,5 @@
 import { useAuthStore } from '../stores'
+
 export interface StreamEvent {
   type: 'start' | 'token' | 'end' | 'error'
   content?: string
@@ -26,7 +27,7 @@ export class StreamingService {
         }
 
         const token = authStore.getToken()
-        const response = await fetch(`/api/v1/chat/ask/stream`, {
+        const response = await fetch('/api/v1/chat/ask/stream', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -103,7 +104,7 @@ export class StreamingService {
         }
 
         const token = authStore.getToken()
-        const response = await fetch(`/api/v1/documents/ask/stream`, {
+        const response = await fetch('/api/v1/documents/ask/stream', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
