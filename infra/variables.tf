@@ -29,23 +29,10 @@ variable "app_service_sku_name_frontend" {
   default     = "B1" # Basic tier 
 }
 
-# Azure OpenAI Configuration
-variable "azure_openai_endpoint" {
-  description = "Azure OpenAI service endpoint URL"
-  type        = string
-  sensitive   = true
-}
-
-variable "azure_openai_api_key" {
-  description = "Azure OpenAI API key"
-  type        = string
-  sensitive   = true
-}
-
 variable "azure_openai_deployment_name" {
   description = "Azure OpenAI model deployment name"
   type        = string
-  default     = "gpt-4o"
+  default     = "gpt-4o-mini"
 }
 
 variable "azure_openai_embedding_deployment" {
@@ -143,18 +130,66 @@ variable "vnet_resource_group_name" {
   description = "Resource group name where the virtual network exists"
   type        = string
 }
-variable "azure_openai_llm_endpoint" {
-  description = "The endpoint for the Azure OpenAI LLM service."
+
+
+# Azure OpenAI Module Variables
+variable "openai_sku_name" {
+  description = "SKU name for the Azure OpenAI service"
   type        = string
-  nullable    = false
+  default     = "S0"
 }
-variable "azure_openai_embedding_endpoint" {
-  description = "The endpoint for the Azure OpenAI embedding service."
-  type        = string
-  nullable    = false
+
+variable "openai_gpt_deployment_capacity" {
+  description = "Capacity for the GPT model deployment"
+  type        = number
+  default     = 10
 }
-variable "cosmosdb_key" {
-  description = "The key for the Cosmos DB instance."
+
+variable "openai_embedding_deployment_capacity" {
+  description = "Capacity for the embedding model deployment"
+  type        = number
+  default     = 10
+}
+
+# Azure AI Search Module Variables
+variable "search_sku" {
+  description = "SKU for the Azure AI Search service"
   type        = string
-  nullable    = false
+  default     = "standard"
+}
+
+variable "search_replica_count" {
+  description = "Number of replicas for the search service"
+  type        = number
+  default     = 1
+}
+
+variable "search_partition_count" {
+  description = "Number of partitions for the search service"
+  type        = number
+  default     = 1
+}
+
+variable "search_semantic_search_sku" {
+  description = "SKU for semantic search capabilities"
+  type        = string
+  default     = "standard"
+}
+
+variable "search_hosting_mode" {
+  description = "Hosting mode for the search service"
+  type        = string
+  default     = "default"
+}
+
+variable "search_local_authentication_enabled" {
+  description = "Whether local authentication is enabled for search service"
+  type        = bool
+  default     = true
+}
+
+variable "search_enable_managed_identity_permissions" {
+  description = "Whether to assign permissions to the search service managed identity"
+  type        = bool
+  default     = false
 }

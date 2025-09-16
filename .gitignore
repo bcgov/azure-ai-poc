@@ -376,3 +376,5 @@ pyrightconfig.json
 *.terraform
 *.terraform.lock.hcl
 **/.terragrunt-cache
+*.tfvars
+.github/instructions/*.md
