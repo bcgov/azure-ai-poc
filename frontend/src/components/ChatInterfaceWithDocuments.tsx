@@ -83,8 +83,10 @@ const ChatInterface: FC = () => {
         .getAxiosInstance()
         .get('/api/v1/documents')
       setDocuments(response.data)
+      return response.data // Return the fresh data
     } catch (err: any) {
       console.error('Error loading documents:', err)
+      return []
     } finally {
       setIsLoadingDocuments(false)
     }
@@ -94,7 +96,7 @@ const ChatInterface: FC = () => {
     loadDocuments()
   }, [])
 
-  // Handle pending document selection after documents are loaded
+  // Handle pending document selection after documents are loaded (backup mechanism)
   useEffect(() => {
     if (
       pendingDocumentSelection &&
@@ -104,6 +106,7 @@ const ChatInterface: FC = () => {
       const documentExists = documents.some(
         (doc) => doc.id === pendingDocumentSelection,
       )
+
       if (documentExists) {
         setSelectedDocument(pendingDocumentSelection)
         setPendingDocumentSelection(null)
@@ -218,11 +221,20 @@ const ChatInterface: FC = () => {
       }
       setMessages((prev) => [...prev, successMessage])
 
-      // Reload documents list
-      await loadDocuments()
+      // Reload documents list and then select the uploaded document
+      const freshDocuments = await loadDocuments()
 
-      // Set pending selection - will be applied after documents are loaded
-      setPendingDocumentSelection(response.data.id)
+      // Verify the document was loaded and then select it
+      const uploadedDoc = freshDocuments.find(
+        (doc: Document) => doc.id === response.data.id,
+      )
+      if (uploadedDoc) {
+        setSelectedDocument(response.data.id)
+      } else {
+        // Use the pending selection mechanism as fallback
+        setPendingDocumentSelection(response.data.id)
+      }
+
       setShowUploadModal(false)
     } catch (err: any) {
       console.error('Upload error:', err)
@@ -368,7 +380,7 @@ const ChatInterface: FC = () => {
             .getAxiosInstance()
             .post('/api/v1/documents/ask', {
               question: questionText,
-              documentId: selectedDocument,
+              document_id: selectedDocument,
             })
         } else {
           // General chat

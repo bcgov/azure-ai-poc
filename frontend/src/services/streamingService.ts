@@ -110,7 +110,7 @@ export class StreamingService {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ question, documentId }),
+          body: JSON.stringify({ question, document_id: documentId }),
         })
 
         if (!response.ok) {

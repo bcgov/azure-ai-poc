@@ -15,6 +15,7 @@ import math
 import re
 import time
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 from io import BytesIO
 from typing import Any
 
@@ -226,29 +227,36 @@ class DocumentService:
             if not chunks:
                 raise ValueError("Failed to create any chunks from the document content")
 
-            # Store each chunk in Azure Search
-            chunk_ids = []
-            embedded_chunks = 0
+            # Generate embeddings for all chunks in batches
+            chunk_contents = [chunk.content for chunk in chunks]
+            embeddings = await self.azure_openai_service.generate_embeddings_batch(chunk_contents)
 
-            for chunk in chunks:
-                chunk_dict = chunk.model_dump()
-                # Upload synchronously (Azure Search is sync SDK). Could batch later.
-                try:
-                    self.azure_search_service.upload_chunks([chunk_dict])
-                except Exception as upload_err:  # noqa: BLE001
-                    self.logger.error(
-                        "Failed to upload chunk %s to Azure Search: %s", chunk.id, upload_err
-                    )
-                chunk_ids.append(chunk.id)
-                if chunk.embedding:
+            # Assign embeddings to chunks
+            embedded_chunks = 0
+            for i, chunk in enumerate(chunks):
+                if i < len(embeddings):
+                    chunk.embedding = embeddings[i]
                     embedded_chunks += 1
 
+            # Convert chunks to dictionaries for batch upload
+            chunk_dicts = [chunk.model_dump() for chunk in chunks]
+            chunk_ids = [chunk.id for chunk in chunks]
+
+            # Upload all chunks in a single batch operation
+            try:
+                self.azure_search_service.upload_chunks_batch(chunk_dicts)
+                self.logger.info(f"Batch uploaded {len(chunk_dicts)} chunks to Azure Search")
+            except Exception as upload_err:  # noqa: BLE001
+                self.logger.error("Failed to batch upload chunks to Azure Search: %s", upload_err)
+                raise
+
             # Create processed document metadata
+            timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
             processed_doc = ProcessedDocument(
                 id=document_id,
                 filename=file.filename,
                 chunk_ids=chunk_ids,
-                uploaded_at=time.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+                uploaded_at=timestamp,
                 total_pages=extracted_data.get("total_pages"),
                 partition_key=partition_key,
                 user_id=user_id,
@@ -805,7 +813,7 @@ class DocumentService:
         partition_key: str,
     ) -> DocumentChunk:
         """
-        Create a document chunk with embeddings.
+        Create a document chunk without embeddings (embeddings will be generated in batches).
 
         Args:
             content: Chunk content
@@ -815,35 +823,18 @@ class DocumentService:
             partition_key: Partition key
 
         Returns:
-            Document chunk
+            Document chunk without embeddings
         """
-        # Generate embeddings for the chunk
-        embedding = None
-        try:
-            embedding = await self.azure_openai_service.generate_embeddings(content)
-            self.logger.debug(
-                f"Generated embeddings for chunk {chunk_index}: {len(embedding)} dimensions"
-            )
-
-            # Validate embedding dimensions for text-embedding-3-large
-            if len(embedding) != 3072:
-                self.logger.warning(
-                    f"Unexpected embedding dimensions: got {len(embedding)}, "
-                    f"expected 3072 for text-embedding-3-large"
-                )
-
-        except Exception as error:
-            self.logger.warning(f"Failed to generate embeddings for chunk {chunk_index}: {error}")
-
-        # Create chunk
+        # Create chunk without embeddings (will be added in batch processing)
+        timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
         chunk = DocumentChunk(
             id=f"{document_id}_chunk_{chunk_index}",
             document_id=document_id,
             content=content,
-            embedding=embedding,
+            embedding=None,  # Will be set during batch processing
             metadata={
                 "filename": filename,
-                "uploadedAt": time.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+                "uploadedAt": timestamp,
                 "chunkIndex": chunk_index,
             },
             partition_key=partition_key,
@@ -851,7 +842,7 @@ class DocumentService:
 
         self.logger.debug(
             f"Created chunk {chunk_index}: {len(content)} characters, "
-            f"{'with' if embedding else 'without'} embeddings"
+            f"embeddings will be generated in batch"
         )
 
         return chunk

@@ -55,6 +55,9 @@ class AzureSearchService:
         self.api_key = self.settings.AZURE_SEARCH_API_KEY
         self._search_client: SearchClient | None = None
         self._index_client: SearchIndexClient | None = None
+        # Connection configuration for better performance
+        self._default_timeout = 30.0  # 30 second timeout
+        self._request_timeout = 60.0  # 60 second timeout for large operations
         self._ensure_initialized()
 
     def _credential(self):  # type: ignore[override]
@@ -98,7 +101,7 @@ class AzureSearchService:
                 profile_name = None
 
         fields: list[SearchField] = [
-            SimpleField(name="id", type=SearchFieldDataType.String, key=True),
+            SimpleField(name="id", type=SearchFieldDataType.String, key=True, filterable=True),
             SimpleField(
                 name="recordType",
                 type=SearchFieldDataType.String,
@@ -181,6 +184,46 @@ class AzureSearchService:
         self.search_client.upload_documents(documents=batch)
         logger.info("Uploaded %d chunks to Azure Search", len(batch))
 
+    def upload_chunks_batch(self, chunks: list[dict[str, Any]], batch_size: int = 1000) -> None:
+        """
+        Upload chunks in optimized batches to Azure Search.
+
+        Args:
+            chunks: List of chunk dictionaries to upload
+            batch_size: Maximum number of chunks per batch (Azure Search recommends ~1000)
+        """
+        if not chunks:
+            return
+
+        total_chunks = len(chunks)
+        logger.info(f"Uploading {total_chunks} chunks in batches of {batch_size}")
+
+        for i in range(0, total_chunks, batch_size):
+            batch_chunks = chunks[i : i + batch_size]
+            batch = []
+
+            for c in batch_chunks:
+                batch.append(
+                    {
+                        "id": c["id"],
+                        "recordType": "chunk",
+                        "documentId": c["document_id"],
+                        "filename": c["metadata"].get("filename"),
+                        "partitionKey": c["partition_key"],
+                        "userId": c.get("user_id"),
+                        "uploadedAt": c["metadata"].get("uploadedAt"),
+                        "chunkIndex": c["metadata"].get("chunkIndex"),
+                        "content": c["content"],
+                        "embedding": c.get("embedding"),
+                        "metadataJson": json.dumps(c.get("metadata", {})),
+                    }
+                )
+
+            self.search_client.upload_documents(documents=batch)
+            logger.info(f"Uploaded batch {i // batch_size + 1}: {len(batch)} chunks")
+
+        logger.info(f"Successfully uploaded all {total_chunks} chunks to Azure Search")
+
     def upload_document_metadata(self, doc: dict[str, Any]) -> None:
         self.search_client.upload_documents(
             documents=[
@@ -252,7 +295,8 @@ class AzureSearchService:
         filter_expr = " and ".join(filters)
 
         vector_query = {
-            "value": request.embedding,
+            "kind": "vector",
+            "vector": request.embedding,
             "k": request.top_k,
             "fields": "embedding",
         }

@@ -81,8 +81,8 @@ resource "azurerm_linux_web_app" "backend" {
     COSMOS_DB_ENDPOINT               = var.cosmosdb_endpoint
     COSMOS_DB_DATABASE_NAME          = var.cosmosdb_db_name
     COSMOS_DB_CONTAINER_NAME         = var.cosmosdb_container_name
-    AZURE_COSMOSDB_DIAGNOSTICS_LEVEL = "debug"
-    AZURE_LOG_LEVEL                  = "verbose"
+    AZURE_COSMOSDB_DIAGNOSTICS_LEVEL = "info"
+    AZURE_LOG_LEVEL                  = "error"
     #Keycloak Configuration
     KEYCLOAK_URL       = var.keycloak_url
     KEYCLOAK_REALM     = "standard"
