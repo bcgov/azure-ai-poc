@@ -211,4 +211,5 @@ variable "keycloak_url" {
   description = "The URL for the Keycloak authentication server."
   type        = string
   nullable    = false
+  default     = "https://dev.loginproxy.gov.bc.ca/auth"
 }
