@@ -88,7 +88,6 @@ module "azure_ai_search" {
   partition_count                     = var.search_partition_count
   semantic_search_sku                 = var.search_semantic_search_sku
   hosting_mode                        = var.search_hosting_mode
-  local_authentication_enabled        = var.search_local_authentication_enabled
   private_endpoint_subnet_id          = module.network.private_endpoint_subnet_id
   log_analytics_workspace_id          = module.monitoring.log_analytics_workspace_id
   enable_managed_identity_permissions = var.search_enable_managed_identity_permissions
