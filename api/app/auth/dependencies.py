@@ -6,7 +6,10 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.auth.models import KeycloakUser
-from app.auth.service import auth_service
+from app.auth.service import get_auth_service
+from app.core.logger import get_logger
+
+logger = get_logger(__name__)
 
 # Security scheme for bearer token
 security = HTTPBearer()
@@ -21,34 +24,32 @@ async def get_token(
 
 async def get_current_user(token: Annotated[str, Depends(get_token)]) -> KeycloakUser:
     """Get current authenticated user from JWT token."""
+    auth_service = get_auth_service()
     return await auth_service.validate_token(token)
 
 
 def require_roles(*required_roles: str):
-    """Create a dependency that requires specific roles."""
+    """Dependency factory enforcing that user has at least one of the given roles.
 
-    async def check_roles(
+    Usage: Depends(require_roles("roleA", "roleB"))
+    """
+    if not required_roles:
+        raise ValueError("require_roles() requires at least one role")
+
+    roles = tuple(required_roles)
+
+    async def checker(
         current_user: Annotated[KeycloakUser, Depends(get_current_user)],
     ) -> KeycloakUser:
-        """Check if user has required roles."""
-        if not current_user.client_roles:
+        user_roles = current_user.client_roles or []
+        if not user_roles or not any(r in user_roles for r in roles):
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN, detail="User roles not found"
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access denied. Required roles: {', '.join(roles)}",
             )
-
-        if required_roles:
-            has_role = any(auth_service.has_role(current_user, role) for role in required_roles)
-
-            if not has_role:
-                detail_msg = f"Access denied. Required roles: {', '.join(required_roles)}"
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=detail_msg,
-                )
-
         return current_user
 
-    return check_roles
+    return checker
 
 
 # Common role dependencies

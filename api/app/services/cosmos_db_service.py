@@ -64,23 +64,23 @@ class CosmosDbService:
 
     def _initialize_client(self) -> None:
         """Initialize the Cosmos DB client with managed identity or key authentication."""
-        endpoint = self.settings.cosmos_db_endpoint
-        database_name = self.settings.cosmos_db_database_name
-        container_name = self.settings.cosmos_db_container_name
+        endpoint = self.settings.COSMOS_DB_ENDPOINT
+        database_name = self.settings.COSMOS_DB_DATABASE_NAME
+        container_name = self.settings.COSMOS_DB_CONTAINER_NAME
 
         # Check for required configuration
-        if self.settings.environment != "local":
+        if self.settings.ENVIRONMENT != "local":
             if not endpoint or not database_name or not container_name:
-                self.logger.error(
-                    "Missing Cosmos DB configuration in environment variables"
-                )
+                self.logger.error("Missing Cosmos DB configuration in environment variables")
                 raise ValueError("Cosmos DB configuration is incomplete")
 
         try:
             # Use managed identity for production, key for local development
-            if self.settings.environment == "local" and self.settings.cosmos_db_key:
+            if self.settings.ENVIRONMENT == "local" and self.settings.COSMOS_DB_KEY:
                 self.client = CosmosClient(
-                    url=endpoint, credential=self.settings.cosmos_db_key
+                    url=endpoint,
+                    credential=self.settings.COSMOS_DB_KEY,
+                    enable_endpoint_discovery=False,
                 )
                 self.logger.info("Cosmos DB client initialized with key authentication")
             else:
@@ -97,9 +97,7 @@ class CosmosDbService:
             self.logger.error(f"Failed to initialize Cosmos DB client: {error}")
             raise
 
-    async def create_item(
-        self, item: dict[str, Any], partition_key: str
-    ) -> dict[str, Any]:
+    async def create_item(self, item: dict[str, Any], partition_key: str) -> dict[str, Any]:
         """
         Create an item in Cosmos DB.
 
@@ -158,9 +156,7 @@ class CosmosDbService:
             The item if found, None otherwise
         """
         try:
-            response = self.container.read_item(
-                item=item_id, partition_key=partition_key
-            )
+            response = self.container.read_item(item=item_id, partition_key=partition_key)
             return response
         except CosmosResourceNotFoundError:
             return None
@@ -201,9 +197,7 @@ class CosmosDbService:
             The delete response
         """
         try:
-            response = self.container.delete_item(
-                item=item_id, partition_key=partition_key
-            )
+            response = self.container.delete_item(item=item_id, partition_key=partition_key)
             return response
         except Exception as error:
             self.logger.error(f"Error deleting item from Cosmos DB: {error}")
@@ -277,9 +271,7 @@ class CosmosDbService:
             return items
 
         except Exception as error:
-            self.logger.error(
-                f"Error querying items cross-partition from Cosmos DB: {error}"
-            )
+            self.logger.error(f"Error querying items cross-partition from Cosmos DB: {error}")
             raise
 
     async def query_items_cross_partition_with_pagination(
@@ -311,9 +303,7 @@ class CosmosDbService:
                 pass
 
             # Get iterator for pagination
-            query_iterator = self.container.query_items(
-                query=query_spec, **query_kwargs
-            )
+            query_iterator = self.container.query_items(query=query_spec, **query_kwargs)
 
             items = []
             for item in query_iterator:
@@ -364,21 +354,15 @@ class CosmosDbService:
             # Add filters based on options
             if options.partition_key and not options.enable_cross_partition_query:
                 where_clause += " AND c.partitionKey = @partitionKey"
-                parameters.append(
-                    {"name": "@partitionKey", "value": options.partition_key}
-                )
+                parameters.append({"name": "@partitionKey", "value": options.partition_key})
 
             if options.document_id:
                 where_clause += " AND c.documentId = @documentId"
                 parameters.append({"name": "@documentId", "value": options.document_id})
 
             if options.min_similarity > 0:
-                where_clause += (
-                    " AND VectorDistance(c.embedding, @embedding) >= @minSimilarity"
-                )
-                parameters.append(
-                    {"name": "@minSimilarity", "value": options.min_similarity}
-                )
+                where_clause += " AND VectorDistance(c.embedding, @embedding) >= @minSimilarity"
+                parameters.append({"name": "@minSimilarity", "value": options.min_similarity})
 
             query_spec = {
                 "query": f"""
@@ -424,9 +408,7 @@ class CosmosDbService:
                 )
                 raise ValueError(f"Vector search query error: {error_message}")
             elif "RequestRateTooLarge" in error_message:
-                self.logger.warning(
-                    "Cosmos DB request rate exceeded - implementing backoff"
-                )
+                self.logger.warning("Cosmos DB request rate exceeded - implementing backoff")
                 raise Exception(f"Rate limit exceeded: {error_message}")
             elif "ServiceUnavailable" in error_message:
                 self.logger.error("Cosmos DB service unavailable")
@@ -470,12 +452,8 @@ class CosmosDbService:
                 parameters.append({"name": "@partitionKey", "value": options.user_id})
 
             if options.min_similarity > 0:
-                where_clause += (
-                    " AND VectorDistance(c.embedding, @embedding) >= @minSimilarity"
-                )
-                parameters.append(
-                    {"name": "@minSimilarity", "value": options.min_similarity}
-                )
+                where_clause += " AND VectorDistance(c.embedding, @embedding) >= @minSimilarity"
+                parameters.append({"name": "@minSimilarity", "value": options.min_similarity})
 
             query_spec = {
                 "query": f"""
@@ -525,12 +503,12 @@ class CosmosDbService:
         try:
             start_time = time.time()
 
-            # Try to query the container metadata to verify connection
+            # Try to read the container properties to verify connection
             # This is a lightweight operation that validates connectivity
-            await self.query_items(
-                {"query": "SELECT TOP 1 c.id FROM c", "parameters": []},
-                QueryOptions(max_item_count=1, enable_cross_partition_query=True),
-            )
+            if self.container:
+                self.container.read()  # This reads container metadata
+            else:
+                raise ValueError("Container not initialized")
 
             response_time = (time.time() - start_time) * 1000
 
@@ -570,17 +548,15 @@ class CosmosDbService:
             self.logger.info("Cosmos DB client disposed")
 
 
-# Global instance
+# Global service instance
 _cosmos_db_service: CosmosDbService | None = None
 
 
 def get_cosmos_db_service() -> CosmosDbService:
     """Get the global Cosmos DB service instance."""
     global _cosmos_db_service
-
     if _cosmos_db_service is None:
         _cosmos_db_service = CosmosDbService()
-
     return _cosmos_db_service
 
 

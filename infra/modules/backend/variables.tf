@@ -172,3 +172,16 @@ variable "azure_openai_embedding_endpoint" {
   type        = string
   nullable    = false
 }
+
+# Azure AI Search Configuration Variables
+variable "azure_search_endpoint" {
+  description = "Azure AI Search service endpoint URL"
+  type        = string
+  nullable    = false
+}
+
+variable "azure_search_index_name" {
+  description = "Azure AI Search index name for document storage"
+  type        = string
+  default     = "documents-index"
+}

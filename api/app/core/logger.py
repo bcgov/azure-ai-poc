@@ -10,9 +10,10 @@ from app.core.config import settings
 
 
 def setup_logging() -> None:
-    """Configure structured logging for the application."""
-
-    # Configure structlog
+    """Configure structured logging for the application.
+    Adds a blank line after each log entry by embedding an extra newline
+    in the log format (handler still appends its own terminator).
+    """
     structlog.configure(
         processors=[
             structlog.stdlib.filter_by_level,
@@ -31,9 +32,9 @@ def setup_logging() -> None:
         cache_logger_on_first_use=True,
     )
 
-    # Configure standard library logging
+    # Add an extra newline so each record is followed by a blank line.
     logging.basicConfig(
-        format="%(message)s",
+        format="\n%(message)s\n",
         stream=sys.stdout,
         level=getattr(logging, settings.LOG_LEVEL.upper()),
     )

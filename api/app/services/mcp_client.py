@@ -209,4 +209,12 @@ class MCPClientService:
 
 
 # Global MCP client service instance
-mcp_client_service = MCPClientService()
+_mcp_client_service: MCPClientService | None = None
+
+
+def get_mcp_client_service() -> MCPClientService:
+    """Get the global MCP client service instance."""
+    global _mcp_client_service
+    if _mcp_client_service is None:
+        _mcp_client_service = MCPClientService()
+    return _mcp_client_service

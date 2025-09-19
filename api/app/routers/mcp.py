@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.services.mcp_client import mcp_client_service
+from app.services.mcp_client import get_mcp_client_service
 from app.services.mcp_server import mcp_server
 
 logger = logging.getLogger(__name__)
@@ -48,6 +48,8 @@ class MCPResourceRequest(BaseModel):
 async def list_connected_servers():
     """List all connected MCP servers."""
     try:
+        mcp_client_service = get_mcp_client_service()
+        mcp_client_service = get_mcp_client_service()
         servers = mcp_client_service.get_connected_servers()
         return {"servers": servers}
     except Exception as e:
@@ -59,6 +61,8 @@ async def list_connected_servers():
 async def connect_to_server(request: MCPServerConnectRequest):
     """Connect to an MCP server."""
     try:
+        mcp_client_service = get_mcp_client_service()
+        mcp_client_service = get_mcp_client_service()
         success = await mcp_client_service.connect_to_server(request.server_name, request.command)
         if success:
             return {"message": f"Connected to server: {request.server_name}"}
@@ -75,6 +79,8 @@ async def connect_to_server(request: MCPServerConnectRequest):
 async def disconnect_from_server(server_name: str):
     """Disconnect from an MCP server."""
     try:
+        mcp_client_service = get_mcp_client_service()
+        mcp_client_service = get_mcp_client_service()
         success = await mcp_client_service.disconnect_from_server(server_name)
         if success:
             return {"message": f"Disconnected from server: {server_name}"}
@@ -89,6 +95,7 @@ async def disconnect_from_server(server_name: str):
 async def list_tools(server_name: str):
     """List available tools from an MCP server."""
     try:
+        mcp_client_service = get_mcp_client_service()
         tools = await mcp_client_service.list_tools(server_name)
         return {"tools": tools}
     except ValueError as e:
@@ -102,6 +109,7 @@ async def list_tools(server_name: str):
 async def call_tool(request: MCPToolCallRequest):
     """Call a tool on an MCP server."""
     try:
+        mcp_client_service = get_mcp_client_service()
         result = await mcp_client_service.call_tool(
             request.server_name, request.tool_name, request.arguments
         )
@@ -117,6 +125,7 @@ async def call_tool(request: MCPToolCallRequest):
 async def list_prompts(server_name: str):
     """List available prompts from an MCP server."""
     try:
+        mcp_client_service = get_mcp_client_service()
         prompts = await mcp_client_service.list_prompts(server_name)
         return {"prompts": prompts}
     except ValueError as e:
@@ -130,6 +139,7 @@ async def list_prompts(server_name: str):
 async def get_prompt(request: MCPPromptRequest):
     """Get a specific prompt from an MCP server."""
     try:
+        mcp_client_service = get_mcp_client_service()
         result = await mcp_client_service.get_prompt(
             request.server_name, request.prompt_name, request.arguments
         )
@@ -145,6 +155,7 @@ async def get_prompt(request: MCPPromptRequest):
 async def list_resources(server_name: str):
     """List available resources from an MCP server."""
     try:
+        mcp_client_service = get_mcp_client_service()
         resources = await mcp_client_service.list_resources(server_name)
         return {"resources": resources}
     except ValueError as e:
@@ -158,6 +169,7 @@ async def list_resources(server_name: str):
 async def read_resource(request: MCPResourceRequest):
     """Read a specific resource from an MCP server."""
     try:
+        mcp_client_service = get_mcp_client_service()
         result = await mcp_client_service.read_resource(request.server_name, request.uri)
         return result
     except ValueError as e:

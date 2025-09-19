@@ -30,3 +30,15 @@ output "azure_search_service_url" {
   description = "The URL of the Azure AI Search service"
   value       = module.azure_ai_search.search_service_url
 }
+
+# Azure Document Intelligence outputs
+output "azure_document_intelligence_endpoint" {
+  description = "The Azure Document Intelligence service endpoint"
+  value       = module.document_intelligence.endpoint
+  sensitive   = false
+}
+
+output "azure_document_intelligence_host" {
+  description = "The host portion of the Azure Document Intelligence endpoint"
+  value       = module.document_intelligence.host
+}

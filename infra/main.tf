@@ -96,23 +96,46 @@ module "azure_ai_search" {
   depends_on = [azurerm_resource_group.main, module.network, module.monitoring]
 }
 
+# Azure Document Intelligence module
+module "document_intelligence" {
+  source = "./modules/azure-document-intelligence"
+
+  app_name                       = var.app_name
+  app_env                        = var.app_env
+  resource_group_name            = azurerm_resource_group.main.name
+  location                       = var.location
+  common_tags                    = var.common_tags
+  document_intelligence_sku_name = var.document_intelligence_sku_name
+  private_endpoint_subnet_id     = module.network.private_endpoint_subnet_id
+  log_analytics_workspace_id     = module.monitoring.log_analytics_workspace_id
+
+  depends_on = [azurerm_resource_group.main, module.network, module.monitoring]
+}
 
 
 module "frontend" {
   source = "./modules/frontend"
 
-  app_env                         = var.app_env
-  app_name                        = var.app_name
-  app_service_sku_name_frontend   = var.app_service_sku_name_frontend
-  appinsights_connection_string   = module.monitoring.appinsights_connection_string
-  appinsights_instrumentation_key = module.monitoring.appinsights_instrumentation_key
-  common_tags                     = var.common_tags
-  frontend_image                  = var.frontend_image
-  frontend_subnet_id              = module.network.app_service_subnet_id
-  location                        = var.location
-  log_analytics_workspace_id      = module.monitoring.log_analytics_workspace_id
-  repo_name                       = var.repo_name
-  resource_group_name             = azurerm_resource_group.main.name
+  app_env                              = var.app_env
+  app_name                             = var.app_name
+  app_service_sku_name_frontend        = var.app_service_sku_name_frontend
+  appinsights_connection_string        = module.monitoring.appinsights_connection_string
+  appinsights_instrumentation_key      = module.monitoring.appinsights_instrumentation_key
+  common_tags                          = var.common_tags
+  frontend_image                       = var.frontend_image
+  frontend_subnet_id                   = module.network.app_service_subnet_id
+  location                             = var.location
+  log_analytics_workspace_id           = module.monitoring.log_analytics_workspace_id
+  repo_name                            = var.repo_name
+  resource_group_name                  = azurerm_resource_group.main.name
+  azure_cosmos_endpoint                = module.cosmos.cosmosdb_endpoint
+  azure_cosmos_host                    = module.cosmos.cosmosdb_host
+  azure_document_intelligence_endpoint = module.document_intelligence.endpoint
+  azure_document_intelligence_host     = module.document_intelligence.host
+  azure_openai_endpoint                = module.azure_openai.openai_endpoint
+  azure_openai_host                    = module.azure_openai.openai_host
+  azure_search_endpoint                = module.azure_ai_search.search_service_url
+  azure_search_host                    = module.azure_ai_search.search_service_host
 
   depends_on = [module.monitoring, module.network]
 }
@@ -142,6 +165,9 @@ module "backend" {
   image_tag                               = var.image_tag
   azure_openai_embedding_endpoint         = module.azure_openai.openai_endpoint
   azure_openai_llm_endpoint               = module.azure_openai.openai_endpoint
+  # Azure AI Search
+  azure_search_endpoint   = module.azure_ai_search.search_service_url
+  azure_search_index_name = var.azure_search_index_name
   # CosmosDB
   cosmosdb_endpoint       = module.cosmos.cosmosdb_endpoint
   cosmosdb_db_name        = module.cosmos.cosmosdb_sql_database_name
@@ -166,5 +192,62 @@ resource "azurerm_cosmosdb_sql_role_assignment" "cosmosdb_role_assignment_app_se
   depends_on = [
     module.backend,
     module.cosmos
+  ]
+}
+
+# Azure OpenAI role assignments for backend managed identity
+resource "azurerm_role_assignment" "backend_cognitive_services_openai_user" {
+  scope                = module.azure_openai.openai_id
+  role_definition_name = "Cognitive Services OpenAI User"
+  principal_id         = module.backend.backend_managed_identity_principal_id
+
+  depends_on = [
+    module.backend,
+    module.azure_openai
+  ]
+}
+
+resource "azurerm_role_assignment" "backend_cognitive_services_openai_contributor" {
+  scope                = module.azure_openai.openai_id
+  role_definition_name = "Cognitive Services OpenAI Contributor"
+  principal_id         = module.backend.backend_managed_identity_principal_id
+
+  depends_on = [
+    module.backend,
+    module.azure_openai
+  ]
+}
+
+# Azure AI Search role assignments for backend managed identity
+resource "azurerm_role_assignment" "backend_search_index_data_contributor" {
+  scope                = module.azure_ai_search.search_service_id
+  role_definition_name = "Search Index Data Contributor"
+  principal_id         = module.backend.backend_managed_identity_principal_id
+
+  depends_on = [
+    module.backend,
+    module.azure_ai_search
+  ]
+}
+
+resource "azurerm_role_assignment" "backend_search_service_contributor" {
+  scope                = module.azure_ai_search.search_service_id
+  role_definition_name = "Search Service Contributor"
+  principal_id         = module.backend.backend_managed_identity_principal_id
+
+  depends_on = [
+    module.backend,
+    module.azure_ai_search
+  ]
+}
+
+resource "azurerm_role_assignment" "backend_search_index_data_reader" {
+  scope                = module.azure_ai_search.search_service_id
+  role_definition_name = "Search Index Data Reader"
+  principal_id         = module.backend.backend_managed_identity_principal_id
+
+  depends_on = [
+    module.backend,
+    module.azure_ai_search
   ]
 }

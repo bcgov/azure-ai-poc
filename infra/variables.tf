@@ -26,7 +26,7 @@ variable "app_service_sku_name_backend" {
 variable "app_service_sku_name_frontend" {
   description = "SKU name for the frontend App Service Plan"
   type        = string
-  default     = "B1" # Basic tier 
+  default     = "B3" # Basic tier 
 }
 
 variable "azure_openai_deployment_name" {
@@ -39,6 +39,12 @@ variable "azure_openai_embedding_deployment" {
   description = "Azure OpenAI embedding model deployment name"
   type        = string
   default     = "text-embedding-3-large"
+}
+
+variable "azure_search_index_name" {
+  description = "Azure AI Search index name for document storage"
+  type        = string
+  default     = "documents-index"
 }
 
 variable "client_id" {
@@ -149,6 +155,13 @@ variable "openai_embedding_deployment_capacity" {
   description = "Capacity for the embedding model deployment"
   type        = number
   default     = 10
+}
+
+# Azure Document Intelligence Module Variables
+variable "document_intelligence_sku_name" {
+  description = "SKU name for the Azure Document Intelligence service"
+  type        = string
+  default     = "S0"
 }
 
 # Azure AI Search Module Variables

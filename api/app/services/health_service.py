@@ -297,9 +297,7 @@ class HealthCheckService:
                 message=f"Disk check failed: {str(e)}",
             )
 
-    def _calculate_overall_status(
-        self, components: list[ComponentHealth]
-    ) -> HealthStatus:
+    def _calculate_overall_status(self, components: list[ComponentHealth]) -> HealthStatus:
         """Calculate overall system status based on component statuses."""
         if not components:
             return HealthStatus.UNHEALTHY
@@ -318,10 +316,16 @@ class HealthCheckService:
         return HealthStatus.HEALTHY
 
 
-# Global health check service instance
-health_service = HealthCheckService()
+# Global health check service instance removed - use service manager
+
+
+# Global health service instance
+_health_service: HealthCheckService | None = None
 
 
 def get_health_service() -> HealthCheckService:
     """Get the health check service instance."""
-    return health_service
+    global _health_service
+    if _health_service is None:
+        _health_service = HealthCheckService()
+    return _health_service

@@ -1,15 +1,15 @@
-"""
-Document service for processing, storing, and searching documents.
+"""Document processing, storage, and search service.
 
 This service provides comprehensive document management including:
 - PDF, Markdown, and HTML text extraction
 - Text chunking with embeddings
 - Document Q&A with context-aware responses
-- Vector similarity search
+- Vector similarity search (Cosmos DB native + client-side fallback)
 - Cross-document search capabilities
 - Document lifecycle management
 """
 
+import json
 import logging
 import math
 import re
@@ -21,11 +21,10 @@ from typing import Any
 import PyPDF2 as pypdf2
 from bs4 import BeautifulSoup
 from markdownify import markdownify
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.config import settings
-from app.services.azure_openai_service import get_azure_openai_service
-from app.services.cosmos_db_service import VectorSearchOptions, get_cosmos_db_service
+from app.services.azure_search_service import get_azure_search_service, VectorSearchRequest
 
 
 class DocumentChunk(BaseModel):
@@ -47,16 +46,22 @@ class DocumentChunkWithSimilarity(DocumentChunk):
 
 
 class ProcessedDocument(BaseModel):
-    """Processed document metadata model."""
+    """Processed document metadata model.
+
+    Supports legacy camelCase 'chunkIds' via alias for backward compatibility.
+    """
 
     id: str
     filename: str
-    chunk_ids: list[str]
+    chunk_ids: list[str] = Field(default_factory=list, alias="chunkIds")
     uploaded_at: str  # ISO format datetime string
     total_pages: int | None = None
     partition_key: str
     user_id: str | None = None
     type: str = "document"
+
+    class Config:
+        populate_by_name = True  # allow both chunk_ids and chunkIds
 
 
 class UploadedFile(BaseModel):
@@ -103,21 +108,76 @@ class DocumentService:
         """Initialize the document service."""
         self.logger = logging.getLogger(__name__)
         self.settings = settings
-        self.azure_openai_service = get_azure_openai_service()
-        self.cosmos_db_service = get_cosmos_db_service()
 
-        # Validate dependencies
-        if not self.azure_openai_service:
-            self.logger.error("AzureOpenAIService not properly initialized")
-            raise ValueError("AzureOpenAIService is required for DocumentService")
+        self.logger.info("DocumentService initialized with lazy dependency loading")
 
-        if not self.cosmos_db_service:
-            self.logger.error("CosmosDbService not properly initialized")
-            raise ValueError("CosmosDbService is required for DocumentService")
+    @property
+    def azure_openai_service(self):
+        """Get the Azure OpenAI service (lazy loaded)."""
+        from app.services.azure_openai_service import get_azure_openai_service
 
-        self.logger.info(
-            "DocumentService successfully initialized with Azure dependencies"
-        )
+        return get_azure_openai_service()
+
+    @property
+    def azure_search_service(self):
+        """Get Azure AI Search service (lazy loaded)."""
+        return get_azure_search_service()
+
+    async def get_all_documents(self, user_id: str | None = None) -> list[ProcessedDocument]:
+        """Retrieve all processed documents for a user (partition).
+
+        Falls back to the "default" partition when user_id is None.
+        Uses snake_case field names consistent with how Pydantic dumps models.
+        Legacy camelCase "chunkIds" will still be accepted via model alias.
+        """
+        partition_key = user_id or "default"
+
+        try:
+            start_time = time.time()
+            results = self.azure_search_service.list_documents(partition_key)
+            duration_ms = (time.time() - start_time) * 1000
+            self.logger.debug(
+                "Fetched %d documents for partition '%s' via Azure Search in %.2fms",
+                len(results),
+                partition_key,
+                duration_ms,
+            )
+            documents: list[ProcessedDocument] = []
+            for raw in results:
+                try:
+                    # Map Azure Search fields to ProcessedDocument schema
+                    metadata = raw.get("metadataJson")
+                    chunk_ids: list[str] = []
+                    if metadata:
+                        try:
+                            md = json.loads(metadata)
+                            if isinstance(md, dict):
+                                chunk_ids = md.get("chunkIds", []) or md.get("chunk_ids", []) or []
+                        except Exception:
+                            pass
+                    documents.append(
+                        ProcessedDocument(
+                            id=raw["id"],
+                            filename=raw.get("filename", "unknown"),
+                            chunk_ids=chunk_ids,
+                            uploaded_at=raw.get("uploadedAt", ""),
+                            total_pages=None,
+                            partition_key=raw.get("partitionKey", partition_key),
+                            user_id=raw.get("userId"),
+                        )
+                    )
+                except Exception as model_err:  # noqa: BLE001
+                    self.logger.warning(
+                        "Skipping document with invalid shape (id=%s): %s", raw.get("id"), model_err
+                    )
+            return documents
+        except Exception as error:  # noqa: BLE001
+            self.logger.error(
+                "Error querying documents for partition '%s' via Azure Search: %s",
+                partition_key,
+                error,
+            )
+            raise ValueError(f"Failed to retrieve documents: {error}") from error
 
     async def process_document(
         self, file: UploadedFile, user_id: str | None = None
@@ -133,9 +193,7 @@ class DocumentService:
             Processed document metadata
         """
         try:
-            self.logger.info(
-                f"Processing document: {file.filename} ({file.size // 1024}KB)"
-            )
+            self.logger.info(f"Processing document: {file.filename} ({file.size // 1024}KB)")
 
             # File size validation (100MB limit)
             max_file_size_bytes = 100 * 1024 * 1024
@@ -166,17 +224,21 @@ class DocumentService:
             )
 
             if not chunks:
-                raise ValueError(
-                    "Failed to create any chunks from the document content"
-                )
+                raise ValueError("Failed to create any chunks from the document content")
 
-            # Store each chunk separately in Cosmos DB
+            # Store each chunk in Azure Search
             chunk_ids = []
             embedded_chunks = 0
 
             for chunk in chunks:
                 chunk_dict = chunk.model_dump()
-                await self.cosmos_db_service.create_item(chunk_dict, partition_key)
+                # Upload synchronously (Azure Search is sync SDK). Could batch later.
+                try:
+                    self.azure_search_service.upload_chunks([chunk_dict])
+                except Exception as upload_err:  # noqa: BLE001
+                    self.logger.error(
+                        "Failed to upload chunk %s to Azure Search: %s", chunk.id, upload_err
+                    )
                 chunk_ids.append(chunk.id)
                 if chunk.embedding:
                     embedded_chunks += 1
@@ -194,7 +256,15 @@ class DocumentService:
 
             # Store document metadata
             doc_dict = processed_doc.model_dump()
-            await self.cosmos_db_service.create_item(doc_dict, partition_key)
+            try:
+                self.azure_search_service.upload_document_metadata(doc_dict)
+            except Exception as upload_doc_err:  # noqa: BLE001
+                self.logger.error(
+                    "Failed to upload document metadata %s to Azure Search: %s",
+                    document_id,
+                    upload_doc_err,
+                )
+                raise
 
             self.logger.info(
                 f"Successfully processed document: {file.filename} with "
@@ -205,7 +275,7 @@ class DocumentService:
 
         except Exception as error:
             self.logger.error(f"Error processing document: {file.filename} - {error}")
-            raise ValueError(f"Failed to process document: {error}")
+            raise ValueError(f"Failed to process document: {error}") from error
 
     async def _extract_text_from_file(self, file: UploadedFile) -> dict[str, Any]:
         """
@@ -251,7 +321,7 @@ class DocumentService:
                 "total_pages": len(pdf_reader.pages),
             }
         except Exception as error:
-            raise ValueError(f"Failed to extract text from PDF: {error}")
+            raise ValueError(f"Failed to extract text from PDF: {error}") from error
 
     async def _extract_markdown_text(self, content: bytes) -> dict[str, Any]:
         """Extract text from Markdown content."""
@@ -263,7 +333,7 @@ class DocumentService:
 
             return {"text": plain_text, "total_pages": None}
         except Exception as error:
-            raise ValueError(f"Failed to extract text from Markdown: {error}")
+            raise ValueError(f"Failed to extract text from Markdown: {error}") from error
 
     async def _extract_html_text(self, content: bytes) -> dict[str, Any]:
         """Extract text from HTML content."""
@@ -273,7 +343,7 @@ class DocumentService:
 
             return {"text": plain_text, "total_pages": None}
         except Exception as error:
-            raise ValueError(f"Failed to extract text from HTML: {error}")
+            raise ValueError(f"Failed to extract text from HTML: {error}") from error
 
     def _strip_html_tags(self, html: str) -> str:
         """Strip HTML tags and extract clean text content."""
@@ -338,7 +408,8 @@ class DocumentService:
         partition_key = user_id or "default"
 
         # Get document
-        document = await self.cosmos_db_service.get_item(document_id, partition_key)
+        # Retrieve metadata from Azure Search
+        document = self.azure_search_service.get_document(document_id, partition_key)
         if not document:
             raise ValueError("Document not found")
 
@@ -354,32 +425,22 @@ class DocumentService:
                     f"Using Cosmos DB vector search with {len(chunks_with_embeddings)} "
                     f"chunks with embeddings for document: {document['filename']}"
                 )
-                relevant_context = await self._find_relevant_context(
-                    question, chunks, 3
-                )
+                relevant_context = await self._find_relevant_context(question, chunks, 3)
             else:
-                self.logger.info(
-                    "No embeddings available, using all chunks for context"
-                )
-                relevant_context = "\n\n".join(
-                    chunk.get("content", "") for chunk in chunks
-                )
+                self.logger.info("No embeddings available, using all chunks for context")
+                relevant_context = "\n\n".join(chunk.get("content", "") for chunk in chunks)
 
             # Use Azure OpenAI to answer the question
             answer = await self.azure_openai_service.answer_question_with_context(
                 question, relevant_context
             )
 
-            self.logger.info(
-                f"Successfully answered question for document: {document['filename']}"
-            )
+            self.logger.info(f"Successfully answered question for document: {document['filename']}")
             return answer
 
         except Exception as error:
-            self.logger.error(
-                f"Error answering question for document {document_id}: {error}"
-            )
-            raise ValueError(f"Failed to answer question: {error}")
+            self.logger.error(f"Error answering question for document {document_id}: {error}")
+            raise ValueError(f"Failed to answer question: {error}") from error
 
     async def answer_question_streaming(
         self, document_id: str, question: str, user_id: str | None = None
@@ -398,7 +459,7 @@ class DocumentService:
         partition_key = user_id or "default"
 
         # Get document
-        document = await self.cosmos_db_service.get_item(document_id, partition_key)
+        document = self.azure_search_service.get_document(document_id, partition_key)
         if not document:
             raise ValueError("Document not found")
 
@@ -414,34 +475,22 @@ class DocumentService:
                     f"Using Cosmos DB vector search with {len(chunks_with_embeddings)} "
                     f"chunks with embeddings for document: {document['filename']}"
                 )
-                relevant_context = await self._find_relevant_context(
-                    question, chunks, 3
-                )
+                relevant_context = await self._find_relevant_context(question, chunks, 3)
             else:
-                self.logger.info(
-                    "No embeddings available, using all chunks for context"
-                )
-                relevant_context = "\n\n".join(
-                    chunk.get("content", "") for chunk in chunks
-                )
+                self.logger.info("No embeddings available, using all chunks for context")
+                relevant_context = "\n\n".join(chunk.get("content", "") for chunk in chunks)
 
             # Use Azure OpenAI streaming to answer the question
-            async for (
-                chunk
-            ) in self.azure_openai_service.answer_question_with_context_streaming(
+            async for chunk in self.azure_openai_service.answer_question_with_context_streaming(
                 question, relevant_context
             ):
                 yield chunk
 
-            self.logger.info(
-                f"Successfully streamed answer for document: {document['filename']}"
-            )
+            self.logger.info(f"Successfully streamed answer for document: {document['filename']}")
 
         except Exception as error:
-            self.logger.error(
-                f"Error streaming answer for document {document_id}: {error}"
-            )
-            raise ValueError(f"Failed to stream answer: {error}")
+            self.logger.error(f"Error streaming answer for document {document_id}: {error}")
+            raise ValueError(f"Failed to stream answer: {error}") from error
 
     async def _get_document_chunks(
         self, document_id: str, partition_key: str
@@ -456,36 +505,34 @@ class DocumentService:
         Returns:
             List of document chunks
         """
-        query_spec = {
-            "query": """
-                SELECT c.id, c.documentId, c.content, c.embedding, c.metadata,
-                       c.partitionKey, c.type
-                FROM c
-                WHERE c.documentId = @documentId
-                AND c.partitionKey = @partitionKey
-                AND c.type = @type
-                ORDER BY c.metadata.chunkIndex ASC
-            """,
-            "parameters": [
-                {"name": "@documentId", "value": document_id},
-                {"name": "@partitionKey", "value": partition_key},
-                {"name": "@type", "value": "chunk"},
-            ],
-        }
-
         start_time = time.time()
-        from app.services.cosmos_db_service import QueryOptions
-
-        results = await self.cosmos_db_service.query_items(
-            query_spec, QueryOptions(partition_key=partition_key, max_item_count=500)
-        )
-
+        results = self.azure_search_service.list_chunks(document_id, partition_key)
         query_time = (time.time() - start_time) * 1000
         self.logger.debug(
-            f"Retrieved {len(results)} chunks for document {document_id} in {query_time:.2f}ms"
+            "Retrieved %d chunks for document %s from Azure Search in %.2fms",
+            len(results),
+            document_id,
+            query_time,
         )
-
-        return results
+        # Normalize field names to expected keys for downstream logic
+        normalized: list[dict[str, Any]] = []
+        for r in results:
+            normalized.append(
+                {
+                    "id": r["id"],
+                    "documentId": r.get("documentId"),
+                    "content": r.get("content", ""),
+                    "embedding": r.get("embedding"),
+                    "metadata": {
+                        "filename": r.get("filename"),
+                        "uploadedAt": r.get("uploadedAt"),
+                        "chunkIndex": r.get("chunkIndex", -1),
+                    },
+                    "partitionKey": r.get("partitionKey", partition_key),
+                    "type": "chunk",
+                }
+            )
+        return normalized
 
     async def _find_relevant_context(
         self, question: str, chunks: list[dict[str, Any]], top_k: int = 3
@@ -503,55 +550,43 @@ class DocumentService:
         """
         try:
             # Generate embedding for the question
-            question_embedding = await self.azure_openai_service.generate_embeddings(
-                question
-            )
+            question_embedding = await self.azure_openai_service.generate_embeddings(question)
 
             # Check if we have chunks with embeddings
             chunks_with_embeddings = [c for c in chunks if c.get("embedding")]
 
             if not chunks_with_embeddings:
-                self.logger.warning(
-                    "No chunks with embeddings found for semantic search"
-                )
+                self.logger.warning("No chunks with embeddings found for semantic search")
                 return "\n\n".join(chunk.get("content", "") for chunk in chunks[:top_k])
 
-            # Try Cosmos DB vector search first
+            # Try Azure AI Search vector search first
             try:
-                partition_key = chunks[0].get("partitionKey") if chunks else None
-                document_id = chunks[0].get("documentId") if chunks else None
-
-                if partition_key and document_id:
+                pk = chunks[0].get("partitionKey") if chunks else None
+                doc_id = chunks[0].get("documentId") if chunks else None
+                if pk and doc_id:
                     self.logger.info(
-                        f"Performing Cosmos DB vector search for {len(chunks_with_embeddings)} "
-                        f"chunks with embeddings"
+                        "Performing Azure AI Search vector search over %d embedded chunks",
+                        len(chunks_with_embeddings),
                     )
-
-                    vector_results = await self.cosmos_db_service.vector_search(
-                        question_embedding,
-                        VectorSearchOptions(
-                            partition_key=partition_key,
-                            document_id=document_id,
+                    vector_results = self.azure_search_service.vector_search(
+                        VectorSearchRequest(
+                            embedding=question_embedding,
                             top_k=top_k,
-                            min_similarity=0.1,
-                        ),
+                            partition_key=pk,
+                            document_id=doc_id,
+                        )
                     )
-
                     if vector_results:
                         self.logger.info(
-                            f"Cosmos DB vector search found {len(vector_results)} relevant chunks"
+                            "Azure AI Search vector search returned %d results",
+                            len(vector_results),
                         )
-                        return "\n\n".join(
-                            result.get("content", "") for result in vector_results
-                        )
-                    else:
-                        self.logger.warning(
-                            "Cosmos DB vector search returned no results"
-                        )
-
-            except Exception as vector_search_error:
+                        return "\n\n".join(r.get("content", "") for r in vector_results)
+                    self.logger.warning("Azure AI Search vector search returned no results")
+            except Exception as vector_search_error:  # noqa: BLE001
                 self.logger.warning(
-                    f"Cosmos DB vector search failed: {vector_search_error}"
+                    "Azure AI Search vector search failed: %s - fallback to client similarity",
+                    vector_search_error,
                 )
 
             # Fallback to client-side cosine similarity
@@ -560,18 +595,14 @@ class DocumentService:
             similarities = []
             for chunk in chunks_with_embeddings:
                 if chunk.get("embedding"):
-                    similarity = self._cosine_similarity(
-                        question_embedding, chunk["embedding"]
-                    )
+                    similarity = self._cosine_similarity(question_embedding, chunk["embedding"])
                     similarities.append({"chunk": chunk, "similarity": similarity})
 
             # Sort by similarity and get top k
             similarities.sort(key=lambda x: x["similarity"], reverse=True)
             top_chunks = similarities[:top_k]
 
-            self.logger.info(
-                f"Client-side search found {len(top_chunks)} relevant chunks"
-            )
+            self.logger.info(f"Client-side search found {len(top_chunks)} relevant chunks")
 
             return "\n\n".join(item["chunk"].get("content", "") for item in top_chunks)
 
@@ -608,67 +639,29 @@ class DocumentService:
             Document or None if not found
         """
         partition_key = user_id or "default"
-        result = await self.cosmos_db_service.get_item(document_id, partition_key)
+        result = self.azure_search_service.get_document(document_id, partition_key)
+        if not result:
+            return None
+        metadata = result.get("metadataJson")
+        chunk_ids: list[str] = []
+        if metadata:
+            try:
+                md = json.loads(metadata)
+                if isinstance(md, dict):
+                    chunk_ids = md.get("chunkIds", []) or md.get("chunk_ids", []) or []
+            except Exception:  # noqa: BLE001
+                pass
+        return ProcessedDocument(
+            id=result["id"],
+            filename=result.get("filename", "unknown"),
+            chunk_ids=chunk_ids,
+            uploaded_at=result.get("uploadedAt", ""),
+            total_pages=None,
+            partition_key=result.get("partitionKey", partition_key),
+            user_id=result.get("userId"),
+        )
 
-        if result:
-            return ProcessedDocument(**result)
-        return None
-
-    async def get_all_documents(
-        self, user_id: str | None = None
-    ) -> list[ProcessedDocument]:
-        """
-        Get all documents for a user.
-
-        Args:
-            user_id: Optional user ID
-
-        Returns:
-            List of documents
-        """
-        partition_key = user_id or "default"
-
-        query_spec = {
-            "query": """
-                SELECT c.id, c.filename, c.chunkIds, c.uploadedAt, c.totalPages,
-                       c.partitionKey, c.userId, c.type
-                FROM c
-                WHERE c.partitionKey = @partitionKey
-                AND c.type = @type
-                ORDER BY c.uploadedAt DESC
-            """,
-            "parameters": [
-                {"name": "@partitionKey", "value": partition_key},
-                {"name": "@type", "value": "document"},
-            ],
-        }
-
-        try:
-            start_time = time.time()
-            from app.services.cosmos_db_service import QueryOptions
-
-            results = await self.cosmos_db_service.query_items(
-                query_spec,
-                QueryOptions(partition_key=partition_key, max_item_count=1000),
-            )
-
-            query_time = (time.time() - start_time) * 1000
-            self.logger.info(
-                f"Document query completed in {query_time:.2f}ms for partition: "
-                f"{partition_key}, found {len(results)} documents"
-            )
-
-            return [ProcessedDocument(**doc) for doc in results]
-
-        except Exception as error:
-            self.logger.error(
-                f"Error retrieving documents for partition: {partition_key} - {error}"
-            )
-            raise
-
-    async def delete_document(
-        self, document_id: str, user_id: str | None = None
-    ) -> bool:
+    async def delete_document(self, document_id: str, user_id: str | None = None) -> bool:
         """
         Delete a document and all its chunks.
 
@@ -682,17 +675,10 @@ class DocumentService:
         try:
             partition_key = user_id or "default"
 
-            # First, delete all chunks associated with this document
-            chunks = await self._get_document_chunks(document_id, partition_key)
-
-            for chunk in chunks:
-                await self.cosmos_db_service.delete_item(chunk["id"], partition_key)
-
-            # Then delete the document metadata
-            await self.cosmos_db_service.delete_item(document_id, partition_key)
-
+            # Azure Search: delete doc + chunks
+            self.azure_search_service.delete_document_and_chunks(document_id, partition_key)
             self.logger.info(
-                f"Deleted document {document_id} and {len(chunks)} associated chunks"
+                "Deleted document %s and associated chunks from Azure Search", document_id
             )
             return True
 
@@ -709,9 +695,7 @@ class DocumentService:
         import time
 
         timestamp = int(time.time() * 1000)
-        random_str = "".join(
-            random.choices(string.ascii_lowercase + string.digits, k=10)
-        )
+        random_str = "".join(random.choices(string.ascii_lowercase + string.digits, k=10))
         clean_filename = re.sub(r"[^a-zA-Z0-9]", "_", filename)
 
         return f"{clean_filename}_{timestamp}_{random_str}"
@@ -745,9 +729,7 @@ class DocumentService:
         # If only one paragraph, try sentence splitting
         if len(paragraphs) == 1 and len(text) > max_chunk_size:
             paragraphs = re.split(r"(?<=[.!?])\s+", text)
-            self.logger.info(
-                f"Split text into {len(paragraphs)} sentences for better chunking"
-            )
+            self.logger.info(f"Split text into {len(paragraphs)} sentences for better chunking")
 
         # If still one large block, force split by words
         if len(paragraphs) == 1 and len(text) > max_chunk_size:
@@ -756,10 +738,7 @@ class DocumentService:
             current_paragraph = ""
 
             for word in words:
-                if (
-                    len(current_paragraph) + len(word) + 1 > max_chunk_size
-                    and current_paragraph
-                ):
+                if len(current_paragraph) + len(word) + 1 > max_chunk_size and current_paragraph:
                     paragraphs.append(current_paragraph.strip())
                     current_paragraph = word
                 else:
@@ -768,9 +747,7 @@ class DocumentService:
             if current_paragraph.strip():
                 paragraphs.append(current_paragraph.strip())
 
-            self.logger.info(
-                f"Force split large text into {len(paragraphs)} word-based chunks"
-            )
+            self.logger.info(f"Force split large text into {len(paragraphs)} word-based chunks")
 
         current_chunk = ""
         chunk_index = 0
@@ -778,9 +755,7 @@ class DocumentService:
         self.logger.info(f"Processing {len(paragraphs)} text segments for chunking")
 
         for i, paragraph in enumerate(paragraphs):
-            potential_chunk_size = (
-                len(current_chunk) + len(paragraph) + (2 if current_chunk else 0)
-            )
+            potential_chunk_size = len(current_chunk) + len(paragraph) + (2 if current_chunk else 0)
 
             if potential_chunk_size > max_chunk_size and current_chunk:
                 # Save current chunk
@@ -847,8 +822,7 @@ class DocumentService:
         try:
             embedding = await self.azure_openai_service.generate_embeddings(content)
             self.logger.debug(
-                f"Generated embeddings for chunk {chunk_index}: "
-                f"{len(embedding)} dimensions"
+                f"Generated embeddings for chunk {chunk_index}: {len(embedding)} dimensions"
             )
 
             # Validate embedding dimensions for text-embedding-3-large
@@ -859,9 +833,7 @@ class DocumentService:
                 )
 
         except Exception as error:
-            self.logger.warning(
-                f"Failed to generate embeddings for chunk {chunk_index}: {error}"
-            )
+            self.logger.warning(f"Failed to generate embeddings for chunk {chunk_index}: {error}")
 
         # Create chunk
         chunk = DocumentChunk(
@@ -885,15 +857,13 @@ class DocumentService:
         return chunk
 
 
-# Global instance
+# Global service instance
 _document_service: DocumentService | None = None
 
 
 def get_document_service() -> DocumentService:
     """Get the global document service instance."""
     global _document_service
-
     if _document_service is None:
         _document_service = DocumentService()
-
     return _document_service

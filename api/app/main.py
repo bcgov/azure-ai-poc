@@ -11,28 +11,63 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from app.core.config import settings
-from app.core.logger import setup_logging
+from app.core.logger import get_logger, setup_logging
 from app.core.telemetry import instrument_fastapi_app, setup_telemetry
 from app.middleware.logging_middleware import LoggingMiddleware
 from app.middleware.metrics_middleware import MetricsMiddleware
 from app.middleware.rate_limit_middleware import limiter
 from app.middleware.security_middleware import SecurityMiddleware
 from app.routers import api_router
+from app.services.azure_openai_service import get_azure_openai_service
+from app.services.cosmos_db_service import get_cosmos_db_service
+from app.services.azure_search_service import get_azure_search_service
+
+logger = get_logger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan events."""
     # Startup
+    logger.info("Starting application initialization...")
     setup_logging()
     setup_telemetry()
 
-    # Add any startup tasks here (database connections, etc.)
+    try:
+        # Initialize Azure OpenAI service
+        logger.info("Initializing Azure OpenAI service...")
+        azure_openai_service = get_azure_openai_service()
+        await azure_openai_service.initialize_clients()
+
+        # Initialize Cosmos DB service
+        logger.info("Initializing Cosmos DB service...")
+        cosmos_db_service = get_cosmos_db_service()
+        await cosmos_db_service.health_check()
+        # initializing Azure AI Search service
+        get_azure_search_service()
+        logger.info("All services initialized successfully")
+
+    except Exception as e:
+        logger.error("Failed to initialize services", error=str(e))
+        raise
 
     yield
 
     # Shutdown
-    # Add any cleanup tasks here
+    logger.info("Starting application shutdown...")
+    try:
+        # Get services and cleanup if needed
+        cosmos_db_service = get_cosmos_db_service()
+        if hasattr(cosmos_db_service, "cleanup"):
+            await cosmos_db_service.cleanup()
+
+        azure_openai_service = get_azure_openai_service()
+        if hasattr(azure_openai_service, "cleanup"):
+            await azure_openai_service.cleanup()
+
+        logger.info("Application shutdown completed")
+    except Exception as e:
+        logger.error("Error during shutdown", error=str(e))
 
 
 def create_app() -> FastAPI:
@@ -95,6 +130,13 @@ def create_app() -> FastAPI:
 
     # Include all routers with API prefix and versioning
     app.include_router(api_router, prefix="/api/v1")
+
+    # Backward compatibility: redirect legacy /docs to /api/docs if tests/reference expect it
+    from fastapi.responses import RedirectResponse
+
+    @app.get("/docs", include_in_schema=False)
+    async def legacy_docs_redirect():  # pragma: no cover - simple redirect
+        return RedirectResponse(url="/api/docs")
 
     return app
 
