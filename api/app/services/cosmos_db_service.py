@@ -75,17 +75,27 @@ class CosmosDbService:
                 raise ValueError("Cosmos DB configuration is incomplete")
 
         try:
+            # Connection configuration for better performance
+            # Using direct parameters instead of connection_policy dict
+            connection_timeout = 30  # 30 second timeout
+
             # Use managed identity for production, key for local development
             if self.settings.ENVIRONMENT == "local" and self.settings.COSMOS_DB_KEY:
                 self.client = CosmosClient(
                     url=endpoint,
                     credential=self.settings.COSMOS_DB_KEY,
                     enable_endpoint_discovery=False,
+                    connection_timeout=connection_timeout,
                 )
                 self.logger.info("Cosmos DB client initialized with key authentication")
             else:
                 credential = DefaultAzureCredential()
-                self.client = CosmosClient(url=endpoint, credential=credential)
+                self.client = CosmosClient(
+                    url=endpoint,
+                    credential=credential,
+                    enable_endpoint_discovery=True,
+                    connection_timeout=connection_timeout,
+                )
                 self.logger.info("Cosmos DB client initialized with managed identity")
 
             self.database = self.client.get_database_client(database_name)

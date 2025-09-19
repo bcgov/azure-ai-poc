@@ -94,6 +94,16 @@ SECURITY INSTRUCTIONS:
             logger.error("Failed to initialize Azure OpenAI clients", error=str(e))
             raise
 
+    async def cleanup(self) -> None:
+        """Clean up resources when shutting down."""
+        # Azure OpenAI clients don't require explicit cleanup
+        # but we can set them to None to help with garbage collection
+        if self.chat_client:
+            self.chat_client = None
+        if self.embedding_client:
+            self.embedding_client = None
+        logger.info("Azure OpenAI service cleanup completed")
+
     def validate_user_input(self, input_text: str) -> str:
         """Validate and sanitize user input to prevent prompt injection."""
         # Remove potentially harmful instruction patterns
@@ -228,7 +238,7 @@ SECURITY INSTRUCTIONS:
             await self.initialize_clients()
 
         try:
-            response = await self.embedding_client.embeddings.create(
+            response = self.embedding_client.embeddings.create(
                 model=self.embedding_deployment_name,
                 input=text,
             )
@@ -241,6 +251,63 @@ SECURITY INSTRUCTIONS:
         except Exception as e:
             logger.error("Error generating embeddings", error=str(e))
             raise RuntimeError(f"Failed to generate embeddings: {str(e)}") from e
+
+    async def generate_embeddings_batch(
+        self, texts: list[str], batch_size: int = 2048
+    ) -> list[list[float]]:
+        """
+        Generate embeddings for multiple texts in batches.
+
+        Args:
+            texts: List of texts to generate embeddings for
+            batch_size: Maximum number of texts per batch (Azure OpenAI limit is 2048)
+
+        Returns:
+            List of embeddings in the same order as input texts
+        """
+        if not self.embedding_client:
+            await self.initialize_clients()
+
+        if not texts:
+            return []
+
+        all_embeddings = []
+
+        try:
+            # Process texts in batches
+            for i in range(0, len(texts), batch_size):
+                batch_texts = texts[i : i + batch_size]
+
+                logger.info(
+                    f"Generating embeddings for batch {i // batch_size + 1} "
+                    f"({len(batch_texts)} texts)"
+                )
+
+                response = self.embedding_client.embeddings.create(
+                    model=self.embedding_deployment_name,
+                    input=batch_texts,
+                )
+
+                if not response.data or len(response.data) != len(batch_texts):
+                    raise RuntimeError(
+                        f"Expected {len(batch_texts)} embeddings, "
+                        f"got {len(response.data) if response.data else 0}"
+                    )
+
+                # Extract embeddings in the correct order
+                batch_embeddings = [item.embedding for item in response.data]
+                all_embeddings.extend(batch_embeddings)
+
+            logger.info(
+                f"Successfully generated {len(all_embeddings)} embeddings in "
+                f"{(len(texts) + batch_size - 1) // batch_size} batch(es)"
+            )
+
+            return all_embeddings
+
+        except Exception as e:
+            logger.error("Error generating batch embeddings", error=str(e))
+            raise RuntimeError(f"Failed to generate batch embeddings: {str(e)}") from e
 
     async def answer_question_with_context(self, question: str, document_context: str) -> str:
         """Answer a question using provided document context."""
