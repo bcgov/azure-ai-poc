@@ -49,7 +49,7 @@ variable "gpt_deployment_name" {
 variable "gpt_deployment_capacity" {
   description = "Capacity for the GPT model deployment"
   type        = number
-  default     = 10000
+  nullable    = false
 }
 
 variable "embedding_deployment_name" {
@@ -61,5 +61,5 @@ variable "embedding_deployment_name" {
 variable "embedding_deployment_capacity" {
   description = "Capacity for the embedding model deployment"
   type        = number
-  default     = 10000
+  nullable    = false
 }

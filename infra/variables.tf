@@ -148,13 +148,13 @@ variable "openai_sku_name" {
 variable "openai_gpt_deployment_capacity" {
   description = "Capacity for the GPT model deployment"
   type        = number
-  default     = 10
+  default     = 10000
 }
 
 variable "openai_embedding_deployment_capacity" {
   description = "Capacity for the embedding model deployment"
   type        = number
-  default     = 10
+  default     = 10000
 }
 
 # Azure Document Intelligence Module Variables
