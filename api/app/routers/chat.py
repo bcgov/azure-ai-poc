@@ -66,7 +66,7 @@ router = APIRouter(tags=["chat"])
 async def ask_question(
     chat_question: ChatQuestionDto,
     current_user: Annotated[KeycloakUser, RequireAuth],
-    _: Annotated[None, Depends(require_roles(["azure-ai-poc-super-admin", "ai-poc-participant"]))],
+    _: Annotated[None, Depends(require_roles("azure-ai-poc-super-admin", "ai-poc-participant"))],
     azure_openai_service=Depends(get_azure_openai_service),
 ) -> ChatResponseDto:
     """Ask a general question to the AI chat assistant."""
@@ -104,7 +104,7 @@ async def ask_question(
 async def ask_question_stream(
     chat_question: ChatQuestionDto,
     current_user: Annotated[KeycloakUser, RequireAuth],
-    _: Annotated[None, Depends(require_roles(["azure-ai-poc-super-admin", "ai-poc-participant"]))],
+    _: Annotated[None, Depends(require_roles("azure-ai-poc-super-admin", "ai-poc-participant"))],
     azure_openai_service=Depends(get_azure_openai_service),
 ) -> StreamingResponse:
     """Ask a question with streaming response."""
@@ -120,7 +120,7 @@ async def ask_question_stream(
             yield f"data: {start_data}\n\n"
 
             # Stream the response
-            async for chunk in azure_openai_service.chat_completion_streaming(
+            async for chunk in azure_openai_service.generate_streaming_response(
                 chat_question.question
             ):
                 if chunk:

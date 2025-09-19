@@ -100,7 +100,7 @@ async def upload_document(
     file: UploadFile = File(..., description="Document file to upload (max 100MB)"),
     current_user: Annotated[KeycloakUser, RequireAuth] = None,
     _: Annotated[
-        None, Depends(require_roles(["azure-ai-poc-super-admin", "ai-poc-participant"]))
+        None, Depends(require_roles("azure-ai-poc-super-admin", "ai-poc-participant"))
     ] = None,
     document_service=Depends(get_document_service),
 ) -> DocumentResponseDto:
@@ -191,34 +191,61 @@ async def upload_document(
 )
 async def get_documents(
     current_user: Annotated[KeycloakUser, RequireAuth],
-    _: Annotated[None, Depends(require_roles(["azure-ai-poc-super-admin", "ai-poc-participant"]))],
+    _: Annotated[None, Depends(require_roles("azure-ai-poc-super-admin", "ai-poc-participant"))],
     document_service=Depends(get_document_service),
 ) -> list[DocumentResponseDto]:
     """Get all documents for the current user."""
-    try:
-        paginated_result = await document_service.get_all_documents(user_id=current_user.sub)
+    import traceback
 
-        # Convert ProcessedDocument objects to DocumentResponseDto
-        documents = []
-        for doc in paginated_result.documents:
-            documents.append(
-                DocumentResponseDto(
-                    id=doc.id,
-                    filename=doc.filename,
-                    user_id=doc.user_id,
-                    total_chunks=len(doc.chunk_ids),
-                    total_pages=doc.total_pages,
-                    uploaded_at=doc.uploaded_at,
-                )
+    request_user = getattr(current_user, "sub", None)
+    logging.debug("[get_documents] Start - user_sub=%s", request_user)
+    try:
+        documents = await document_service.get_all_documents(user_id=request_user)
+        logging.debug(
+            "[get_documents] Retrieved %d documents for user_sub=%s", len(documents), request_user
+        )
+        if documents:
+            first = documents[0]
+            # Safely log a subset of first doc fields (avoid large logs)
+            logging.debug(
+                "[get_documents] First doc sample: id=%s filename=%s chunk_ids=%d uploaded_at=%s",
+                getattr(first, "id", None),
+                getattr(first, "filename", None),
+                len(getattr(first, "chunk_ids", []) or []),
+                getattr(first, "uploaded_at", None),
             )
 
-        return documents
-
-    except Exception as error:
-        logging.error(f"Error retrieving documents: {error}")
+        response = [
+            DocumentResponseDto(
+                id=doc.id,
+                filename=doc.filename,
+                user_id=doc.user_id,
+                total_chunks=len(getattr(doc, "chunk_ids", []) or []),
+                total_pages=doc.total_pages,
+                uploaded_at=doc.uploaded_at,
+            )
+            for doc in documents
+        ]
+        logging.debug(
+            "[get_documents] Serialized %d documents for response (user_sub=%s)",
+            len(response),
+            request_user,
+        )
+        return response
+    except HTTPException:
+        # Re-raise untouched
+        raise
+    except Exception as error:  # noqa: BLE001
+        tb = traceback.format_exc(limit=20)
+        logging.error(
+            "[get_documents] Unhandled error user_sub=%s error=%r traceback=%s",
+            request_user,
+            error,
+            tb,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve documents: {str(error)}",
+            detail="Failed to retrieve documents",
         ) from error
 
 
@@ -250,7 +277,7 @@ async def get_documents(
 async def ask_question(
     question_dto: QuestionDto,
     current_user: Annotated[KeycloakUser, RequireAuth],
-    _: Annotated[None, Depends(require_roles(["azure-ai-poc-super-admin", "ai-poc-participant"]))],
+    _: Annotated[None, Depends(require_roles("azure-ai-poc-super-admin", "ai-poc-participant"))],
     document_service=Depends(get_document_service),
 ) -> AnswerDto:
     """Ask a question about a specific document."""
@@ -308,7 +335,7 @@ async def ask_question(
 async def ask_question_stream(
     question_dto: QuestionDto,
     current_user: Annotated[KeycloakUser, RequireAuth],
-    _: Annotated[None, Depends(require_roles(["azure-ai-poc-super-admin", "ai-poc-participant"]))],
+    _: Annotated[None, Depends(require_roles("azure-ai-poc-super-admin", "ai-poc-participant"))],
     document_service=Depends(get_document_service),
 ) -> StreamingResponse:
     """Ask a question about a document with streaming response."""
@@ -373,63 +400,6 @@ async def ask_question_stream(
 
 
 @router.get(
-    "/",
-    summary="List user's documents",
-    description="Get a list of all documents uploaded by the current user",
-    response_model=list[DocumentResponseDto],
-    responses={
-        200: {
-            "description": "Documents retrieved successfully",
-            "content": {
-                "application/json": {
-                    "example": [
-                        {
-                            "id": "doc_123456",
-                            "filename": "example.pdf",
-                            "user_id": "user123",
-                            "total_chunks": 15,
-                            "total_pages": 10,
-                            "uploaded_at": "2024-01-15T10:30:00Z",
-                        }
-                    ]
-                }
-            },
-        },
-        401: {"description": "Unauthorized - Invalid or missing JWT token"},
-        403: {"description": "Forbidden - Insufficient permissions"},
-    },
-)
-async def list_documents(
-    current_user: Annotated[KeycloakUser, RequireAuth],
-    _: Annotated[None, Depends(require_roles(["azure-ai-poc-super-admin", "ai-poc-participant"]))],
-    document_service=Depends(get_document_service),
-) -> list[DocumentResponseDto]:
-    """List all documents for the current user."""
-
-    try:
-        documents = await document_service.get_all_documents(current_user.sub)
-
-        return [
-            DocumentResponseDto(
-                id=doc.id,
-                filename=doc.filename,
-                user_id=doc.user_id,
-                total_chunks=len(doc.chunk_ids),
-                total_pages=doc.total_pages,
-                uploaded_at=doc.uploaded_at,
-            )
-            for doc in documents
-        ]
-
-    except Exception as error:
-        logging.error(f"Error listing documents: {error}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve documents: {str(error)}",
-        ) from error
-
-
-@router.get(
     "/{document_id}",
     summary="Get document details",
     description="Get details of a specific document",
@@ -444,7 +414,7 @@ async def list_documents(
 async def get_document(
     document_id: str,
     current_user: Annotated[KeycloakUser, RequireAuth],
-    _: Annotated[None, Depends(require_roles(["azure-ai-poc-super-admin", "ai-poc-participant"]))],
+    _: Annotated[None, Depends(require_roles("azure-ai-poc-super-admin", "ai-poc-participant"))],
     document_service=Depends(get_document_service),
 ) -> DocumentResponseDto:
     """Get details of a specific document."""
@@ -489,7 +459,7 @@ async def get_document(
 async def delete_document(
     document_id: str,
     current_user: Annotated[KeycloakUser, RequireAuth],
-    _: Annotated[None, Depends(require_roles(["azure-ai-poc-super-admin", "ai-poc-participant"]))],
+    _: Annotated[None, Depends(require_roles("azure-ai-poc-super-admin", "ai-poc-participant"))],
     document_service=Depends(get_document_service),
 ) -> None:
     """Delete a document and all its chunks."""

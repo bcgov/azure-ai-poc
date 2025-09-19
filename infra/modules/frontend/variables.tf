@@ -79,3 +79,50 @@ variable "app_service_sku_name_frontend" {
   type        = string
   nullable    = false
 }
+variable "azure_cosmos_endpoint" {
+  description = "The Azure Cosmos DB endpoint URL."
+  type        = string
+  nullable    = false
+}
+
+variable "azure_cosmos_host" {
+  description = "The Azure Cosmos DB host."
+  type        = string
+  nullable    = false
+}
+
+variable "azure_document_intelligence_endpoint" {
+  description = "The Azure Document Intelligence endpoint URL."
+  type        = string
+  nullable    = false
+}
+
+variable "azure_document_intelligence_host" {
+  description = "The Azure Document Intelligence host."
+  type        = string
+  nullable    = false
+}
+
+variable "azure_openai_endpoint" {
+  description = "The Azure OpenAI endpoint URL."
+  type        = string
+  nullable    = false
+}
+
+variable "azure_openai_host" {
+  description = "The Azure OpenAI host."
+  type        = string
+  nullable    = false
+}
+
+variable "azure_search_endpoint" {
+  description = "The Azure Search endpoint URL."
+  type        = string
+  nullable    = false
+}
+
+variable "azure_search_host" {
+  description = "The Azure Search host."
+  type        = string
+  nullable    = false
+}

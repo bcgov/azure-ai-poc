@@ -12,7 +12,10 @@ output "search_service_url" {
   description = "The URL of the Azure AI Search service"
   value       = "https://${azurerm_search_service.main.name}.search.windows.net"
 }
-
+output "search_service_host" {
+  description = "The host for the Azure AI Search service"
+  value       = "${azurerm_search_service.main.name}.search.windows.net"
+}
 output "search_service_primary_key" {
   description = "The primary admin key for the Azure AI Search service"
   value       = azurerm_search_service.main.primary_key

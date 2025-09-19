@@ -10,7 +10,11 @@ output "account_id" {
 
 output "cosmosdb_endpoint" {
   description = "The endpoint of the Cosmos DB account."
-  value       = azurerm_cosmosdb_account.cosmosdb_sql.endpoint
+  value       = trimsuffix(azurerm_cosmosdb_account.cosmosdb_sql.endpoint, "/")
+}
+output "cosmosdb_host" {
+  description = "The host for the Cosmos DB account."
+  value       = trimsuffix(replace(azurerm_cosmosdb_account.cosmosdb_sql.endpoint, "https://", ""), "/")
 }
 output "cosmosdb_sql_database_name" {
   description = "The name of the Cosmos DB SQL database."

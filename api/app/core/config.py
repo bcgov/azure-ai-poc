@@ -35,13 +35,9 @@ class Settings(BaseSettings):
 
     # Azure OpenAI Configuration
     AZURE_OPENAI_LLM_ENDPOINT: str = Field(alias="AZURE_OPENAI_LLM_ENDPOINT")
-    AZURE_OPENAI_EMBEDDING_ENDPOINT: str = Field(
-        alias="AZURE_OPENAI_EMBEDDING_ENDPOINT"
-    )
+    AZURE_OPENAI_EMBEDDING_ENDPOINT: str = Field(alias="AZURE_OPENAI_EMBEDDING_ENDPOINT")
     AZURE_OPENAI_API_KEY: str | None = Field(default=None, alias="AZURE_OPENAI_API_KEY")
-    AZURE_OPENAI_LLM_DEPLOYMENT_NAME: str = Field(
-        alias="AZURE_OPENAI_LLM_DEPLOYMENT_NAME"
-    )
+    AZURE_OPENAI_LLM_DEPLOYMENT_NAME: str = Field(alias="AZURE_OPENAI_LLM_DEPLOYMENT_NAME")
     AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME: str = Field(
         alias="AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME"
     )
@@ -49,12 +45,13 @@ class Settings(BaseSettings):
     # Cosmos DB Configuration
     COSMOS_DB_ENDPOINT: str = Field(alias="COSMOS_DB_ENDPOINT")
     COSMOS_DB_KEY: str | None = Field(default=None, alias="COSMOS_DB_KEY")
-    COSMOS_DB_DATABASE_NAME: str = Field(
-        default="azure-ai-poc", alias="COSMOS_DB_DATABASE_NAME"
-    )
-    COSMOS_DB_CONTAINER_NAME: str = Field(
-        default="documents", alias="COSMOS_DB_CONTAINER_NAME"
-    )
+    COSMOS_DB_DATABASE_NAME: str = Field(default="azure-ai-poc", alias="COSMOS_DB_DATABASE_NAME")
+    COSMOS_DB_CONTAINER_NAME: str = Field(default="documents", alias="COSMOS_DB_CONTAINER_NAME")
+
+    # Azure AI Search Configuration
+    AZURE_SEARCH_ENDPOINT: str | None = Field(default=None, alias="AZURE_SEARCH_ENDPOINT")
+    AZURE_SEARCH_API_KEY: str | None = Field(default=None, alias="AZURE_SEARCH_API_KEY")
+    AZURE_SEARCH_INDEX_NAME: str = Field(default="documents-index", alias="AZURE_SEARCH_INDEX_NAME")
 
     # Keycloak Configuration
     KEYCLOAK_URL: str | None = Field(default=None, alias="KEYCLOAK_URL")

@@ -42,11 +42,11 @@ router = APIRouter(tags=["health"])
 )
 async def health_check() -> dict[str, Any]:
     """Basic health check endpoint."""
-    import time
+    from datetime import UTC, datetime
 
     return {
         "status": HealthStatus.UP,
-        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+        "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "service": "azure-ai-poc-api",
     }
 
@@ -87,6 +87,7 @@ async def readiness_check(
 ) -> dict[str, Any]:
     """Readiness check that verifies all critical services are available."""
     import time
+    from datetime import UTC, datetime
 
     checks = {}
     overall_status = HealthStatus.UP
@@ -110,7 +111,7 @@ async def readiness_check(
 
     response = {
         "status": overall_status,
-        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+        "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "checks": checks,
     }
 
@@ -137,10 +138,10 @@ async def readiness_check(
 )
 async def liveness_check() -> dict[str, Any]:
     """Liveness check to verify the application is alive."""
-    import time
+    from datetime import UTC, datetime
 
     return {
         "status": HealthStatus.UP,
-        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+        "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "service": "azure-ai-poc-api",
     }

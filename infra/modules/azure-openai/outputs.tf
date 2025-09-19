@@ -1,6 +1,6 @@
 output "openai_endpoint" {
   description = "The endpoint URL for the Azure OpenAI service"
-  value       = azurerm_cognitive_account.openai.endpoint
+  value       = trimsuffix(azurerm_cognitive_account.openai.endpoint, "/")
   sensitive   = false
 }
 
@@ -54,4 +54,8 @@ output "openai_managed_identity_tenant_id" {
 output "private_endpoint_id" {
   description = "The resource ID of the private endpoint"
   value       = azurerm_private_endpoint.openai.id
+}
+output "openai_host" {
+  description = "The host for the Azure OpenAI service"
+  value       = trimsuffix(replace(azurerm_cognitive_account.openai.endpoint, "https://", ""), "/")
 }

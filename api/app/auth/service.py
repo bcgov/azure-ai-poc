@@ -22,16 +22,13 @@ class AuthService:
             settings, "KEYCLOAK_URL", "https://dev.loginproxy.gov.bc.ca/auth"
         )
         self.keycloak_realm = getattr(settings, "KEYCLOAK_REALM", "standard")
-        self.keycloak_client_id = getattr(
-            settings, "KEYCLOAK_CLIENT_ID", "azure-poc-6086"
-        )
+        self.keycloak_client_id = getattr(settings, "KEYCLOAK_CLIENT_ID", "azure-poc-6086")
 
         if not self.keycloak_url or not self.keycloak_realm:
             raise ValueError("KEYCLOAK_URL and KEYCLOAK_REALM must be configured")
 
         self.jwks_uri = (
-            f"{self.keycloak_url}/realms/{self.keycloak_realm}"
-            "/protocol/openid-connect/certs"
+            f"{self.keycloak_url}/realms/{self.keycloak_realm}/protocol/openid-connect/certs"
         )
         self._jwks_cache: dict[str, Any] | None = None
 
@@ -55,7 +52,8 @@ class AuthService:
                 )
 
             # Get the signing key from Keycloak
-            public_key = await self._get_signing_key(unverified_header["kid"])
+            kid = str(unverified_header["kid"])  # Ensure kid is a string
+            public_key = await self._get_signing_key(kid)
 
             # Verify and decode the token
             try:
@@ -63,6 +61,7 @@ class AuthService:
                     token,
                     public_key,
                     algorithms=["RS256"],
+                    audience=self.keycloak_client_id,
                     options={"verify_exp": True},
                 )
                 logger.info("Token decoded successfully", sub=payload.get("sub"))
@@ -108,30 +107,26 @@ class AuthService:
             # Find the key with matching kid
             for key_data in self._jwks_cache.get("keys", []):
                 if key_data.get("kid") == kid:
-                    # Convert JWK to PEM format
+                    try:
+                        # Use jose library's built-in JWK to PEM conversion
+                        from jose.backends import RSAKey
 
-                    from cryptography.hazmat.primitives import serialization
-                    from cryptography.hazmat.primitives.asymmetric import rsa
-                    from jose.utils import base64url_decode
+                        # Convert JWK to RSA key object and get PEM
+                        rsa_key = RSAKey(key_data, algorithm="RS256")
+                        pem = rsa_key.to_pem()
 
-                    # Extract modulus and exponent
-                    n = base64url_decode(key_data["n"])
-                    e = base64url_decode(key_data["e"])
+                        # Ensure we return a string
+                        if isinstance(pem, bytes):
+                            return pem.decode("utf-8")
+                        return pem
 
-                    # Convert to integers
-                    n_int = int.from_bytes(n, "big")
-                    e_int = int.from_bytes(e, "big")
-
-                    # Create RSA public key
-                    public_key = rsa.RSAPublicNumbers(e_int, n_int).public_key()
-
-                    # Convert to PEM format
-                    pem = public_key.public_bytes(
-                        encoding=serialization.Encoding.PEM,
-                        format=serialization.PublicFormat.SubjectPublicKeyInfo,
-                    )
-
-                    return pem.decode("utf-8")
+                    except Exception as decode_error:
+                        logger.error(
+                            "Error converting JWK to PEM",
+                            error=str(decode_error),
+                            kid=str(kid),
+                        )
+                        raise
 
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -141,7 +136,7 @@ class AuthService:
         except HTTPException:
             raise
         except Exception as e:
-            logger.error("Error getting signing key", error=str(e), kid=kid)
+            logger.error("Error getting signing key", error=str(e), kid=str(kid))
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Unable to verify token signature",
@@ -183,4 +178,12 @@ class AuthService:
 
 
 # Global auth service instance
-auth_service = AuthService()
+_auth_service: AuthService | None = None
+
+
+def get_auth_service() -> AuthService:
+    """Get the global auth service instance."""
+    global _auth_service
+    if _auth_service is None:
+        _auth_service = AuthService()
+    return _auth_service
