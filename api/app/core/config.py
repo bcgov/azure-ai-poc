@@ -17,11 +17,7 @@ class Settings(BaseSettings):
     # API Configuration
     API_TITLE: str = "Azure AI POC API"
     API_VERSION: str = Field(default="latest", alias="IMAGE_TAG")
-    PORT: int = Field(default=3001, alias="PORT")
-
-    # Security Configuration
-    SECRET_KEY: str = Field(default="your-secret-key-change-in-production")
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    PORT: int = Field(default=3000, alias="PORT")
 
     # CORS Configuration
     CORS_ORIGINS: list[str] = ["*"]
@@ -67,10 +63,10 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = Field(default="INFO", alias="LOG_LEVEL")
 
     # Health Check Configuration
-    HEALTH_CHECK_PATH: str = "/health"
+    HEALTH_CHECK_PATH: str = "/api/v1/health"
 
     # Metrics Configuration
-    METRICS_PATH: str = "/metrics"
+    METRICS_PATH: str = "/api/v1/metrics"
 
     # Environment
     ENVIRONMENT: str = Field(default="development", alias="NODE_ENV")

@@ -85,7 +85,7 @@ SECURITY INSTRUCTIONS:
                 self.embedding_client = AzureOpenAI(
                     api_key=token_provider,
                     azure_endpoint=embedding_endpoint,
-                    api_version="2024-08-01-preview",
+                    api_version="2024-12-01-preview",
                 )
 
                 logger.info("Initialized Azure OpenAI clients with managed identity")

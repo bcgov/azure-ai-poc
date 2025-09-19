@@ -41,16 +41,12 @@ variable "appinsights_instrumentation_key" {
 }
 
 # Azure OpenAI Configuration Variables
-variable "azure_openai_endpoint" {
-  description = "Azure OpenAI service endpoint URL"
-  type        = string
-  sensitive   = true
-}
 
 variable "azure_openai_api_key" {
   description = "Azure OpenAI API key"
   type        = string
   sensitive   = true
+  nullable    = false
 }
 
 variable "azure_openai_deployment_name" {
@@ -185,3 +181,9 @@ variable "azure_search_index_name" {
   type        = string
   default     = "documents-index"
 }
+variable "keycloak_url" {
+  description = "The URL for the Keycloak authentication server."
+  type        = string
+  nullable    = false
+}
+
