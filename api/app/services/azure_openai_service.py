@@ -3,7 +3,7 @@
 import re
 from collections.abc import AsyncGenerator
 
-from azure.identity import DefaultAzureCredential
+from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 from openai import AzureOpenAI
 
 from app.core.config import settings
@@ -72,21 +72,20 @@ SECURITY INSTRUCTIONS:
                 logger.info("Initialized Azure OpenAI clients with API key")
             else:
                 # Use managed identity authentication
-                credential = DefaultAzureCredential()
-                token = await credential.get_token("https://cognitiveservices.azure.com/.default")
+                token_provider = get_bearer_token_provider(
+                    DefaultAzureCredential(), "https://cognitiveservices.azure.com/.default"
+                )
 
                 self.chat_client = AzureOpenAI(
-                    api_key=token.token,
+                    api_key=token_provider,
                     base_url=llm_endpoint,
                     api_version="2024-12-01-preview",
-                    default_headers={"Authorization": f"Bearer {token.token}"},
                 )
 
                 self.embedding_client = AzureOpenAI(
-                    api_key=token.token,
+                    api_key=token_provider,
                     azure_endpoint=embedding_endpoint,
                     api_version="2024-08-01-preview",
-                    default_headers={"Authorization": f"Bearer {token.token}"},
                 )
 
                 logger.info("Initialized Azure OpenAI clients with managed identity")
