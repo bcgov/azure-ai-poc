@@ -26,7 +26,7 @@ resource "azurerm_linux_web_app" "backend" {
     always_on                               = true
     container_registry_use_managed_identity = true
     minimum_tls_version                     = "1.3"
-    health_check_path                       = "/api/v1/health"
+    health_check_path                       = "/api/v1/health/"
     health_check_eviction_time_in_min       = 2
     application_stack {
       docker_image_name   = var.api_image
@@ -69,11 +69,11 @@ resource "azurerm_linux_web_app" "backend" {
     WEBSITE_ENABLE_SYNC_UPDATE_SITE       = "1"
     IMAGE_TAG                             = var.image_tag
     # Azure OpenAI Configuration
-    AZURE_OPENAI_ENDPOINT                  = var.azure_openai_endpoint
     AZURE_OPENAI_LLM_DEPLOYMENT_NAME       = var.azure_openai_deployment_name
     AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME = var.azure_openai_embedding_deployment
     AZURE_OPENAI_LLM_ENDPOINT              = var.azure_openai_llm_endpoint
     AZURE_OPENAI_EMBEDDING_ENDPOINT        = var.azure_openai_embedding_endpoint
+    AZURE_OPENAI_API_KEY                   = var.azure_openai_api_key
     # Azure AI Search Configuration
     AZURE_SEARCH_ENDPOINT   = var.azure_search_endpoint
     AZURE_SEARCH_INDEX_NAME = var.azure_search_index_name
@@ -83,7 +83,10 @@ resource "azurerm_linux_web_app" "backend" {
     COSMOS_DB_CONTAINER_NAME         = var.cosmosdb_container_name
     AZURE_COSMOSDB_DIAGNOSTICS_LEVEL = "debug"
     AZURE_LOG_LEVEL                  = "verbose"
-
+    #Keycloak Configuration
+    KEYCLOAK_URL       = var.keycloak_url
+    KEYCLOAK_REALM     = "standard"
+    KEYCLOAK_CLIENT_ID = "azure-poc-6086"
   }
   logs {
     detailed_error_messages = true

@@ -198,11 +198,17 @@ variable "search_hosting_mode" {
 variable "search_local_authentication_enabled" {
   description = "Whether local authentication is enabled for search service"
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "search_enable_managed_identity_permissions" {
   description = "Whether to assign permissions to the search service managed identity"
   type        = bool
-  default     = false
+  default     = true
+}
+
+variable "keycloak_url" {
+  description = "The URL for the Keycloak authentication server."
+  type        = string
+  nullable    = false
 }

@@ -150,7 +150,6 @@ module "backend" {
   app_service_subnet_id                   = module.network.app_service_subnet_id
   appinsights_connection_string           = module.monitoring.appinsights_connection_string
   appinsights_instrumentation_key         = module.monitoring.appinsights_instrumentation_key
-  azure_openai_endpoint                   = module.azure_openai.openai_endpoint
   azure_openai_api_key                    = module.azure_openai.openai_primary_key
   azure_openai_deployment_name            = module.azure_openai.gpt_deployment_name
   azure_openai_embedding_deployment       = module.azure_openai.embedding_deployment_name
@@ -172,7 +171,10 @@ module "backend" {
   cosmosdb_endpoint       = module.cosmos.cosmosdb_endpoint
   cosmosdb_db_name        = module.cosmos.cosmosdb_sql_database_name
   cosmosdb_container_name = module.cosmos.cosmosdb_sql_database_container_name
-  depends_on              = [module.frontend, module.azure_openai, module.azure_ai_search]
+
+  #keycloak
+  keycloak_url = var.keycloak_url
+  depends_on   = [module.frontend, module.azure_openai, module.azure_ai_search]
 }
 
 
@@ -249,5 +251,17 @@ resource "azurerm_role_assignment" "backend_search_index_data_reader" {
   depends_on = [
     module.backend,
     module.azure_ai_search
+  ]
+}
+
+# Azure Document Intelligence role assignment for backend managed identity
+resource "azurerm_role_assignment" "backend_cognitive_services_user" {
+  scope                = module.document_intelligence.document_intelligence_id
+  role_definition_name = "Cognitive Services User"
+  principal_id         = module.backend.backend_managed_identity_principal_id
+
+  depends_on = [
+    module.backend,
+    module.document_intelligence
   ]
 }

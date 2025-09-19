@@ -19,8 +19,8 @@ from app.middleware.rate_limit_middleware import limiter
 from app.middleware.security_middleware import SecurityMiddleware
 from app.routers import api_router
 from app.services.azure_openai_service import get_azure_openai_service
-from app.services.cosmos_db_service import get_cosmos_db_service
 from app.services.azure_search_service import get_azure_search_service
+from app.services.cosmos_db_service import get_cosmos_db_service
 
 logger = get_logger(__name__)
 

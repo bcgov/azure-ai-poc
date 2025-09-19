@@ -16,11 +16,8 @@ resource "azurerm_search_service" "main" {
   # Hosting mode for higher storage and query limits
   hosting_mode = var.hosting_mode
 
-  # Local authentication settings
-  local_authentication_enabled = var.local_authentication_enabled
-
-  # Authentication failure mode
-  authentication_failure_mode = var.authentication_failure_mode
+  local_authentication_enabled = true
+  authentication_failure_mode  = "http403"
 
   identity {
     type = "SystemAssigned"

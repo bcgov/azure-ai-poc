@@ -39,7 +39,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             method=request.method,
             url=str(request.url),
             status_code=response.status_code,
-            process_time=round(process_time * 1000, 2),  # ms
+            process_time_ms=round(process_time * 1000, 2),  # ms
         )
 
         # Add processing time header

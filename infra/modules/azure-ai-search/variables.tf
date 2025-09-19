@@ -77,23 +77,7 @@ variable "hosting_mode" {
   }
 }
 
-variable "local_authentication_enabled" {
-  description = "Whether local authentication is enabled"
-  type        = bool
-  default     = true
-}
 
-variable "authentication_failure_mode" {
-  description = "Authentication failure mode"
-  type        = string
-  default     = null
-  validation {
-    condition = var.authentication_failure_mode == null || contains([
-      "http401WithBearerChallenge", "http403"
-    ], var.authentication_failure_mode)
-    error_message = "Authentication failure mode must be null, 'http401WithBearerChallenge', or 'http403'."
-  }
-}
 
 variable "customer_managed_key_enforcement_enabled" {
   description = "Whether customer managed key enforcement is enabled"
