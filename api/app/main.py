@@ -34,8 +34,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     setup_telemetry()
 
     try:
-        # Initialize Azure OpenAI service
-        logger.info("Initializing Azure OpenAI service...")
+        # Initialize Azure OpenAI service (legacy - now used via LangChain)
+        logger.info("Initializing Azure OpenAI service (legacy backend)...")
         azure_openai_service = get_azure_openai_service()
         await azure_openai_service.initialize_clients()
 
@@ -43,6 +43,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("Initializing Cosmos DB service...")
         cosmos_db_service = get_cosmos_db_service()
         await cosmos_db_service.health_check()
+
+        # Initialize LangChain AI service (it will automatically use the cosmos service)
+        logger.info("Initializing LangChain AI service...")
+        from app.services.langchain_service import get_langchain_ai_service
+
+        langchain_service = get_langchain_ai_service()
+        await langchain_service.initialize_client()
+
+        # Initialize LangGraph agent service
+        logger.info("Initializing LangGraph agent service...")
+        from app.services.langgraph_agent_service import get_langgraph_agent_service
+
+        get_langgraph_agent_service()  # Initialize the service
+
         # initializing Azure AI Search service
         get_azure_search_service()
         logger.info("All services initialized successfully")
@@ -84,14 +98,12 @@ def create_app() -> FastAPI:
         ),
         version=os.getenv("IMAGE_TAG", "latest"),
         openapi_tags=[
-            {"name": "app", "description": "Basic application endpoints"},
             {"name": "documents", "description": "Document management endpoints"},
             {"name": "chat", "description": "Chat functionality endpoints"},
             {
                 "name": "health",
                 "description": "Health check endpoints (no rate limiting)",
             },
-            {"name": "mcp", "description": "Model Context Protocol endpoints"},
             {"name": "metrics", "description": "Prometheus metrics endpoints"},
         ],
         docs_url="/api/docs",

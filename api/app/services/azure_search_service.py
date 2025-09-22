@@ -310,6 +310,85 @@ class AzureSearchService:
         # Azure Search returns no explicit score for pure vector query yet; we keep order.
         return list(results)
 
+    def search_documents(
+        self,
+        query: str,
+        partition_key: str | None = None,
+        document_id: str | None = None,
+        top: int = 10,
+    ) -> list[dict[str, Any]]:
+        """
+        Perform text-based search across document chunks.
+
+        Args:
+            query: Search query string
+            partition_key: Optional partition key to filter by user
+            document_id: Optional document ID to search within specific document
+            top: Maximum number of results to return
+
+        Returns:
+            List of search results with content, metadata, and scores
+        """
+        # Build filter for chunks only
+        filters = ["recordType eq 'chunk'"]
+        if partition_key:
+            filters.append(f"partitionKey eq '{partition_key}'")
+        if document_id:
+            filters.append(f"documentId eq '{document_id}'")
+        filter_expr = " and ".join(filters)
+
+        try:
+            results = self.search_client.search(
+                search_text=query,
+                filter=filter_expr,
+                top=top,
+                select=[
+                    "id",
+                    "documentId",
+                    "content",
+                    "filename",
+                    "chunkIndex",
+                    "partitionKey",
+                    "metadataJson",
+                ],
+                include_total_count=True,
+            )
+
+            # Process results to extract metadata and format response
+            formatted_results = []
+            for result in results:
+                # Parse metadata to get document info
+                metadata = {}
+                if result.get("metadataJson"):
+                    try:
+                        import json
+
+                        metadata = json.loads(result["metadataJson"])
+                    except Exception:
+                        metadata = {}
+
+                # Extract title and page info
+                title = metadata.get("title") or result.get("filename", "Unknown Document")
+                page_number = metadata.get("page_number") or result.get("chunkIndex", "Unknown")
+
+                formatted_result = {
+                    "content": result.get("content", ""),
+                    "title": title,
+                    "page_number": str(page_number),
+                    "document_id": result.get("documentId", ""),
+                    "filename": result.get("filename", ""),
+                    "chunk_index": result.get("chunkIndex", 0),
+                    "partition_key": result.get("partitionKey", ""),
+                    "@search.score": result.get("@search.score", 0.0),
+                }
+                formatted_results.append(formatted_result)
+
+            return formatted_results
+
+        except Exception as e:
+            logger.error("Search failed: %s", str(e))
+            return []
+
 
 # Global singleton
 _azure_search_service: AzureSearchService | None = None

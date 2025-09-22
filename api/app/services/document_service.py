@@ -113,11 +113,11 @@ class DocumentService:
         self.logger.info("DocumentService initialized with lazy dependency loading")
 
     @property
-    def azure_openai_service(self):
-        """Get the Azure OpenAI service (lazy loaded)."""
-        from app.services.azure_openai_service import get_azure_openai_service
+    def langchain_service(self):
+        """Get the LangChain AI service (lazy loaded)."""
+        from app.services.langchain_service import get_langchain_ai_service
 
-        return get_azure_openai_service()
+        return get_langchain_ai_service()
 
     @property
     def azure_search_service(self):
@@ -227,9 +227,9 @@ class DocumentService:
             if not chunks:
                 raise ValueError("Failed to create any chunks from the document content")
 
-            # Generate embeddings for all chunks in batches
+            # Generate embeddings for all chunks in batches using LangChain
             chunk_contents = [chunk.content for chunk in chunks]
-            embeddings = await self.azure_openai_service.generate_embeddings_batch(chunk_contents)
+            embeddings = await self.langchain_service.generate_embeddings_batch(chunk_contents)
 
             # Assign embeddings to chunks
             embedded_chunks = 0
@@ -438,9 +438,12 @@ class DocumentService:
                 self.logger.info("No embeddings available, using all chunks for context")
                 relevant_context = "\n\n".join(chunk.get("content", "") for chunk in chunks)
 
-            # Use Azure OpenAI to answer the question
-            answer = await self.azure_openai_service.answer_question_with_context(
-                question, relevant_context
+            # Use LangChain service to answer the question with context
+            answer = await self.langchain_service.chat_completion(
+                message=f"Context: {relevant_context}\n\nQuestion: {question}",
+                context="Document Q&A",
+                session_id=None,
+                user_id=None,
             )
 
             self.logger.info(f"Successfully answered question for document: {document['filename']}")
@@ -488,9 +491,12 @@ class DocumentService:
                 self.logger.info("No embeddings available, using all chunks for context")
                 relevant_context = "\n\n".join(chunk.get("content", "") for chunk in chunks)
 
-            # Use Azure OpenAI streaming to answer the question
-            async for chunk in self.azure_openai_service.answer_question_with_context_streaming(
-                question, relevant_context
+            # Use LangChain service streaming to answer the question with context
+            async for chunk in self.langchain_service.chat_completion_streaming(
+                message=f"Context: {relevant_context}\n\nQuestion: {question}",
+                context="Document Q&A Streaming",
+                session_id=None,
+                user_id=None,
             ):
                 yield chunk
 
@@ -557,8 +563,8 @@ class DocumentService:
             Relevant context string
         """
         try:
-            # Generate embedding for the question
-            question_embedding = await self.azure_openai_service.generate_embeddings(question)
+            # Generate embedding for the question using LangChain
+            question_embedding = await self.langchain_service.generate_embeddings(question)
 
             # Check if we have chunks with embeddings
             chunks_with_embeddings = [c for c in chunks if c.get("embedding")]

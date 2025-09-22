@@ -50,6 +50,11 @@ dependencies = [
     "psutil>=7.0.0",
     "mcp>=1.0.0",
     "azure-search-documents>=11.5.3",
+    # LangGraph and minimal LangChain for agentic AI capabilities
+    "langchain-openai>=0.3.33",
+    "langchain-community>=0.3.29",
+    "langgraph>=0.6.7",
+    "langchain-core>=0.3.76",
 ]
 
 [project.optional-dependencies]

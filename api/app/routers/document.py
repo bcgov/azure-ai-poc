@@ -3,38 +3,18 @@ Document router for document management and processing.
 
 This router provides document management functionality including:
 - Document upload and processing (PDF, Markdown, HTML)
-- Document-based Q&A with context-aware responses
 - Document listing and deletion
-- Search across documents
 """
 
 import logging
-from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.auth.dependencies import RequireAuth, require_roles
 from app.auth.models import KeycloakUser
 from app.services.document_service import UploadedFile, get_document_service
-
-
-class QuestionDto(BaseModel):
-    """Question DTO for document Q&A."""
-
-    question: str = Field(..., description="Question to ask about the document")
-    document_id: str = Field(..., description="ID of the document to query")
-
-
-class AnswerDto(BaseModel):
-    """Answer DTO for document Q&A responses."""
-
-    answer: str = Field(..., description="AI assistant's answer")
-    document_id: str = Field(..., description="Document ID that was queried")
-    question: str = Field(..., description="Original question")
-    timestamp: datetime = Field(..., description="Response timestamp")
 
 
 class DocumentResponseDto(BaseModel):
@@ -46,24 +26,6 @@ class DocumentResponseDto(BaseModel):
     total_chunks: int = Field(..., description="Number of chunks created")
     total_pages: int | None = Field(None, description="Total pages (for PDFs)")
     uploaded_at: str = Field(..., description="Upload timestamp")
-
-
-class SearchDto(BaseModel):
-    """Search DTO for document search."""
-
-    query: str = Field(..., description="Search query")
-    top_k: int = Field(default=5, description="Number of top results to return")
-
-
-class SearchResultDto(BaseModel):
-    """Search result DTO."""
-
-    content: str = Field(..., description="Chunk content")
-    filename: str = Field(..., description="Document filename")
-    document_id: str = Field(..., description="Document ID")
-    chunk_index: int = Field(..., description="Chunk index within document")
-    similarity: float = Field(..., description="Similarity score")
-    uploaded_at: str = Field(..., description="Document upload timestamp")
 
 
 router = APIRouter(tags=["documents"])
@@ -247,156 +209,6 @@ async def get_documents(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve documents",
         ) from error
-
-
-@router.post(
-    "/ask",
-    summary="Ask a question about a specific document",
-    description="Ask a question about a specific document and get an AI-generated answer",
-    response_model=AnswerDto,
-    responses={
-        200: {
-            "description": "Question answered successfully",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "answer": "The document discusses the implementation of AI systems...",
-                        "document_id": "doc_123456",
-                        "question": "What is the main topic?",
-                        "timestamp": "2024-01-15T10:30:00Z",
-                    }
-                }
-            },
-        },
-        400: {"description": "Bad request - Missing question or document ID"},
-        404: {"description": "Document not found"},
-        401: {"description": "Unauthorized - Invalid or missing JWT token"},
-        403: {"description": "Forbidden - Insufficient permissions"},
-    },
-)
-async def ask_question(
-    question_dto: QuestionDto,
-    current_user: Annotated[KeycloakUser, RequireAuth],
-    _: Annotated[None, Depends(require_roles("azure-ai-poc-super-admin", "ai-poc-participant"))],
-    document_service=Depends(get_document_service),
-) -> AnswerDto:
-    """Ask a question about a specific document."""
-
-    try:
-        answer = await document_service.answer_question(
-            question_dto.document_id, question_dto.question, current_user.sub
-        )
-
-        return AnswerDto(
-            answer=answer,
-            document_id=question_dto.document_id,
-            question=question_dto.question,
-            timestamp=datetime.utcnow(),
-        )
-
-    except ValueError as error:
-        if "Document not found" in str(error):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Document not found"
-            ) from error
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
-    except Exception as error:
-        logging.error(f"Error answering question: {error}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to answer question: {str(error)}",
-        ) from error
-
-
-@router.post(
-    "/ask/stream",
-    summary="Ask a question about a document with streaming response",
-    description="Ask a question and receive a Server-Sent Events stream of the AI response",
-    responses={
-        200: {
-            "description": "Streaming answer response",
-            "content": {
-                "text/event-stream": {
-                    "example": 'data: {"type":"token","content":"The document"}\n\n'
-                }
-            },
-            "headers": {
-                "Content-Type": {"description": "text/event-stream"},
-                "Cache-Control": {"description": "no-cache"},
-                "Connection": {"description": "keep-alive"},
-            },
-        },
-        400: {"description": "Bad request - Missing question or document ID"},
-        404: {"description": "Document not found"},
-        401: {"description": "Unauthorized - Invalid or missing JWT token"},
-        403: {"description": "Forbidden - Insufficient permissions"},
-    },
-)
-async def ask_question_stream(
-    question_dto: QuestionDto,
-    current_user: Annotated[KeycloakUser, RequireAuth],
-    _: Annotated[None, Depends(require_roles("azure-ai-poc-super-admin", "ai-poc-participant"))],
-    document_service=Depends(get_document_service),
-) -> StreamingResponse:
-    """Ask a question about a document with streaming response."""
-
-    async def generate_stream():
-        """Generate Server-Sent Events stream."""
-        import json
-
-        try:
-            # Send start event
-            start_event = {
-                "type": "start",
-                "document_id": question_dto.document_id,
-                "timestamp": datetime.utcnow().isoformat() + "Z",
-            }
-            yield f"data: {json.dumps(start_event)}\n\n"
-
-            # Stream the response
-            async for chunk in document_service.answer_question_streaming(
-                question_dto.document_id, question_dto.question, current_user.sub
-            ):
-                if chunk:
-                    yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
-
-            # Send completion event
-            end_event = {"type": "end", "timestamp": datetime.utcnow().isoformat() + "Z"}
-            yield f"data: {json.dumps(end_event)}\n\n"
-
-        except ValueError as error:
-            if "Document not found" in str(error):
-                error_event = {
-                    "type": "error",
-                    "message": "Document not found",
-                    "timestamp": datetime.utcnow().isoformat() + "Z",
-                }
-                yield f"data: {json.dumps(error_event)}\n\n"
-            else:
-                error_event = {
-                    "type": "error",
-                    "message": str(error),
-                    "timestamp": datetime.utcnow().isoformat() + "Z",
-                }
-                yield f"data: {json.dumps(error_event)}\n\n"
-        except Exception as error:
-            error_event = {
-                "type": "error",
-                "message": f"Failed to answer question: {str(error)}",
-                "timestamp": datetime.utcnow().isoformat() + "Z",
-            }
-            yield f"data: {json.dumps(error_event)}\n\n"
-
-    return StreamingResponse(
-        generate_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Cache-Control",
-        },
-    )
 
 
 @router.get(
