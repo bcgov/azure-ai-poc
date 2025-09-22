@@ -9,7 +9,7 @@ from azure.cosmos import exceptions as cosmos_exceptions
 from pydantic import BaseModel
 
 from app.core.config import settings
-from app.services.azure_openai_service import get_azure_openai_service
+from app.services.langchain_service import get_langchain_ai_service
 from app.services.cosmos_db_service import get_cosmos_db_service
 
 
@@ -57,7 +57,7 @@ class HealthCheckService:
         health_checks = [
             self._check_application_health(),
             self._check_cosmos_db_health(),
-            self._check_azure_openai_health(),
+            self._check_langchain_ai_health(),
         ]
 
         if detailed:
@@ -172,30 +172,32 @@ class HealthCheckService:
                 message=f"Cosmos DB health check failed: {str(e)}",
             )
 
-    async def _check_azure_openai_health(self) -> ComponentHealth:
-        """Check Azure OpenAI service health."""
+    async def _check_langchain_ai_health(self) -> ComponentHealth:
+        """Check LangChain AI service health (using Azure OpenAI backend)."""
         start_time = time.time()
 
         try:
-            openai_service = get_azure_openai_service()
+            langchain_service = get_langchain_ai_service()
 
-            # Perform a minimal API call to check connectivity
-            # Using a very short completion request
-            test_response = await openai_service.chat_completion(
-                messages=[{"role": "user", "content": "test"}],
-                max_tokens=1,
-                temperature=0,
+            # Perform a minimal API call to check connectivity using LangChain
+            test_response = await langchain_service.chat_completion(
+                message="test",
+                context="Health check",
+                session_id=None,
+                user_id=None,
             )
 
             response_time = (time.time() - start_time) * 1000
 
-            if test_response and hasattr(test_response, "choices"):
+            if test_response and len(test_response.strip()) > 0:
                 return ComponentHealth(
-                    name="azure_openai",
+                    name="langchain_ai",
                     status=HealthStatus.HEALTHY,
-                    message="Azure OpenAI is accessible and responding",
+                    message="LangChain AI service is accessible and responding",
                     response_time_ms=round(response_time, 2),
                     details={
+                        "service": "langchain",
+                        "backend": "azure_openai",
                         "llm_endpoint": settings.AZURE_OPENAI_LLM_ENDPOINT,
                         "embedding_endpoint": settings.AZURE_OPENAI_EMBEDDING_ENDPOINT,
                         "deployment": settings.AZURE_OPENAI_LLM_DEPLOYMENT_NAME,
@@ -203,16 +205,16 @@ class HealthCheckService:
                 )
             else:
                 return ComponentHealth(
-                    name="azure_openai",
+                    name="langchain_ai",
                     status=HealthStatus.DEGRADED,
-                    message="Azure OpenAI responded but with unexpected format",
+                    message="LangChain AI service responded but with unexpected format",
                 )
 
         except Exception as e:
             return ComponentHealth(
-                name="azure_openai",
+                name="langchain_ai",
                 status=HealthStatus.UNHEALTHY,
-                message=f"Azure OpenAI health check failed: {str(e)}",
+                message=f"LangChain AI service health check failed: {str(e)}",
             )
 
     async def _check_memory_usage(self) -> ComponentHealth:

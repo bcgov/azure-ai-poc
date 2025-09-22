@@ -1,5 +1,5 @@
 import apiService from '@/service/api-service'
-import streamingService from '@/services/streamingService'
+import { langGraphAgentService } from '@/services/langGraphAgentService'
 import type { FC } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import {
@@ -210,6 +210,18 @@ const ChatInterface: FC = () => {
             }
           },
         })
+      const newDocument: Document = {
+        id: response.data.id,
+        filename: response.data.filename || file.name,
+        uploadedAt: response.data.uploadedAt || new Date().toISOString(),
+        totalPages: response.data.totalPages,
+      }
+      // Add the new document to the state immediately
+      setDocuments((prev) => [...prev, newDocument])
+
+      // Now select the document - it exists in state
+      setSelectedDocument(response.data.id)
+      setPendingDocumentSelection(response.data.id)
 
       // Add success message
       const successMessage: ChatMessage = {
@@ -222,19 +234,7 @@ const ChatInterface: FC = () => {
       setMessages((prev) => [...prev, successMessage])
 
       // Reload documents list and then select the uploaded document
-      const freshDocuments = await loadDocuments()
-
-      // Verify the document was loaded and then select it
-      const uploadedDoc = freshDocuments.find(
-        (doc: Document) => doc.id === response.data.id,
-      )
-      if (uploadedDoc) {
-        setSelectedDocument(response.data.id)
-      } else {
-        // Use the pending selection mechanism as fallback
-        setPendingDocumentSelection(response.data.id)
-      }
-
+      loadDocuments()
       setShowUploadModal(false)
     } catch (err: any) {
       console.error('Upload error:', err)
@@ -295,6 +295,10 @@ const ChatInterface: FC = () => {
     setDocumentToDelete(null)
   }
 
+  const selectedDocumentName = selectedDocument
+    ? documents.find((doc) => doc.id === selectedDocument)?.filename
+    : null
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
@@ -317,7 +321,7 @@ const ChatInterface: FC = () => {
     setError(null)
 
     if (streamingEnabled) {
-      // Handle streaming response
+      // Handle streaming response with LangGraph agent
       setIsStreaming(true)
 
       // Create placeholder assistant message for streaming
@@ -332,32 +336,32 @@ const ChatInterface: FC = () => {
       setMessages((prev) => [...prev, placeholderMessage])
 
       try {
-        let streamingContent = ''
-        const streamGenerator = selectedDocument
-          ? streamingService.streamDocumentQuestion(
-              questionText,
-              selectedDocument,
-            )
-          : streamingService.streamChatQuestion(questionText)
-
-        for await (const event of streamGenerator) {
-          if (event.type === 'token' && event.content) {
-            streamingContent += event.content
-
-            // Update the placeholder message with accumulated content
-            setMessages((prev) =>
-              prev.map((msg) =>
-                msg.id === assistantMessageId
-                  ? { ...msg, content: streamingContent }
-                  : msg,
-              ),
-            )
-          } else if (event.type === 'error') {
-            throw new Error(event.message || 'Streaming error occurred')
-          }
+        const onChunk = (chunk: string) => {
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === assistantMessageId ? { ...msg, content: chunk } : msg,
+            ),
+          )
         }
+
+        const onError = (error: string) => {
+          setError(error)
+          // Remove the placeholder message on error
+          setMessages((prev) =>
+            prev.filter((msg) => msg.id !== assistantMessageId),
+          )
+        }
+
+        // Use LangGraph agent with document context for streaming
+        await langGraphAgentService.streamDocumentQuery(
+          questionText,
+          selectedDocument ? [selectedDocument] : undefined,
+          `session_${Date.now()}`,
+          onChunk,
+          onError,
+        )
       } catch (err: any) {
-        console.error('Streaming error:', err)
+        console.error('LangGraph streaming error:', err)
         setError(err.message || 'Failed to stream response. Please try again.')
 
         // Remove the placeholder message on error
@@ -368,40 +372,38 @@ const ChatInterface: FC = () => {
         setIsStreaming(false)
       }
     } else {
-      // Handle traditional non-streaming response
+      // Handle non-streaming response with LangGraph agent
       setIsLoading(true)
 
       try {
-        let response
+        // Use LangGraph agent with document context
+        const result = await langGraphAgentService.queryDocuments(
+          questionText,
+          selectedDocument ? [selectedDocument] : undefined, // Search specific doc or all docs
+          `session_${Date.now()}`,
+          selectedDocument ? `Document: ${selectedDocumentName}` : undefined,
+        )
 
-        if (selectedDocument) {
-          // Ask question about specific document
-          response = await apiService
-            .getAxiosInstance()
-            .post('/api/v1/documents/ask', {
-              question: questionText,
-              document_id: selectedDocument,
-            })
+        let assistantContent = ''
+        if (result.success && result.data) {
+          assistantContent = result.data.answer
         } else {
-          // General chat
-          response = await apiService
-            .getAxiosInstance()
-            .post('/api/v1/chat/ask', {
-              question: questionText,
-            })
+          throw new Error(
+            result.error || 'Failed to get response from LangGraph agent',
+          )
         }
 
         const assistantMessage: ChatMessage = {
           id: (Date.now() + 1).toString(),
           type: 'assistant',
-          content: response.data.answer || 'No response received',
+          content: assistantContent,
           timestamp: new Date(),
           documentId: selectedDocument || undefined,
         }
 
         setMessages((prev) => [...prev, assistantMessage])
       } catch (err: any) {
-        console.error('Chat API error:', err)
+        console.error('LangGraph API error:', err)
         setError(
           err.response?.data?.message ||
             'Failed to get response. Please try again.',
@@ -425,10 +427,6 @@ const ChatInterface: FC = () => {
       minute: '2-digit',
     })
   }
-
-  const selectedDocumentName = selectedDocument
-    ? documents.find((doc) => doc.id === selectedDocument)?.filename
-    : null
 
   // Debug logging for selectedDocumentName
   useEffect(() => {
@@ -489,8 +487,9 @@ const ChatInterface: FC = () => {
                   variant={!selectedDocument ? 'primary' : 'outline-secondary'}
                   size="sm"
                   onClick={() => setSelectedDocument(null)}
+                  disabled={documents.length === 0}
                 >
-                  General Questions
+                  Across All Docs
                 </Button>
               </div>
 
@@ -578,13 +577,41 @@ const ChatInterface: FC = () => {
                     <h5>Loading documents...</h5>
                     <p>Please wait while we fetch your documents.</p>
                   </>
+                ) : documents.length === 0 ? (
+                  <>
+                    <i className="bi bi-file-earmark-plus display-4 mb-3"></i>
+                    <h5>Get Started with Document Q&A</h5>
+                    <p className="mb-3">
+                      Upload your documents to start asking questions and get
+                      AI-powered answers with source citations.
+                    </p>
+                    <Button
+                      variant="primary"
+                      size="lg"
+                      onClick={() => setShowUploadModal(true)}
+                      className="mb-3"
+                    >
+                      <i className="bi bi-cloud-upload me-2"></i>
+                      Upload Your First Document
+                    </Button>
+                    <div className="small text-muted">
+                      <p className="mb-1">
+                        Supported formats: PDF, Markdown (.md), HTML
+                      </p>
+                      <p className="mb-0">
+                        Ask questions about specific documents or search across
+                        your entire collection
+                      </p>
+                    </div>
+                  </>
                 ) : (
                   <>
                     <i className="bi bi-chat-quote display-4 mb-3"></i>
                     <h5>Welcome to AI Document Assistant</h5>
                     <p>
-                      Upload a document (PDF, Markdown, or HTML) and ask
-                      questions about it, or ask general questions.
+                      Upload documents (PDF, Markdown, or HTML) and ask
+                      questions about them, or search across all your uploaded
+                      documents.
                     </p>
                   </>
                 )}
@@ -776,6 +803,24 @@ const ChatInterface: FC = () => {
           {/* Input Form */}
           <div className="border-top pt-2 pt-md-3 chat-input-container flex-shrink-0">
             <Form onSubmit={handleSubmit} style={{ marginBottom: '5em' }}>
+              {/* LangGraph Agent and Controls */}
+              <div className="mb-2 d-flex flex-wrap align-items-center gap-2">
+                <div className="d-flex align-items-center">
+                  <Form.Check
+                    type="switch"
+                    id="streaming-toggle"
+                    label="Streaming"
+                    checked={streamingEnabled}
+                    onChange={(e) => setStreamingEnabled(e.target.checked)}
+                    className="small"
+                  />
+                </div>
+
+                <Badge bg="info" className="small">
+                  LangGraph Agent - Multi-step reasoning & citations
+                </Badge>
+              </div>
+
               <div className="position-relative">
                 <Form.Control
                   as="textarea"
@@ -788,9 +833,11 @@ const ChatInterface: FC = () => {
                       ? `Ask a question about ${selectedDocumentName}...`
                       : selectedDocument
                         ? 'Ask a question about the selected document...'
-                        : 'Ask a general question or upload a document first...'
+                        : documents.length === 0
+                          ? 'Please upload documents first to start asking questions...'
+                          : 'Ask a question across all your documents...'
                   }
-                  disabled={isLoading}
+                  disabled={isLoading || documents.length === 0}
                   style={{
                     minHeight: 'clamp(2.5rem, 2.75rem, 3rem)',
                     maxHeight: 'clamp(6rem, 8rem, 10rem)',
@@ -803,7 +850,12 @@ const ChatInterface: FC = () => {
                 <Button
                   type="submit"
                   variant="primary"
-                  disabled={!currentQuestion.trim() || isLoading || isStreaming}
+                  disabled={
+                    !currentQuestion.trim() ||
+                    isLoading ||
+                    isStreaming ||
+                    documents.length === 0
+                  }
                   className="position-absolute d-flex align-items-center justify-content-center p-0 border-0"
                   style={{
                     right: '0.75rem',
@@ -834,9 +886,11 @@ const ChatInterface: FC = () => {
               </div>
               <small className="text-muted">
                 <i className="bi bi-info-circle me-1"></i>
-                {selectedDocument
-                  ? `Questions will be answered based on the selected document${streamingEnabled ? ' with streaming' : ''}`
-                  : `Upload a document (PDF, Markdown, HTML) to ask questions about it, or ask general questions${streamingEnabled ? ' with streaming' : ''}`}
+                {documents.length === 0
+                  ? 'Please upload documents first to start asking questions'
+                  : selectedDocument
+                    ? `Questions will be answered based on the selected document${streamingEnabled ? ' with streaming' : ''}`
+                    : `Questions will be answered by searching across all your uploaded documents${streamingEnabled ? ' with streaming' : ''}`}
               </small>
             </Form>
           </div>
