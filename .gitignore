@@ -378,5 +378,6 @@ pyrightconfig.json
 **/.terragrunt-cache
 *.tfvars
 .github/instructions/*.md
-personal
-personal/**
+sensitive
+sensitive/**
+coverage.json
