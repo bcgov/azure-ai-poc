@@ -374,31 +374,15 @@ class DocumentService:
             return text
 
         except Exception as error:
-            self.logger.warning(f"Failed to parse HTML with BeautifulSoup: {error}")
-
-            # Fallback to regex-based HTML tag removal
-            text = re.sub(
-                r"<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>",
-                "",
-                html,
-                flags=re.IGNORECASE,
+            self.logger.error(
+                f"Failed to parse HTML with BeautifulSoup: {error}. "
+                "Refusing to use unsafe regex fallback for security reasons."
             )
-            text = re.sub(
-                r"<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>",
-                "",
-                html,
-                flags=re.IGNORECASE,
-            )
-            text = re.sub(r"<[^>]+>", "", text)
-            text = text.replace("&nbsp;", " ")
-            text = text.replace("&amp;", "&")
-            text = text.replace("&lt;", "<")
-            text = text.replace("&gt;", ">")
-            text = text.replace("&quot;", '"')
-            text = text.replace("&#39;", "'")
-            text = re.sub(r"\s+", " ", text)
-
-            return text.strip()
+            # Security: Do NOT use regex-based HTML parsing as it cannot handle
+            # malformed HTML correctly and is vulnerable to XSS attacks.
+            # See: https://codeql.github.com/codeql-query-help/python/py-bad-tag-filter/
+            # If BeautifulSoup fails, return empty text rather than risk security issue.
+            return ""
 
     async def answer_question(
         self, document_id: str, question: str, user_id: str | None = None
