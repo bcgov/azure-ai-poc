@@ -12,14 +12,6 @@ resource "azurerm_resource_group" "main" {
     ]
   }
 }
-# User Assigned Managed Identity
-resource "azurerm_user_assigned_identity" "app_service_identity" {
-  depends_on          = [azurerm_resource_group.main]
-  location            = var.location
-  name                = "${var.app_name}-as-identity"
-  resource_group_name = var.resource_group_name
-  tags                = var.common_tags
-}
 
 # -------------
 # Modules based on Dependency
@@ -35,30 +27,6 @@ module "network" {
 
   depends_on = [azurerm_resource_group.main]
 }
-module "postgresql" {
-  source = "./modules/postgresql"
-
-  app_name                     = var.app_name
-  auto_grow_enabled            = var.postgres_auto_grow_enabled
-  backup_retention_period      = var.postgres_backup_retention_period
-  common_tags                  = var.common_tags
-  database_name                = var.database_name
-  db_master_password           = var.db_master_password
-  geo_redundant_backup_enabled = var.postgres_geo_redundant_backup_enabled
-  ha_enabled                   = var.postgres_ha_enabled
-  is_postgis_enabled           = var.postgres_is_postgis_enabled
-  location                     = var.location
-  postgresql_admin_username    = var.postgresql_admin_username
-  postgresql_sku_name          = var.postgres_sku_name
-  postgresql_storage_mb        = var.postgres_storage_mb
-  private_endpoint_subnet_id   = module.network.private_endpoint_subnet_id
-  resource_group_name          = azurerm_resource_group.main.name
-  standby_availability_zone    = var.postgres_standby_availability_zone
-  zone                         = var.postgres_zone
-  postgres_version             = var.postgres_version
-
-  depends_on = [module.network]
-}
 module "monitoring" {
   source = "./modules/monitoring"
 
@@ -72,61 +40,103 @@ module "monitoring" {
   depends_on = [azurerm_resource_group.main, module.network]
 }
 
-module "flyway" {
-  source   = "./modules/flyway"
-  app_name = var.app_name
 
-  container_instance_subnet_id = module.network.container_instance_subnet_id
-  database_name                = module.postgresql.database_name
-  db_master_password           = var.db_master_password
-  dns_servers                  = module.network.dns_servers
-  flyway_image                 = var.flyway_image
-  location                     = var.location
-  log_analytics_workspace_id   = module.monitoring.log_analytics_workspace_workspaceId
-  log_analytics_workspace_key  = module.monitoring.log_analytics_workspace_key
-  postgres_host                = module.postgresql.postgres_host
-  postgresql_admin_username    = var.postgresql_admin_username
-  resource_group_name          = azurerm_resource_group.main.name
+module "cosmos" {
+  source = "./modules/cosmos"
 
-  depends_on = [module.postgresql, module.monitoring]
-}
-
-
-
-module "frontdoor" {
-  source = "./modules/frontdoor"
-
-  app_name            = var.app_name
-  common_tags         = var.common_tags
-  frontdoor_sku_name  = var.frontdoor_sku_name
-  resource_group_name = azurerm_resource_group.main.name
+  app_name                   = var.app_name
+  common_tags                = var.common_tags
+  location                   = var.location
+  resource_group_name        = azurerm_resource_group.main.name
+  private_endpoint_subnet_id = module.network.private_endpoint_subnet_id
+  log_analytics_workspace_id = module.monitoring.log_analytics_workspace_id
 
   depends_on = [azurerm_resource_group.main, module.network]
+}
+
+# Azure OpenAI module
+module "azure_openai" {
+  source = "./modules/azure-openai"
+
+  app_name                      = var.app_name
+  app_env                       = var.app_env
+  resource_group_name           = azurerm_resource_group.main.name
+  location                      = var.location
+  common_tags                   = var.common_tags
+  openai_sku_name               = var.openai_sku_name
+  private_endpoint_subnet_id    = module.network.private_endpoint_subnet_id
+  log_analytics_workspace_id    = module.monitoring.log_analytics_workspace_id
+  gpt_deployment_name           = var.azure_openai_deployment_name
+  gpt_deployment_capacity       = var.openai_gpt_deployment_capacity
+  embedding_deployment_name     = var.azure_openai_embedding_deployment
+  embedding_deployment_capacity = var.openai_embedding_deployment_capacity
+
+  depends_on = [azurerm_resource_group.main, module.network, module.monitoring]
+}
+
+# Azure AI Search module
+module "azure_ai_search" {
+  source = "./modules/azure-ai-search"
+
+  app_name                            = var.app_name
+  app_env                             = var.app_env
+  resource_group_name                 = azurerm_resource_group.main.name
+  location                            = var.location
+  common_tags                         = var.common_tags
+  search_sku                          = var.search_sku
+  replica_count                       = var.search_replica_count
+  partition_count                     = var.search_partition_count
+  semantic_search_sku                 = var.search_semantic_search_sku
+  hosting_mode                        = var.search_hosting_mode
+  private_endpoint_subnet_id          = module.network.private_endpoint_subnet_id
+  log_analytics_workspace_id          = module.monitoring.log_analytics_workspace_id
+  enable_managed_identity_permissions = var.search_enable_managed_identity_permissions
+
+  depends_on = [azurerm_resource_group.main, module.network, module.monitoring]
+}
+
+# Azure Document Intelligence module
+module "document_intelligence" {
+  source = "./modules/azure-document-intelligence"
+
+  app_name                       = var.app_name
+  app_env                        = var.app_env
+  resource_group_name            = azurerm_resource_group.main.name
+  location                       = var.location
+  common_tags                    = var.common_tags
+  document_intelligence_sku_name = var.document_intelligence_sku_name
+  private_endpoint_subnet_id     = module.network.private_endpoint_subnet_id
+  log_analytics_workspace_id     = module.monitoring.log_analytics_workspace_id
+
+  depends_on = [azurerm_resource_group.main, module.network, module.monitoring]
 }
 
 
 module "frontend" {
   source = "./modules/frontend"
 
-  app_env                               = var.app_env
-  app_name                              = var.app_name
-  app_service_sku_name_frontend         = var.app_service_sku_name_frontend
-  appinsights_connection_string         = module.monitoring.appinsights_connection_string
-  appinsights_instrumentation_key       = module.monitoring.appinsights_instrumentation_key
-  common_tags                           = var.common_tags
-  frontend_frontdoor_resource_guid      = module.frontdoor.frontdoor_resource_guid
-  frontend_image                        = var.frontend_image
-  frontend_subnet_id                    = module.network.app_service_subnet_id
-  frontdoor_frontend_firewall_policy_id = module.frontdoor.firewall_policy_id
-  frontend_frontdoor_id                 = module.frontdoor.frontdoor_id
-  location                              = var.location
-  log_analytics_workspace_id            = module.monitoring.log_analytics_workspace_id
-  repo_name                             = var.repo_name
-  resource_group_name                   = azurerm_resource_group.main.name
-  user_assigned_identity_client_id      = azurerm_user_assigned_identity.app_service_identity.client_id
-  user_assigned_identity_id             = azurerm_user_assigned_identity.app_service_identity.id
+  app_env                              = var.app_env
+  app_name                             = var.app_name
+  app_service_sku_name_frontend        = var.app_service_sku_name_frontend
+  appinsights_connection_string        = module.monitoring.appinsights_connection_string
+  appinsights_instrumentation_key      = module.monitoring.appinsights_instrumentation_key
+  common_tags                          = var.common_tags
+  frontend_image                       = var.frontend_image
+  frontend_subnet_id                   = module.network.app_service_subnet_id
+  location                             = var.location
+  log_analytics_workspace_id           = module.monitoring.log_analytics_workspace_id
+  repo_name                            = var.repo_name
+  resource_group_name                  = azurerm_resource_group.main.name
+  azure_cosmos_endpoint                = module.cosmos.cosmosdb_endpoint
+  azure_cosmos_host                    = module.cosmos.cosmosdb_host
+  azure_document_intelligence_endpoint = module.document_intelligence.endpoint
+  azure_document_intelligence_host     = module.document_intelligence.host
+  azure_openai_endpoint                = module.azure_openai.openai_endpoint
+  azure_openai_host                    = module.azure_openai.openai_host
+  azure_search_endpoint                = module.azure_ai_search.search_service_url
+  azure_search_host                    = module.azure_ai_search.search_service_host
 
-  depends_on = [module.frontdoor, module.monitoring, module.network]
+  depends_on = [module.monitoring, module.network]
 }
 
 module "backend" {
@@ -139,26 +149,118 @@ module "backend" {
   app_service_subnet_id                   = module.network.app_service_subnet_id
   appinsights_connection_string           = module.monitoring.appinsights_connection_string
   appinsights_instrumentation_key         = module.monitoring.appinsights_instrumentation_key
+  azure_openai_api_key                    = module.azure_openai.openai_primary_key
+  azure_openai_deployment_name            = module.azure_openai.gpt_deployment_name
+  azure_openai_embedding_deployment       = module.azure_openai.embedding_deployment_name
   backend_subnet_id                       = module.network.app_service_subnet_id
   common_tags                             = var.common_tags
-  database_name                           = var.database_name
-  db_master_password                      = var.db_master_password
-  enable_psql_sidecar                     = var.enable_psql_sidecar
-  frontend_frontdoor_resource_guid        = module.frontdoor.frontdoor_resource_guid
   frontend_possible_outbound_ip_addresses = module.frontend.possible_outbound_ip_addresses
   location                                = var.location
   log_analytics_workspace_id              = module.monitoring.log_analytics_workspace_id
-  postgres_host                           = module.postgresql.postgres_host
-  postgresql_admin_username               = var.postgresql_admin_username
   private_endpoint_subnet_id              = module.network.private_endpoint_subnet_id
   repo_name                               = var.repo_name
   resource_group_name                     = azurerm_resource_group.main.name
-  user_assigned_identity_client_id        = azurerm_user_assigned_identity.app_service_identity.client_id
-  user_assigned_identity_id               = azurerm_user_assigned_identity.app_service_identity.id
+  image_tag                               = var.image_tag
+  azure_openai_embedding_endpoint         = module.azure_openai.openai_endpoint
+  azure_openai_llm_endpoint               = module.azure_openai.openai_endpoint
+  # Azure AI Search
+  azure_search_endpoint   = module.azure_ai_search.search_service_url
+  azure_search_index_name = var.azure_search_index_name
+  # CosmosDB
+  cosmosdb_endpoint       = module.cosmos.cosmosdb_endpoint
+  cosmosdb_db_name        = module.cosmos.cosmosdb_sql_database_name
+  cosmosdb_container_name = module.cosmos.cosmosdb_sql_database_container_name
 
-  depends_on = [module.frontend, module.flyway]
+  #keycloak
+  keycloak_url = var.keycloak_url
+  depends_on   = [module.frontend, module.azure_openai, module.azure_ai_search]
 }
 
 
 
 
+
+# due to circular dependency issues this resource is created at root level
+// Assign the App Service's managed identity to the Cosmos DB SQL Database with Data Contributor role
+
+resource "azurerm_cosmosdb_sql_role_assignment" "cosmosdb_role_assignment_app_service_data_contributor" {
+  resource_group_name = azurerm_resource_group.main.name
+  account_name        = module.cosmos.account_name
+  role_definition_id  = "${module.cosmos.account_id}/sqlRoleDefinitions/00000000-0000-0000-0000-000000000002"
+  principal_id        = module.backend.backend_managed_identity_principal_id
+  scope               = module.cosmos.account_id
+
+  depends_on = [
+    module.backend,
+    module.cosmos
+  ]
+}
+
+# Azure OpenAI role assignments for backend managed identity
+resource "azurerm_role_assignment" "backend_cognitive_services_openai_user" {
+  scope                = module.azure_openai.openai_id
+  role_definition_name = "Cognitive Services OpenAI User"
+  principal_id         = module.backend.backend_managed_identity_principal_id
+
+  depends_on = [
+    module.backend,
+    module.azure_openai
+  ]
+}
+
+resource "azurerm_role_assignment" "backend_cognitive_services_openai_contributor" {
+  scope                = module.azure_openai.openai_id
+  role_definition_name = "Cognitive Services OpenAI Contributor"
+  principal_id         = module.backend.backend_managed_identity_principal_id
+
+  depends_on = [
+    module.backend,
+    module.azure_openai
+  ]
+}
+
+# Azure AI Search role assignments for backend managed identity
+resource "azurerm_role_assignment" "backend_search_index_data_contributor" {
+  scope                = module.azure_ai_search.search_service_id
+  role_definition_name = "Search Index Data Contributor"
+  principal_id         = module.backend.backend_managed_identity_principal_id
+
+  depends_on = [
+    module.backend,
+    module.azure_ai_search
+  ]
+}
+
+resource "azurerm_role_assignment" "backend_search_service_contributor" {
+  scope                = module.azure_ai_search.search_service_id
+  role_definition_name = "Search Service Contributor"
+  principal_id         = module.backend.backend_managed_identity_principal_id
+
+  depends_on = [
+    module.backend,
+    module.azure_ai_search
+  ]
+}
+
+resource "azurerm_role_assignment" "backend_search_index_data_reader" {
+  scope                = module.azure_ai_search.search_service_id
+  role_definition_name = "Search Index Data Reader"
+  principal_id         = module.backend.backend_managed_identity_principal_id
+
+  depends_on = [
+    module.backend,
+    module.azure_ai_search
+  ]
+}
+
+# Azure Document Intelligence role assignment for backend managed identity
+resource "azurerm_role_assignment" "backend_cognitive_services_user" {
+  scope                = module.document_intelligence.document_intelligence_id
+  role_definition_name = "Cognitive Services User"
+  principal_id         = module.backend.backend_managed_identity_principal_id
+
+  depends_on = [
+    module.backend,
+    module.document_intelligence
+  ]
+}

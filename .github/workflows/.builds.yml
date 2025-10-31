@@ -20,10 +20,10 @@ jobs:
     strategy:
       matrix:
         # Only building frontend containers to run PR based e2e tests
-        package: [backend, migrations, frontend]
+        package: [frontend, api]
     timeout-minutes: 10
     steps:
-      - uses: bcgov/action-builder-ghcr@v4.0.0
+      - uses: bcgov/action-builder-ghcr@v3.0.1
         with:
           package: ${{ matrix.package }}
           tags: ${{ inputs.tags }}

@@ -20,13 +20,31 @@ variable "app_name" {
 variable "app_service_sku_name_backend" {
   description = "SKU name for the backend App Service Plan"
   type        = string
-  default     = "B1" # Basic tier 
+  default     = "B2" # Basic tier 
 }
 
 variable "app_service_sku_name_frontend" {
   description = "SKU name for the frontend App Service Plan"
   type        = string
-  default     = "B1" # Basic tier 
+  default     = "B3" # Basic tier 
+}
+
+variable "azure_openai_deployment_name" {
+  description = "Azure OpenAI model deployment name"
+  type        = string
+  default     = "gpt-4o-mini"
+}
+
+variable "azure_openai_embedding_deployment" {
+  description = "Azure OpenAI embedding model deployment name"
+  type        = string
+  default     = "text-embedding-3-large"
+}
+
+variable "azure_search_index_name" {
+  description = "Azure AI Search index name for document storage"
+  type        = string
+  default     = "documents-index"
 }
 
 variable "client_id" {
@@ -40,32 +58,6 @@ variable "common_tags" {
   type        = map(string)
 }
 
-variable "database_name" {
-  description = "Name of the database to create"
-  type        = string
-  default     = "app"
-}
-
-variable "db_master_password" {
-  description = "Master password for the PostgreSQL server"
-  type        = string
-  sensitive   = true
-  validation {
-    condition     = length(var.db_master_password) >= 12
-    error_message = "The db_master_password must be at least 12 characters long."
-  }
-}
-
-variable "enable_psql_sidecar" {
-  description = "Whether to enable the CloudBeaver database management container"
-  type        = bool
-  default     = true
-}
-
-variable "flyway_image" {
-  description = "The image for the Flyway container"
-  type        = string
-}
 
 variable "frontend_image" {
   description = "The image for the Frontend container"
@@ -76,6 +68,11 @@ variable "frontdoor_sku_name" {
   description = "SKU name for the Front Door"
   type        = string
   default     = "Standard_AzureFrontDoor"
+}
+variable "image_tag" {
+  description = "Tag for the container images"
+  type        = string
+  default     = "latest"
 }
 
 variable "location" {
@@ -96,76 +93,10 @@ variable "log_analytics_sku" {
   default     = "PerGB2018"
 }
 
-variable "postgres_auto_grow_enabled" {
-  description = "Enable auto-grow for PostgreSQL Flexible Server storage"
-  type        = bool
-  default     = true
-}
-
-variable "postgres_backup_retention_period" {
-  description = "Backup retention period in days for PostgreSQL Flexible Server"
-  type        = number
-  default     = 7
-}
-
-variable "postgres_geo_redundant_backup_enabled" {
-  description = "Enable geo-redundant backup for PostgreSQL Flexible Server"
-  type        = bool
-  default     = false
-}
-
-variable "postgres_ha_enabled" {
-  description = "Enable high availability for PostgreSQL Flexible Server"
-  type        = bool
-  default     = false
-}
-
-variable "postgres_is_postgis_enabled" {
-  description = "Enable PostGIS extension for PostgreSQL Flexible Server"
-  type        = bool
-  default     = false
-}
-
-variable "postgres_sku_name" {
-  description = "SKU name for PostgreSQL Flexible Server"
-  type        = string
-  default     = "B_Standard_B1ms"
-}
-
-variable "postgres_standby_availability_zone" {
-  description = "Availability zone for standby replica of PostgreSQL Flexible Server"
-  type        = string
-  default     = "1"
-}
-
-variable "postgres_storage_mb" {
-  description = "Storage in MB for PostgreSQL Flexible Server"
-  type        = number
-  default     = 32768
-}
-
-variable "postgres_version" {
-  description = "Version of PostgreSQL Flexible Server"
-  type        = string
-  default     = "16"
-}
-
-variable "postgres_zone" {
-  description = "Availability zone for PostgreSQL server"
-  type        = string
-  default     = "1"
-}
-
-variable "postgresql_admin_username" {
-  description = "Administrator username for PostgreSQL server"
-  type        = string
-  default     = "pgadmin"
-}
-
 variable "repo_name" {
   description = "Name of the repository, used for resource naming"
   type        = string
-  default     = "quickstart-azure-containers"
+  nullable    = false
 }
 
 variable "resource_group_name" {
@@ -204,4 +135,81 @@ variable "vnet_name" {
 variable "vnet_resource_group_name" {
   description = "Resource group name where the virtual network exists"
   type        = string
+}
+
+
+# Azure OpenAI Module Variables
+variable "openai_sku_name" {
+  description = "SKU name for the Azure OpenAI service"
+  type        = string
+  default     = "S0"
+}
+
+variable "openai_gpt_deployment_capacity" {
+  description = "Capacity for the GPT model deployment"
+  type        = number
+  default     = 10000
+}
+
+variable "openai_embedding_deployment_capacity" {
+  description = "Capacity for the embedding model deployment"
+  type        = number
+  default     = 10000
+}
+
+# Azure Document Intelligence Module Variables
+variable "document_intelligence_sku_name" {
+  description = "SKU name for the Azure Document Intelligence service"
+  type        = string
+  default     = "S0"
+}
+
+# Azure AI Search Module Variables
+variable "search_sku" {
+  description = "SKU for the Azure AI Search service"
+  type        = string
+  default     = "standard"
+}
+
+variable "search_replica_count" {
+  description = "Number of replicas for the search service"
+  type        = number
+  default     = 1
+}
+
+variable "search_partition_count" {
+  description = "Number of partitions for the search service"
+  type        = number
+  default     = 1
+}
+
+variable "search_semantic_search_sku" {
+  description = "SKU for semantic search capabilities"
+  type        = string
+  default     = "standard"
+}
+
+variable "search_hosting_mode" {
+  description = "Hosting mode for the search service"
+  type        = string
+  default     = "default"
+}
+
+variable "search_local_authentication_enabled" {
+  description = "Whether local authentication is enabled for search service"
+  type        = bool
+  default     = false
+}
+
+variable "search_enable_managed_identity_permissions" {
+  description = "Whether to assign permissions to the search service managed identity"
+  type        = bool
+  default     = true
+}
+
+variable "keycloak_url" {
+  description = "The URL for the Keycloak authentication server."
+  type        = string
+  nullable    = false
+  default     = "https://dev.loginproxy.gov.bc.ca/auth"
 }

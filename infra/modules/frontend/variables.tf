@@ -35,17 +35,6 @@ variable "container_registry_url" {
   default     = "https://ghcr.io"
 }
 
-variable "frontend_frontdoor_id" {
-  description = "The ID of the Front Door profile for the frontend."
-  type        = string
-  nullable    = false
-}
-
-variable "frontend_frontdoor_resource_guid" {
-  description = "The resource GUID of the Front Door profile for the frontend."
-  type        = string
-  nullable    = false
-}
 
 variable "frontend_image" {
   description = "The Docker image for the frontend application."
@@ -59,11 +48,6 @@ variable "frontend_subnet_id" {
   nullable    = false
 }
 
-variable "frontdoor_frontend_firewall_policy_id" {
-  description = "The resource ID of the Front Door firewall policy for the frontend."
-  type        = string
-  nullable    = false
-}
 
 variable "location" {
   description = "The Azure region where resources will be created."
@@ -89,20 +73,56 @@ variable "resource_group_name" {
   nullable    = false
 }
 
-variable "user_assigned_identity_client_id" {
-  description = "The client ID of the user-assigned managed identity for the frontend."
-  type        = string
-  nullable    = false
-}
-
-variable "user_assigned_identity_id" {
-  description = "The resource ID of the user-assigned managed identity for the frontend."
-  type        = string
-  nullable    = false
-}
 
 variable "app_service_sku_name_frontend" {
   description = "The SKU name for the frontend App Service plan."
+  type        = string
+  nullable    = false
+}
+variable "azure_cosmos_endpoint" {
+  description = "The Azure Cosmos DB endpoint URL."
+  type        = string
+  nullable    = false
+}
+
+variable "azure_cosmos_host" {
+  description = "The Azure Cosmos DB host."
+  type        = string
+  nullable    = false
+}
+
+variable "azure_document_intelligence_endpoint" {
+  description = "The Azure Document Intelligence endpoint URL."
+  type        = string
+  nullable    = false
+}
+
+variable "azure_document_intelligence_host" {
+  description = "The Azure Document Intelligence host."
+  type        = string
+  nullable    = false
+}
+
+variable "azure_openai_endpoint" {
+  description = "The Azure OpenAI endpoint URL."
+  type        = string
+  nullable    = false
+}
+
+variable "azure_openai_host" {
+  description = "The Azure OpenAI host."
+  type        = string
+  nullable    = false
+}
+
+variable "azure_search_endpoint" {
+  description = "The Azure Search endpoint URL."
+  type        = string
+  nullable    = false
+}
+
+variable "azure_search_host" {
+  description = "The Azure Search host."
   type        = string
   nullable    = false
 }
