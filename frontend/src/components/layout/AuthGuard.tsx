@@ -1,5 +1,5 @@
 import React, { type FC } from 'react'
-import { useAuth, useAuthInit } from '../stores'
+import { useAuth, useAuthInit } from '@/stores'
 
 type Props = {
   children: React.ReactNode

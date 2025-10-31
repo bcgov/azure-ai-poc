@@ -8,7 +8,7 @@ This router provides LangGraph-based AI chat functionality including:
 - Role-based access control
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -211,7 +211,7 @@ async def ask_question(
             selected_document_ids=chat_request.selected_document_ids,
         )
 
-        return ChatResponseDto(answer=answer, timestamp=datetime.utcnow())
+        return ChatResponseDto(answer=answer, timestamp=datetime.now(UTC))
 
     except Exception as error:
         raise HTTPException(

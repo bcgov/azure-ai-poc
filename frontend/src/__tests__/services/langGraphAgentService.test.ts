@@ -1,3 +1,4 @@
+import '@testing-library/jest-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Mock import.meta.env before importing the service
@@ -12,6 +13,19 @@ vi.stubGlobal('import', {
 // Mock fetch
 const mockFetch = vi.fn()
 vi.stubGlobal('fetch', mockFetch)
+
+// Mock auth store
+const mockAuthStore = {
+  getToken: vi.fn(() => 'mock-token'),
+  updateToken: vi.fn(),
+  isLoggedIn: vi.fn(() => true),
+}
+
+vi.mock('@/stores', () => ({
+  useAuthStore: {
+    getState: () => mockAuthStore,
+  },
+}))
 
 import type { LangGraphAgentRequest } from '@/services/langGraphAgentService'
 import { langGraphAgentService } from '@/services/langGraphAgentService'
@@ -54,16 +68,14 @@ describe('LangGraphAgentService', () => {
 
       expect(result.success).toBe(true)
       expect(result.data).toEqual(mockResponse)
-      expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:8000/chat/agent',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(request),
+      expect(mockFetch).toHaveBeenCalledWith('/api/v1/chat/ask', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer mock-token',
         },
-      )
+        body: JSON.stringify(request),
+      })
     })
 
     it('should handle API errors', async () => {
@@ -104,7 +116,7 @@ describe('LangGraphAgentService', () => {
   describe('streamMessage', () => {
     it('should simulate streaming with chunks', async () => {
       const mockResponse = {
-        response: 'Hello world test',
+        answer: 'Hello world test',
         session_id: 'test-session',
       }
 
@@ -134,8 +146,20 @@ describe('LangGraphAgentService', () => {
   describe('getCapabilities', () => {
     it('should return capabilities when endpoint exists', async () => {
       const mockCapabilities = {
-        tools: ['search', 'calculator', 'weather'],
-        features: ['reasoning', 'memory'],
+        tools: [
+          'document_search',
+          'citation_generator',
+          'context_analyzer',
+          'memory_manager',
+        ],
+        features: [
+          'Document-aware responses',
+          'Automatic source citations',
+          'Multi-step reasoning',
+          'Tool usage capabilities',
+          'Context-aware conversations',
+          'Session memory',
+        ],
       }
 
       mockFetch.mockResolvedValueOnce({
@@ -157,13 +181,22 @@ describe('LangGraphAgentService', () => {
 
       const result = await langGraphAgentService.getCapabilities()
 
-      expect(result.success).toBe(false)
+      // The implementation always returns success with static capabilities
+      expect(result.success).toBe(true)
       expect(result.data).toEqual({
-        tools: ['document_search', 'weather', 'calculator'],
+        tools: [
+          'document_search',
+          'citation_generator',
+          'context_analyzer',
+          'memory_manager',
+        ],
         features: [
-          'multi-step reasoning',
-          'tool chaining',
-          'memory persistence',
+          'Document-aware responses',
+          'Automatic source citations',
+          'Multi-step reasoning',
+          'Tool usage capabilities',
+          'Context-aware conversations',
+          'Session memory',
         ],
       })
     })

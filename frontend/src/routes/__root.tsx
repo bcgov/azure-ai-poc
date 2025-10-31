@@ -1,7 +1,6 @@
 import { createRootRoute, ErrorComponent, Outlet } from '@tanstack/react-router'
-import Layout from '@/components/Layout'
+import { Layout, AuthGuard } from '@/components/layout'
 import NotFound from '@/components/NotFound'
-import AuthGuard from '@/components/AuthGuard'
 
 export const Route = createRootRoute({
   component: () => (

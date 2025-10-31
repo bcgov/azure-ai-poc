@@ -13,6 +13,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.services.cosmos_db_service import get_cosmos_db_service
+from app.services.multi_tenant_service import get_multi_tenant_service
 
 
 class HealthStatus:
@@ -84,6 +85,7 @@ async def health_check() -> dict[str, Any]:
 )
 async def readiness_check(
     cosmos_db_service=Depends(get_cosmos_db_service),
+    multi_tenant_service=Depends(get_multi_tenant_service),
 ) -> dict[str, Any]:
     """Readiness check that verifies all critical services are available."""
     import time
@@ -103,6 +105,23 @@ async def readiness_check(
     except Exception as error:
         logging.error(f"Cosmos DB health check failed: {error}")
         checks["cosmosdb"] = {
+            "status": HealthStatus.DOWN,
+            "error": str(error),
+            "timestamp": time.time(),
+        }
+        overall_status = HealthStatus.DOWN
+
+    try:
+        # Check Multi-tenant service health
+        mt_health = await multi_tenant_service.health_check()
+        checks["multi_tenant"] = mt_health
+
+        if mt_health["status"] != HealthStatus.UP:
+            overall_status = HealthStatus.DOWN
+
+    except Exception as error:
+        logging.error(f"Multi-tenant service health check failed: {error}")
+        checks["multi_tenant"] = {
             "status": HealthStatus.DOWN,
             "error": str(error),
             "timestamp": time.time(),

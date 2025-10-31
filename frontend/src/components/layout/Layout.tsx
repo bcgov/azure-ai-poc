@@ -1,7 +1,7 @@
 import React, { type FC } from 'react'
 import { Footer, Header } from '@bcgov/design-system-react-components'
 import { Button } from 'react-bootstrap'
-import { useAuth } from '../stores'
+import { useAuth } from '@/stores'
 
 type Props = {
   children: React.ReactNode
@@ -15,16 +15,22 @@ const Layout: FC<Props> = ({ children }) => {
   }
 
   return (
-    <div className="d-flex flex-column min-vh-100">
-      <div className="mb-3">
+    <div className="app-layout">
+      <div className="app-header shadow-sm">
         <Header title={'AI Chat'} titleElement="h1">
           <div className="d-flex align-items-center gap-3">
             {isLoggedIn && (
               <div className="d-flex align-items-center gap-3">
-                <span className="text-dark fw-semibold">
+                <span className="text-dark fw-semibold d-flex align-items-center">
+                  <i className="bi bi-person-circle me-2"></i>
                   {username || 'User'}
                 </span>
-                <Button variant="primary" size="sm" onClick={handleLogout}>
+                <Button 
+                  variant="primary" 
+                  size="sm" 
+                  onClick={handleLogout}
+                  style={{ borderRadius: '0.5rem', fontWeight: '600' }}
+                >
                   <i
                     className="bi bi-box-arrow-right"
                     style={{ fontSize: '1rem', marginRight: '0.25rem' }}
@@ -36,8 +42,10 @@ const Layout: FC<Props> = ({ children }) => {
           </div>
         </Header>
       </div>
-      <div className="flex-grow-1 d-flex flex-column">{children}</div>
-      <Footer />
+      <div className="app-content">{children}</div>
+      <div className="app-footer">
+        <Footer />
+      </div>
     </div>
   )
 }

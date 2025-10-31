@@ -1,5 +1,6 @@
 """FastAPI application bootstrap and configuration."""
 
+import asyncio
 import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -13,6 +14,7 @@ from slowapi.errors import RateLimitExceeded
 from app.core.config import settings
 from app.core.logger import get_logger, setup_logging
 from app.core.telemetry import instrument_fastapi_app, setup_telemetry
+from app.middleware.compression_middleware import CompressionMiddleware
 from app.middleware.logging_middleware import LoggingMiddleware
 from app.middleware.metrics_middleware import MetricsMiddleware
 from app.middleware.rate_limit_middleware import limiter
@@ -33,32 +35,63 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     setup_logging()
     setup_telemetry()
 
+    skip_startup = os.getenv("SKIP_STARTUP_INIT", "").lower() in {"1", "true", "yes"}
+    if skip_startup:
+        logger.info("SKIP_STARTUP_INIT enabled - skipping external service initialization")
+        try:
+            yield
+        finally:
+            logger.info("SKIP_STARTUP_INIT enabled - skipping external service shutdown")
+        return
+
     try:
-        # Initialize Azure OpenAI service (legacy - now used via LangChain)
-        logger.info("Initializing Azure OpenAI service (legacy backend)...")
-        azure_openai_service = get_azure_openai_service()
-        await azure_openai_service.initialize_clients()
+        # Parallelize initialization of independent services
+        logger.info("Initializing independent services in parallel...")
 
-        # Initialize Cosmos DB service
-        logger.info("Initializing Cosmos DB service...")
-        cosmos_db_service = get_cosmos_db_service()
-        await cosmos_db_service.health_check()
+        async def init_azure_openai():
+            """Initialize Azure OpenAI service."""
+            logger.info("Initializing Azure OpenAI service (legacy backend)...")
+            azure_openai_service = get_azure_openai_service()
+            await azure_openai_service.initialize_clients()
 
-        # Initialize LangChain AI service (it will automatically use the cosmos service)
+        async def init_cosmos_db():
+            """Initialize Cosmos DB service."""
+            logger.info("Initializing Cosmos DB service...")
+            cosmos_db_service = get_cosmos_db_service()
+            await cosmos_db_service.health_check()
+
+        async def init_azure_search():
+            """Initialize Azure AI Search service."""
+            logger.info("Initializing Azure AI Search service...")
+            get_azure_search_service()  # Lazy initialization
+
+        # Run independent services in parallel
+        await asyncio.gather(
+            init_azure_openai(),
+            init_cosmos_db(),
+            init_azure_search(),
+        )
+
+        # Initialize services that depend on Cosmos DB (must be sequential)
         logger.info("Initializing LangChain AI service...")
         from app.services.langchain_service import get_langchain_ai_service
 
         langchain_service = get_langchain_ai_service()
         await langchain_service.initialize_client()
 
-        # Initialize LangGraph agent service
+        # Initialize LangGraph agent service (depends on LangChain)
         logger.info("Initializing LangGraph agent service...")
         from app.services.langgraph_agent_service import get_langgraph_agent_service
 
         get_langgraph_agent_service()  # Initialize the service
 
-        # initializing Azure AI Search service
-        get_azure_search_service()
+        # Initialize multi-tenant service (depends on Cosmos DB)
+        logger.info("Initializing multi-tenant service...")
+        from app.services.multi_tenant_service import get_multi_tenant_service
+
+        multi_tenant_service = get_multi_tenant_service()
+        await multi_tenant_service.initialize()
+
         logger.info("All services initialized successfully")
 
     except Exception as e:
@@ -119,6 +152,13 @@ def create_app() -> FastAPI:
     # Security middleware (equivalent to helmet)
     app.add_middleware(SecurityMiddleware)
 
+    # Compression middleware (compress responses > 1KB)
+    app.add_middleware(
+        CompressionMiddleware,
+        min_size=1024,
+        compression_level=6,
+    )
+
     # CORS middleware
     app.add_middleware(
         CORSMiddleware,
@@ -142,6 +182,15 @@ def create_app() -> FastAPI:
 
     # Include all routers with API prefix and versioning
     app.include_router(api_router, prefix="/api/v1")
+
+    @app.get("/api/v1/", tags=["health"], summary="API index")
+    async def api_index():
+        """Provide high-level API metadata for quick smoke tests."""
+        return {
+            "name": app.title,
+            "version": app.version,
+            "status": "up",
+        }
 
     # Backward compatibility: redirect legacy /docs to /api/docs if tests/reference expect it
     from fastapi.responses import RedirectResponse
