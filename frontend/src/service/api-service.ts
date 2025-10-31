@@ -1,16 +1,11 @@
 import type { AxiosInstance } from 'axios'
-import axios from 'axios'
+import httpClient from '../services/httpClient'
 
 class APIService {
   private readonly client: AxiosInstance
 
   constructor() {
-    this.client = axios.create({
-      baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    })
+    this.client = httpClient
     this.client.interceptors.response.use(
       (config) => {
         console.info(
@@ -20,6 +15,7 @@ class APIService {
       },
       (error) => {
         console.error(error)
+        return Promise.reject(error)
       },
     )
   }

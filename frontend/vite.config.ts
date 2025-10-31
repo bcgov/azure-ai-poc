@@ -5,10 +5,10 @@ import { TanStackRouterVite } from '@tanstack/router-plugin/vite'
 
 export default ({ mode }) => {
   // Load app-level env vars to node-level env vars.
-  const loadedEnv = loadEnv(mode, process.cwd());
+  const loadedEnv = loadEnv(mode, process.cwd())
   for (const [key, value] of Object.entries(loadedEnv)) {
     if (key.startsWith('VITE_')) {
-      process.env[key] = value;
+      process.env[key] = value
     }
   }
 

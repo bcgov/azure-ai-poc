@@ -9,11 +9,17 @@
 		format console
 		level {$LOG_LEVEL}
 	}
+	handle /env.js {
+		header {
+			Content-Type text/javascript
+		}
+		respond `window.config={"VITE_KEYCLOAK_URL":"{$VITE_KEYCLOAK_URL}", "VITE_KEYCLOAK_REALM":"{$VITE_KEYCLOAK_REALM}", "VITE_KEYCLOAK_CLIENT_ID":"{$VITE_KEYCLOAK_CLIENT_ID}"};`
+	}
 	root * /srv
 	encode zstd gzip
 	file_server
 	@spa_router {
-		not path /api*
+		not path /api* /env.js /health /favicon.ico /index.html
 		file {
 			try_files {path} /index.html
 		}
@@ -23,6 +29,8 @@
 	reverse_proxy /api* {$VITE_BACKEND_URL} {
 		header_up Host {http.reverse_proxy.upstream.hostport}
 		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
 	}
 	header {
 		-Server

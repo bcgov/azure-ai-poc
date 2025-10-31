@@ -40,6 +40,27 @@ variable "appinsights_instrumentation_key" {
   nullable    = false
 }
 
+# Azure OpenAI Configuration Variables
+
+variable "azure_openai_api_key" {
+  description = "Azure OpenAI API key"
+  type        = string
+  sensitive   = true
+  nullable    = false
+}
+
+variable "azure_openai_deployment_name" {
+  description = "Azure OpenAI model deployment name"
+  type        = string
+  default     = "gpt-4o"
+}
+
+variable "azure_openai_embedding_deployment" {
+  description = "Azure OpenAI embedding model deployment name"
+  type        = string
+  default     = "text-embedding-3-large"
+}
+
 variable "backend_autoscale_enabled" {
   description = "Whether autoscaling is enabled for the backend App Service plan."
   type        = bool
@@ -71,37 +92,17 @@ variable "container_registry_url" {
   default     = "https://ghcr.io"
 }
 
-variable "database_name" {
-  description = "The name of the PostgreSQL database."
-  type        = string
-  nullable    = false
-}
-
-variable "db_master_password" {
-  description = "The password for the PostgreSQL admin user."
-  type        = string
-  sensitive   = true
-  nullable    = false
-}
-
-variable "enable_psql_sidecar" {
-  description = "Whether to enable the CloudBeaver PostgreSQL sidecar."
-  type        = bool
-  default     = false
-}
-
-variable "frontend_frontdoor_resource_guid" {
-  description = "The resource GUID for the Front Door service associated with the frontend App Service."
-  type        = string
-  nullable    = false
-}
 
 variable "frontend_possible_outbound_ip_addresses" {
   description = "Possible outbound IP addresses for the frontend App Service."
   type        = string
   nullable    = false
 }
-
+variable "image_tag" {
+  description = "Tag for the container images"
+  type        = string
+  nullable    = false
+}
 variable "location" {
   description = "The Azure region where resources will be created."
   type        = string
@@ -120,17 +121,6 @@ variable "node_env" {
   default     = "production"
 }
 
-variable "postgres_host" {
-  description = "The FQDN of the PostgreSQL server."
-  type        = string
-  nullable    = false
-}
-
-variable "postgresql_admin_username" {
-  description = "The admin username for the PostgreSQL server."
-  type        = string
-  nullable    = false
-}
 
 variable "private_endpoint_subnet_id" {
   description = "The subnet ID for private endpoints."
@@ -150,14 +140,50 @@ variable "resource_group_name" {
   nullable    = false
 }
 
-variable "user_assigned_identity_client_id" {
-  description = "The client ID of the user-assigned managed identity for the backend."
+
+#cosmosdb variables
+variable "cosmosdb_endpoint" {
+  description = "The endpoint URL for the Cosmos DB instance."
+  type        = string
+  nullable    = false
+}
+variable "cosmosdb_db_name" {
+  description = "The name of the Cosmos DB database."
+  type        = string
+  nullable    = false
+}
+variable "cosmosdb_container_name" {
+  description = "The name of the Cosmos DB container."
   type        = string
   nullable    = false
 }
 
-variable "user_assigned_identity_id" {
-  description = "The resource ID of the user-assigned managed identity for the backend."
+variable "azure_openai_llm_endpoint" {
+  description = "The endpoint for the Azure OpenAI LLM service."
   type        = string
   nullable    = false
 }
+variable "azure_openai_embedding_endpoint" {
+  description = "The endpoint for the Azure OpenAI embedding service."
+  type        = string
+  nullable    = false
+}
+
+# Azure AI Search Configuration Variables
+variable "azure_search_endpoint" {
+  description = "Azure AI Search service endpoint URL"
+  type        = string
+  nullable    = false
+}
+
+variable "azure_search_index_name" {
+  description = "Azure AI Search index name for document storage"
+  type        = string
+  default     = "documents-index"
+}
+variable "keycloak_url" {
+  description = "The URL for the Keycloak authentication server."
+  type        = string
+  nullable    = false
+}
+
