@@ -441,8 +441,8 @@ const ChatInterface: FC = () => {
   }, [selectedDocument, documents, selectedDocumentName])
 
   return (
-    <Container fluid className="vh-100 d-flex flex-column p-0">
-      <Row className="flex-grow-1 overflow-hidden g-0">
+    <Container fluid className="chat-interface-container p-0">
+      <Row className="flex-grow-1 overflow-hidden g-0 h-100">
         <Col
           xs={12}
           sm={12}
@@ -453,30 +453,20 @@ const ChatInterface: FC = () => {
           className="mx-auto d-flex flex-column h-100 position-relative px-2 px-md-3"
         >
           {/* Chat Header */}
-          <div className="py-2 py-md-3 border-bottom flex-shrink-0">
+          <div className="chat-header py-2 py-md-3 border-bottom flex-shrink-0">
             <div className="d-flex justify-content-between align-items-center mb-2">
               <h4 className="mb-0">
                 <i className="bi bi-chat-dots me-2"></i>
                 AI Document Assistant
               </h4>
-              <div className="d-flex gap-2">
-                <Form.Check
-                  type="switch"
-                  id="streaming-toggle"
-                  label="Streaming"
-                  checked={streamingEnabled}
-                  onChange={(e) => setStreamingEnabled(e.target.checked)}
-                  className="d-flex align-items-center"
-                />
-                <Button
-                  variant="primary"
-                  size="sm"
-                  onClick={() => setShowUploadModal(true)}
-                >
-                  <i className="bi bi-cloud-upload me-1"></i>
-                  Upload Document
-                </Button>
-              </div>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => setShowUploadModal(true)}
+              >
+                <i className="bi bi-cloud-upload me-1"></i>
+                Upload Document
+              </Button>
             </div>
 
             {/* Document Selection */}
@@ -504,12 +494,12 @@ const ChatInterface: FC = () => {
                   {documents.map((doc) => (
                     <div
                       key={doc.id}
-                      className="d-flex align-items-center border rounded p-1"
+                      className={`document-chip d-flex align-items-center ${selectedDocument === doc.id ? 'selected' : ''}`}
                       style={{
                         backgroundColor:
                           selectedDocument === doc.id
-                            ? 'var(--bs-info-bg-subtle, #e3f2fd)'
-                            : 'var(--bs-gray-100, #f8f9fa)',
+                            ? 'rgba(13, 110, 253, 0.1)'
+                            : '#f8f9fa',
                       }}
                     >
                       <Button
@@ -523,21 +513,22 @@ const ChatInterface: FC = () => {
                         className="text-truncate border-0 me-1"
                         style={{
                           maxWidth: 'clamp(8rem, 11.25rem, 15rem)',
+                          fontWeight: selectedDocument === doc.id ? '600' : '400',
                         }}
                       >
                         <i className={`${getFileIcon(doc.filename)} me-1`}></i>
                         {doc.filename}
                       </Button>
                       <Button
-                        variant="outline-danger"
+                        variant="link"
                         size="sm"
                         onClick={() => handleDeleteDocument(doc)}
-                        className="border-0 p-1 d-flex align-items-center justify-content-center"
+                        className="document-delete-btn border-0 p-1 d-flex align-items-center justify-content-center text-danger"
                         style={{ width: '1.75rem', height: '1.75rem' }}
                         title={`Remove ${doc.filename}`}
                       >
                         <i
-                          className="bi bi-x"
+                          className="bi bi-x-circle-fill"
                           style={{ fontSize: '1.1em' }}
                         ></i>
                       </Button>
@@ -570,7 +561,7 @@ const ChatInterface: FC = () => {
             onScroll={handleScroll}
           >
             {messages.length === 0 ? (
-              <div className="text-center text-muted py-5">
+              <div className="empty-state">
                 {isLoadingDocuments ? (
                   <>
                     <Spinner animation="border" className="mb-3" />
@@ -579,34 +570,39 @@ const ChatInterface: FC = () => {
                   </>
                 ) : documents.length === 0 ? (
                   <>
-                    <i className="bi bi-file-earmark-plus display-4 mb-3"></i>
+                    <i className="bi bi-file-earmark-plus empty-state-icon"></i>
                     <h5>Get Started with Document Q&A</h5>
-                    <p className="mb-3">
+                    <p>
                       Upload your documents to start asking questions and get
                       AI-powered answers with source citations.
                     </p>
                     <Button
                       variant="primary"
-                      size="lg"
                       onClick={() => setShowUploadModal(true)}
                       className="mb-3"
+                      style={{ 
+                        borderRadius: '0.75rem', 
+                        fontWeight: '600',
+                        padding: '0.5rem 1.5rem'
+                      }}
                     >
                       <i className="bi bi-cloud-upload me-2"></i>
                       Upload Your First Document
                     </Button>
-                    <div className="small text-muted">
-                      <p className="mb-1">
-                        Supported formats: PDF, Markdown (.md), HTML
-                      </p>
-                      <p className="mb-0">
-                        Ask questions about specific documents or search across
-                        your entire collection
-                      </p>
+                    <div className="d-flex gap-3 justify-content-center flex-wrap small text-muted">
+                      <span>
+                        <i className="bi bi-check-circle-fill text-success me-1"></i>
+                        PDF, Markdown, HTML
+                      </span>
+                      <span>
+                        <i className="bi bi-lightning-fill text-warning me-1"></i>
+                        AI-Powered Search
+                      </span>
                     </div>
                   </>
                 ) : (
                   <>
-                    <i className="bi bi-chat-quote display-4 mb-3"></i>
+                    <i className="bi bi-chat-quote empty-state-icon d-block"></i>
                     <h5>Welcome to AI Document Assistant</h5>
                     <p>
                       Upload documents (PDF, Markdown, or HTML) and ask
@@ -802,7 +798,7 @@ const ChatInterface: FC = () => {
 
           {/* Input Form */}
           <div className="border-top pt-2 pt-md-3 chat-input-container flex-shrink-0">
-            <Form onSubmit={handleSubmit} style={{ marginBottom: '5em' }}>
+            <Form onSubmit={handleSubmit}>
               {/* LangGraph Agent and Controls */}
               <div className="mb-2 d-flex flex-wrap align-items-center gap-2">
                 <div className="d-flex align-items-center">

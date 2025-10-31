@@ -15,7 +15,7 @@ import time
 from contextlib import asynccontextmanager
 from typing import Any
 
-from azure.cosmos import ContainerProxy, CosmosClient, DatabaseProxy
+from azure.cosmos import ContainerProxy, CosmosClient, DatabaseProxy, PartitionKey
 from azure.cosmos.exceptions import CosmosHttpResponseError, CosmosResourceNotFoundError
 from azure.identity import DefaultAzureCredential
 from pydantic import BaseModel, Field
@@ -107,6 +107,71 @@ class CosmosDbService:
             self.logger.error(f"Failed to initialize Cosmos DB client: {error}")
             raise
 
+    def get_container(self, container_name: str) -> ContainerProxy:
+        """
+        Get a container client for the specified container name.
+
+        Args:
+            container_name: The name of the container
+
+        Returns:
+            ContainerProxy for the specified container
+
+        Raises:
+            ValueError: If database is not initialized
+            CosmosResourceNotFoundError: If container doesn't exist
+        """
+        if not self.database:
+            raise ValueError("Database not initialized")
+
+        return self.database.get_container_client(container_name)
+
+    async def create_container(
+        self,
+        container_name: str,
+        partition_key_path: str,
+        container_properties: dict[str, Any] | None = None,
+    ) -> ContainerProxy:
+        """Create a container if it does not already exist."""
+        if not self.database:
+            raise ValueError("Database not initialized")
+
+        try:
+            partition_key = PartitionKey(path=partition_key_path)
+            indexing_policy = None
+            if container_properties:
+                indexing_policy = container_properties.get("indexingPolicy")
+
+            container = self.database.create_container_if_not_exists(
+                id=container_name,
+                partition_key=partition_key,
+                indexing_policy=indexing_policy,
+            )
+
+            self.logger.info("Cosmos DB container ensured", container_name=container_name)
+            return container
+
+        except Exception as error:
+            self.logger.error(f"Failed to create Cosmos DB container '{container_name}': {error}")
+            raise
+
+    async def delete_container(self, container_name: str) -> None:
+        """Delete a container if it exists."""
+        if not self.database:
+            raise ValueError("Database not initialized")
+
+        try:
+            self.database.delete_container(container_name)
+            self.logger.info("Cosmos DB container deleted", container_name=container_name)
+        except CosmosResourceNotFoundError:
+            self.logger.warning(
+                "Cosmos DB container not found during delete",
+                container_name=container_name,
+            )
+        except Exception as error:
+            self.logger.error(f"Failed to delete Cosmos DB container '{container_name}': {error}")
+            raise
+
     async def create_item(self, item: dict[str, Any], partition_key: str) -> dict[str, Any]:
         """
         Create an item in Cosmos DB.
@@ -146,7 +211,7 @@ class CosmosDbService:
                 raise ValueError(
                     f"Document too large for Cosmos DB storage ({item_size_kb}KB). "
                     "Consider breaking it into smaller chunks."
-                )
+                ) from error
 
             self.logger.error(f"Error creating item in Cosmos DB: {error}")
             raise
@@ -416,18 +481,18 @@ class CosmosDbService:
                 self.logger.error(
                     "Invalid vector search query - check embedding dimensions and query structure"
                 )
-                raise ValueError(f"Vector search query error: {error_message}")
+                raise ValueError(f"Vector search query error: {error_message}") from error
             elif "RequestRateTooLarge" in error_message:
                 self.logger.warning("Cosmos DB request rate exceeded - implementing backoff")
-                raise Exception(f"Rate limit exceeded: {error_message}")
+                raise Exception(f"Rate limit exceeded: {error_message}") from error
             elif "ServiceUnavailable" in error_message:
                 self.logger.error("Cosmos DB service unavailable")
-                raise Exception(f"Service unavailable: {error_message}")
+                raise Exception(f"Service unavailable: {error_message}") from error
             elif "VectorDistance" in error_message:
                 self.logger.error(
                     "VectorDistance function error - check vector indexing configuration"
                 )
-                raise ValueError(f"Vector indexing error: {error_message}")
+                raise ValueError(f"Vector indexing error: {error_message}") from error
 
             self.logger.error(f"Error performing vector search in Cosmos DB: {error}")
             raise

@@ -44,7 +44,7 @@ dependencies = [
     "click>=8.1.7", # CLI framework
     "rich>=13.8.1", # Rich text and pretty printing
     "beautifulsoup4>=4.13.5",
-    "pypdf2>=3.0.1",
+    "pypdf>=5.1.0",
     "markdownify>=1.2.0",
     "opentelemetry-instrumentation-requests>=0.58b0",
     "psutil>=7.0.0",
@@ -55,6 +55,8 @@ dependencies = [
     "langchain-community>=0.3.29",
     "langgraph>=0.6.7",
     "langchain-core>=0.3.76",
+    # Agent Lightning for agent optimization
+    "agentlightning>=0.1.0",
 ]
 
 [project.optional-dependencies]
@@ -64,6 +66,7 @@ dev = [
     "pytest-asyncio>=0.24.0",
     "pytest-cov>=5.0.0",
     "pytest-mock>=3.14.0",
+    "coverage>=7.10.6",                  # Coverage.py for pytest-cov
     "httpx>=0.27.2",                     # For testing HTTP endpoints
     
     # Code quality
@@ -125,6 +128,9 @@ source = ["app"]
 omit = ["*/tests/*", "*/test_*.py"]
 
 [tool.coverage.report]
+# Fail build if coverage falls below thresholds
+fail_under = 35
+
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",
@@ -138,8 +144,19 @@ exclude_lines = [
     "@(abc\\.)?abstractmethod",
 ]
 
+# Coverage thresholds by module type
+[tool.coverage.paths]
+source = ["app"]
+
+# Custom coverage requirements for specific modules
+# Core modules (cache, config, logger, telemetry) should maintain 75%+
+# Middleware modules should maintain 75%+
+# Model modules should maintain 75%+
+# Integration-heavy services can be lower due to external dependencies
+
 [dependency-groups]
 dev = [
+    "coverage>=7.10.6",
     "pytest>=8.4.2",
     "pytest-asyncio>=1.2.0",
     "pytest-cov>=7.0.0",

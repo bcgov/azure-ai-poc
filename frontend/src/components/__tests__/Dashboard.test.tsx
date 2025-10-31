@@ -1,3 +1,4 @@
+import '@testing-library/jest-dom'
 import { vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import Dashboard from '@/components/Dashboard'
@@ -14,6 +15,6 @@ describe('Dashboard', () => {
       useNavigate: useNavigateMock,
     }))
     render(<Dashboard />)
-    expect(screen.getByText(/Employee ID/i)).toBeInTheDocument()
+    expect(screen.getByText(/AI Document Assistant/i)).toBeInTheDocument()
   })
 })

@@ -19,13 +19,14 @@ from datetime import UTC, datetime
 from io import BytesIO
 from typing import Any
 
-import PyPDF2 as pypdf2
+import pypdf
 from bs4 import BeautifulSoup
 from markdownify import markdownify
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.config import settings
-from app.services.azure_search_service import get_azure_search_service, VectorSearchRequest
+from app.services.azure_search_service import VectorSearchRequest, get_azure_search_service
+from app.services.optimized_embedding_service import get_optimized_embedding_service
 
 
 class DocumentChunk(BaseModel):
@@ -61,8 +62,7 @@ class ProcessedDocument(BaseModel):
     user_id: str | None = None
     type: str = "document"
 
-    class Config:
-        populate_by_name = True  # allow both chunk_ids and chunkIds
+    model_config = ConfigDict(populate_by_name=True)  # allow both chunk_ids and chunkIds
 
 
 class UploadedFile(BaseModel):
@@ -227,9 +227,10 @@ class DocumentService:
             if not chunks:
                 raise ValueError("Failed to create any chunks from the document content")
 
-            # Generate embeddings for all chunks in batches using LangChain
+            # Generate embeddings for all chunks using optimized service (with caching & batching)
             chunk_contents = [chunk.content for chunk in chunks]
-            embeddings = await self.langchain_service.generate_embeddings_batch(chunk_contents)
+            embedding_service = get_optimized_embedding_service()
+            embeddings = await embedding_service.embed_texts(chunk_contents)
 
             # Assign embeddings to chunks
             embedded_chunks = 0
@@ -318,7 +319,7 @@ class DocumentService:
         """Extract text from PDF content."""
         try:
             pdf_file = BytesIO(content)
-            pdf_reader = pypdf2.PdfReader(pdf_file)
+            pdf_reader = pypdf.PdfReader(pdf_file)
 
             text_parts = []
             for page in pdf_reader.pages:

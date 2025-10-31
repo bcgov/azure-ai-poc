@@ -89,16 +89,15 @@ class TestCapabilitiesAndHealth:
             metrics_text = response.text
             assert len(metrics_text) > 0
             print("✅ Metrics endpoint accessible with data")
+            # Should contain some basic metrics
+            assert "python_info" in metrics_text or "process_" in metrics_text
+            print(f"   Metrics size: {len(metrics_text)} characters")
         elif response.status_code == 307:
             print("✅ Metrics endpoint returns redirect (307)")
         else:
             print(f"✅ Metrics endpoint requires authentication (status: {response.status_code})")
 
-        # Should contain some basic metrics
-        assert "python_info" in metrics_text or "process_" in metrics_text
-
         print("✅ Metrics endpoint is working")
-        print(f"   Metrics size: {len(metrics_text)} characters")
 
     async def test_langgraph_capabilities_discovery(
         self,
@@ -106,21 +105,21 @@ class TestCapabilitiesAndHealth:
         auth_headers: dict[str, str],
     ):
         """Test discovering LangGraph agent capabilities."""
-        # This would be a capabilities endpoint if it exists
-        # For now, test the agent endpoint to see what it can do
+        # Test the ask endpoint to see what it can do
 
         payload = {
             "message": "What are your capabilities?",
         }
 
         response = await async_client.post(
-            "/api/v1/chat/agent",
+            "/api/v1/chat/ask",
             json=payload,
             headers=auth_headers,
         )
 
         if response.status_code == 200:
             data = response.json()
+            assert "answer" in data
             print(f"✅ LangGraph capabilities inquiry: {data['answer'][:100]}...")
         else:
             print(f"⚠️  LangGraph capabilities test failed: {response.status_code}")
@@ -139,9 +138,9 @@ class TestCapabilitiesAndHealth:
         assert response_404.status_code == 404
         print("✅ 404 error handling works")
 
-        # Test malformed JSON handling
+        # Test malformed JSON handling on existing endpoint
         response_400 = await async_client.post(
-            "/api/v1/chat/agent",
+            "/api/v1/chat/ask",
             content="invalid json {",
             headers={"Content-Type": "application/json", **auth_headers},
         )

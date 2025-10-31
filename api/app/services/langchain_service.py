@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.core.logger import get_logger
 from app.services.cosmos_db_service import CosmosDbService
 from app.services.memory_service import MemoryService
+from app.services.optimized_embedding_service import get_optimized_embedding_service
 
 logger = get_logger(__name__)
 
@@ -415,7 +416,7 @@ INSTRUCTIONS:
 
     async def generate_embeddings_batch(self, texts: list[str]) -> list[list[float]]:
         """
-        Generate embeddings for multiple texts using LangChain Azure OpenAI embeddings.
+        Generate embeddings for multiple texts using optimized service with caching & batching.
 
         Args:
             texts: List of texts to generate embeddings for
@@ -423,13 +424,10 @@ INSTRUCTIONS:
         Returns:
             List of embedding lists
         """
-        if not self.embeddings_model:
-            msg = "Embeddings model not initialized"
-            raise RuntimeError(msg)
-
         try:
-            # Use LangChain's embed_documents method for batch processing
-            embeddings = await self.embeddings_model.aembed_documents(texts)
+            # Use optimized embedding service with caching and batching
+            embedding_service = get_optimized_embedding_service()
+            embeddings = await embedding_service.embed_texts(texts)
             return embeddings
         except Exception as e:
             self.logger.error(f"Error generating batch embeddings: {e}")

@@ -253,7 +253,14 @@ class LangGraphAgentService:
 
         # Build the agent workflow
         self.graph = self._build_agent_graph()
-        self.logger.info("LangGraph agent service initialized with document search capabilities")
+
+        # Wrap agent with Agent Lightning for optimization (zero-code-change pattern)
+        self.graph = self._wrap_with_agent_lightning(self.graph)
+
+        self.logger.info(
+            "LangGraph agent service initialized with document search capabilities "
+            "and Agent Lightning optimization"
+        )
 
     def _build_agent_graph(self) -> StateGraph:
         """Build the agent workflow graph."""
@@ -275,6 +282,167 @@ class LangGraphAgentService:
 
         # Compile the graph
         return graph.compile()
+
+    def _wrap_with_agent_lightning(self, agent: Any) -> Any:
+        """
+        Wrap the LangGraph agent with Agent Lightning for optimization.
+
+        This implements the zero-code-change pattern: the wrapper preserves
+        the agent's API while adding optimization capabilities.
+
+        Args:
+            agent: The compiled LangGraph agent to wrap
+
+        Returns:
+            Wrapped agent (or original if Agent Lightning unavailable/disabled)
+        """
+        try:
+            from app.core.agent_lightning_config import (
+                create_optimization_config,
+                is_agent_lightning_available,
+            )
+            from app.services.agent_wrapper_service import wrap
+
+            # Check if Agent Lightning is available and enabled
+            if not is_agent_lightning_available():
+                self.logger.info(
+                    "Agent Lightning not available or disabled - using unwrapped agent"
+                )
+                return agent
+
+            # Create optimization config for document QA agent
+            # Note: tenant_id here is a fallback default. The wrapper extracts
+            # the actual user_id from each request's AgentState dynamically
+            config = create_optimization_config(
+                agent_name="langgraph_document_qa",
+                tenant_id="default",  # Fallback only - wrapper uses user_id from request
+                enable_rl=True,
+                enable_prompt_opt=False,  # Can enable after baseline established
+                enable_sft=False,  # Can enable after training data collected
+            )
+
+            # Wrap the agent (preserves API, adds per-request tenant_id extraction)
+            wrapped = wrap(agent, config)
+
+            self.logger.info(
+                "LangGraph agent wrapped with Agent Lightning",
+                agent_name="langgraph_document_qa",
+                optimization_algorithms=["rl"],
+            )
+
+            return wrapped
+
+        except ImportError as e:
+            self.logger.warning(f"Agent Lightning not installed ({e}) - using unwrapped agent")
+            return agent
+        except Exception as e:
+            self.logger.error(
+                f"Failed to wrap agent with Agent Lightning: {e} - using unwrapped agent"
+            )
+            return agent
+
+    async def _collect_execution_metrics(
+        self,
+        query: str,
+        response: str,
+        latency_ms: float,
+        user_id: str | None,
+        metadata: dict[str, Any],
+    ) -> None:
+        """
+        Collect execution metrics for Agent Lightning optimization.
+
+        This method is non-blocking and failures don't affect agent execution.
+
+        Args:
+            query: User query
+            response: Agent response
+            latency_ms: Execution latency in milliseconds
+            user_id: User identifier (used as tenant_id)
+            metadata: Additional metadata from agent execution
+        """
+        try:
+            from app.models.optimization_models import OptimizationConfig
+            from app.services.optimization_service import OptimizationDataCollector
+
+            # Extract token usage from metadata if available
+            token_usage = 0
+            if "search_results" in metadata:
+                # Estimate tokens based on response length (rough approximation)
+                token_usage = len(response.split()) + len(query.split())
+
+            # Calculate quality signal (confidence score based on response characteristics)
+            quality_signal = self._calculate_quality_signal(response, metadata)
+
+            # Use user_id as tenant_id for per-user metrics isolation
+            # If no user_id provided, fall back to "default" for backwards compatibility
+            tenant_id = user_id or "default"
+
+            # Create optimization config with proper tenant_id
+            config = OptimizationConfig(
+                tenant_id=tenant_id,
+                agent_name="langgraph_document_qa",
+            )
+
+            collector = OptimizationDataCollector(config=config)
+
+            # Prepare agent metadata
+            agent_metadata = {
+                "latency_ms": latency_ms,
+                "tokens": token_usage,
+                **metadata,
+            }
+
+            collector.collect_metrics(
+                query={"input": query},
+                response={"output": response},
+                agent_metadata=agent_metadata,
+                quality_signal=quality_signal,
+            )
+
+            self.logger.info(
+                "Metrics collected for Agent Lightning",
+                tenant_id=tenant_id,
+                latency_ms=latency_ms,
+                token_usage=token_usage,
+                quality_signal=quality_signal,
+            )
+
+        except Exception as e:
+            # Don't let metrics collection failures affect agent execution
+            self.logger.warning(
+                f"Failed to collect metrics for Agent Lightning: {e}",
+                exc_info=True,
+            )
+
+    def _calculate_quality_signal(self, response: str, metadata: dict[str, Any]) -> float:
+        """
+        Calculate quality signal (confidence score) for the response.
+
+        Args:
+            response: Agent response text
+            metadata: Execution metadata
+
+        Returns:
+            Quality signal between 0.0 and 1.0
+        """
+        # Base quality score
+        quality = 0.5
+
+        # Boost if response contains citations (indicates document-grounded answer)
+        if "Source:" in response or "Page" in response:
+            quality += 0.2
+
+        # Boost if we have search results
+        if metadata.get("search_results"):
+            quality += 0.15
+
+        # Boost if response is substantive (not an error message)
+        if len(response) > 50 and "error" not in response.lower():
+            quality += 0.15
+
+        # Ensure between 0.0 and 1.0
+        return min(max(quality, 0.0), 1.0)
 
     async def _agent_node(self, state: AgentState) -> dict[str, Any]:
         """
@@ -567,6 +735,8 @@ Remember to cite your sources inline throughout your response, not just at the e
         Returns:
             Final agent response with document citations if applicable
         """
+        start_time = time.time()
+
         try:
             # Create initial state with document context
             initial_state = AgentState(
@@ -595,7 +765,23 @@ Remember to cite your sources inline throughout your response, not just at the e
             # Extract final answer
             final_answer = result.get("final_answer", "I'm sorry, I couldn't process your request.")
 
-            self.logger.info(f"LangGraph workflow completed in {result.get('step_count', 0)} steps")
+            # Calculate execution time
+            end_time = time.time()
+            latency_ms = (end_time - start_time) * 1000
+
+            self.logger.info(
+                f"LangGraph workflow completed in {result.get('step_count', 0)} steps "
+                f"({latency_ms:.2f}ms)"
+            )
+
+            # Collect metrics for Agent Lightning optimization (non-blocking)
+            await self._collect_execution_metrics(
+                query=message,
+                response=final_answer,
+                latency_ms=latency_ms,
+                user_id=user_id,
+                metadata=result,
+            )
 
             return final_answer
 
