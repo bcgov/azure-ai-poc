@@ -144,10 +144,10 @@ class TestAgentWrapper:
         self, mock_agent: MagicMock, optimization_config: OptimizationConfig
     ) -> None:
         """Test get_baseline_metrics() measures actual agent latency."""
-        from app.services.agent_wrapper_service import get_baseline_metrics
-
         # Simulate agent taking 100ms
         import time
+
+        from app.services.agent_wrapper_service import get_baseline_metrics
 
         def slow_invoke(query: dict[str, Any]) -> dict[str, Any]:
             time.sleep(0.1)
