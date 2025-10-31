@@ -4,7 +4,7 @@ This module tests the optimization service that collects metrics and applies
 optimization algorithms. Tests written FIRST per TDD approach.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
