@@ -1,5 +1,6 @@
 import apiService from '@/service/api-service'
-import { langGraphAgentService } from '@/services/langGraphAgentService'
+import { chatAgentService, type ChatMessage as ChatAgentMessage } from '@/services/chatAgentService'
+import { documentService } from '@/services/documentService'
 import type { FC } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { Alert, Button, Col, Container, Row } from 'react-bootstrap'
@@ -12,6 +13,7 @@ import {
   ChatEmptyState,
   type Document,
 } from '@/components/chat'
+import type { SourceInfo } from '@/services/chatAgentService'
 
 interface ChatMessageType {
   id: string
@@ -19,10 +21,13 @@ interface ChatMessageType {
   content: string
   timestamp: Date
   documentId?: string
+  sources?: SourceInfo[]
+  hasSufficientInfo?: boolean
 }
 
 const ChatPage: FC = () => {
   const [messages, setMessages] = useState<ChatMessageType[]>([])
+  const [sessionId, setSessionId] = useState<string>(`session_${Date.now()}`)
   const [currentQuestion, setCurrentQuestion] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [isStreaming, setIsStreaming] = useState(false)
@@ -65,9 +70,12 @@ const ChatPage: FC = () => {
   const loadDocuments = async () => {
     setIsLoadingDocuments(true)
     try {
-      const response = await apiService.getAxiosInstance().get('/api/v1/documents')
-      setDocuments(response.data)
-      return response.data
+      const result = await documentService.listDocuments()
+      if (result.success && result.data) {
+        setDocuments(result.data.documents)
+        return result.data.documents
+      }
+      return []
     } catch (err: any) {
       console.error('Error loading documents:', err)
       return []
@@ -90,12 +98,19 @@ const ChatPage: FC = () => {
     }
   }, [documents, pendingDocumentSelection])
 
-  useEffect(() => {
-    if (messages.length > previousMessageCount.current && shouldAutoScrollOnNewMessage.current) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  // Scroll helper - only called explicitly when needed
+  const scrollToBottom = () => {
+    if (shouldAutoScrollOnNewMessage.current) {
+      requestAnimationFrame(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+      })
     }
+  }
+
+  // Track message count for reference only (no auto-scroll here)
+  useEffect(() => {
     previousMessageCount.current = messages.length
-  }, [messages])
+  }, [messages.length])
 
   useEffect(() => {
     const container = messagesContainerRef.current
@@ -175,7 +190,10 @@ const ChatPage: FC = () => {
     setError(null)
 
     try {
-      await apiService.getAxiosInstance().delete(`/api/v1/documents/${documentToDelete.id}`)
+      const result = await documentService.deleteDocument(documentToDelete.id)
+      if (!result.success) {
+        throw new Error(result.error || 'Delete failed')
+      }
 
       setDocuments((prev) => prev.filter((doc) => doc.id !== documentToDelete.id))
 
@@ -208,7 +226,7 @@ const ChatPage: FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!currentQuestion.trim() || isLoading || documents.length === 0) return
+    if (!currentQuestion.trim() || isLoading) return
 
     const userMessage: ChatMessageType = {
       id: Date.now().toString(),
@@ -219,8 +237,17 @@ const ChatPage: FC = () => {
     }
 
     setMessages((prev) => [...prev, userMessage])
+    // Don't scroll here - let the message appear naturally above the input
+    
+    const questionToSend = currentQuestion
     setCurrentQuestion('')
     setError(null)
+
+    // Build chat history from messages for context
+    const chatHistory: ChatAgentMessage[] = messages.map((msg) => ({
+      role: msg.type === 'user' ? 'user' : 'assistant',
+      content: msg.content,
+    }))
 
     if (streamingEnabled) {
       setIsStreaming(true)
@@ -232,6 +259,7 @@ const ChatPage: FC = () => {
         timestamp: new Date(),
         documentId: selectedDocument || undefined,
       }
+      // Add placeholder without scrolling - content will grow naturally
       setMessages((prev) => [...prev, placeholderMessage])
 
       try {
@@ -248,15 +276,34 @@ const ChatPage: FC = () => {
           setMessages((prev) => prev.filter((msg) => msg.id !== assistantMessageId))
         }
 
-        await langGraphAgentService.streamDocumentQuery(
-          currentQuestion,
-          selectedDocument ? [selectedDocument] : undefined,
-          `session_${Date.now()}`,
+        const streamResult = await chatAgentService.streamMessage(
+          questionToSend,
+          sessionId,
+          chatHistory,
           onChunk,
           onError,
         )
+
+        // Update message with sources after streaming completes
+        if (streamResult) {
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === assistantMessageId
+                ? {
+                    ...msg,
+                    sources: streamResult.sources,
+                    hasSufficientInfo: streamResult.hasSufficientInfo,
+                  }
+                : msg,
+            ),
+          )
+          // Update session ID if returned
+          if (streamResult.sessionId) {
+            setSessionId(streamResult.sessionId)
+          }
+        }
       } catch (err: any) {
-        console.error('LangGraph streaming error:', err)
+        console.error('Chat Agent streaming error:', err)
         setError(err.message || 'Failed to stream response. Please try again.')
         setMessages((prev) => prev.filter((msg) => msg.id !== assistantMessageId))
       } finally {
@@ -265,18 +312,25 @@ const ChatPage: FC = () => {
     } else {
       setIsLoading(true)
       try {
-        const result = await langGraphAgentService.queryDocuments(
-          currentQuestion,
-          selectedDocument ? [selectedDocument] : undefined,
-          `session_${Date.now()}`,
-          selectedDocument ? `Document: ${selectedDocumentName}` : undefined,
+        const result = await chatAgentService.sendMessage(
+          questionToSend,
+          sessionId,
+          chatHistory,
         )
 
         let assistantContent = ''
+        let sources: SourceInfo[] = []
+        let hasSufficientInfo = true
         if (result.success && result.data) {
-          assistantContent = result.data.answer
+          assistantContent = result.data.response
+          sources = result.data.sources || []
+          hasSufficientInfo = result.data.has_sufficient_info
+          // Update session ID if returned
+          if (result.data.session_id) {
+            setSessionId(result.data.session_id)
+          }
         } else {
-          throw new Error(result.error || 'Failed to get response from LangGraph agent')
+          throw new Error(result.error || 'Failed to get response from chat agent')
         }
 
         const assistantMessage: ChatMessageType = {
@@ -285,11 +339,14 @@ const ChatPage: FC = () => {
           content: assistantContent,
           timestamp: new Date(),
           documentId: selectedDocument || undefined,
+          sources,
+          hasSufficientInfo,
         }
 
         setMessages((prev) => [...prev, assistantMessage])
+        // Don't auto-scroll - let user control their view
       } catch (err: any) {
-        console.error('LangGraph API error:', err)
+        console.error('Chat Agent API error:', err)
         setError(err.message || 'Failed to get response. Please try again.')
       } finally {
         setIsLoading(false)
@@ -383,6 +440,8 @@ const ChatPage: FC = () => {
                         : undefined
                     }
                     getFileIcon={getFileIcon}
+                    sources={message.sources}
+                    hasSufficientInfo={message.hasSufficientInfo}
                   />
                 ))}
                 <div ref={messagesEndRef} />

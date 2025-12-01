@@ -46,7 +46,7 @@ const ChatInput: FC<ChatInputProps> = ({
       return 'Ask a question about the selected document...'
     }
     if (documentsCount === 0) {
-      return 'Please upload documents first to start asking questions...'
+      return 'Please ask general questions...'
     }
     return 'Ask a question across all your documents...'
   }
@@ -64,7 +64,7 @@ const ChatInput: FC<ChatInputProps> = ({
   return (
     <div className="border-top pt-2 pt-md-3 chat-input-container flex-shrink-0">
       <Form onSubmit={onSubmit}>
-        {/* LangGraph Agent and Controls */}
+        {/* Agent Controls */}
         <div className="mb-2 d-flex flex-wrap align-items-center gap-2">
           <div className="d-flex align-items-center">
             <Form.Check
@@ -78,7 +78,7 @@ const ChatInput: FC<ChatInputProps> = ({
           </div>
 
           <Badge bg="info" className="small">
-            LangGraph Agent - Multi-step reasoning & citations
+            AI Assistant - Powered by Microsoft Agent Framework
           </Badge>
         </div>
 
@@ -90,7 +90,7 @@ const ChatInput: FC<ChatInputProps> = ({
             onChange={(e) => setCurrentQuestion(e.target.value)}
             onKeyDown={onKeyPress}
             placeholder={getPlaceholder()}
-            disabled={isLoading || documentsCount === 0}
+            disabled={isLoading}
             style={{
               minHeight: 'clamp(2.5rem, 2.75rem, 3rem)',
               maxHeight: 'clamp(6rem, 8rem, 10rem)',
@@ -106,8 +106,7 @@ const ChatInput: FC<ChatInputProps> = ({
             disabled={
               !currentQuestion.trim() ||
               isLoading ||
-              isStreaming ||
-              documentsCount === 0
+              isStreaming
             }
             className="position-absolute d-flex align-items-center justify-content-center p-0 border-0"
             style={{

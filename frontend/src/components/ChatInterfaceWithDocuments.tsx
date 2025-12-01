@@ -1,5 +1,6 @@
 import apiService from '@/service/api-service'
-import { langGraphAgentService } from '@/services/langGraphAgentService'
+import { chatAgentService, type ChatMessage as ChatServiceMessage } from '@/services/chatAgentService'
+import { documentService } from '@/services/documentService'
 import type { FC } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import {
@@ -33,6 +34,7 @@ interface Document {
 
 const ChatInterface: FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [sessionId, setSessionId] = useState<string>(`session_${Date.now()}`)
   const [currentQuestion, setCurrentQuestion] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [isStreaming, setIsStreaming] = useState(false)
@@ -79,11 +81,12 @@ const ChatInterface: FC = () => {
   const loadDocuments = async () => {
     setIsLoadingDocuments(true)
     try {
-      const response = await apiService
-        .getAxiosInstance()
-        .get('/api/v1/documents')
-      setDocuments(response.data)
-      return response.data // Return the fresh data
+      const result = await documentService.listDocuments()
+      if (result.success && result.data) {
+        setDocuments(result.data.documents)
+        return result.data.documents
+      }
+      return []
     } catch (err: any) {
       console.error('Error loading documents:', err)
       return []
@@ -257,9 +260,8 @@ const ChatInterface: FC = () => {
     setError(null)
 
     try {
-      await apiService
-        .getAxiosInstance()
-        .delete(`/api/v1/documents/${documentToDelete.id}`)
+      const result = await documentService.deleteDocument(documentToDelete.id)
+      if (!result.success) throw new Error(result.error || 'Delete failed')
 
       // Remove from documents list
       setDocuments((prev) =>
@@ -320,8 +322,14 @@ const ChatInterface: FC = () => {
     setCurrentQuestion('')
     setError(null)
 
+    // Build chat history from messages for context
+    const chatHistory: ChatServiceMessage[] = messages.map((msg) => ({
+      role: msg.type === 'user' ? 'user' : 'assistant',
+      content: msg.content,
+    }))
+
     if (streamingEnabled) {
-      // Handle streaming response with LangGraph agent
+      // Handle streaming response with Chat Agent
       setIsStreaming(true)
 
       // Create placeholder assistant message for streaming
@@ -352,16 +360,16 @@ const ChatInterface: FC = () => {
           )
         }
 
-        // Use LangGraph agent with document context for streaming
-        await langGraphAgentService.streamDocumentQuery(
+        // Use Chat Agent for streaming
+        await chatAgentService.streamMessage(
           questionText,
-          selectedDocument ? [selectedDocument] : undefined,
-          `session_${Date.now()}`,
+          sessionId,
+          chatHistory,
           onChunk,
           onError,
         )
       } catch (err: any) {
-        console.error('LangGraph streaming error:', err)
+        console.error('Chat Agent streaming error:', err)
         setError(err.message || 'Failed to stream response. Please try again.')
 
         // Remove the placeholder message on error
@@ -372,24 +380,27 @@ const ChatInterface: FC = () => {
         setIsStreaming(false)
       }
     } else {
-      // Handle non-streaming response with LangGraph agent
+      // Handle non-streaming response with Chat Agent
       setIsLoading(true)
 
       try {
-        // Use LangGraph agent with document context
-        const result = await langGraphAgentService.queryDocuments(
+        // Use Chat Agent
+        const result = await chatAgentService.sendMessage(
           questionText,
-          selectedDocument ? [selectedDocument] : undefined, // Search specific doc or all docs
-          `session_${Date.now()}`,
-          selectedDocument ? `Document: ${selectedDocumentName}` : undefined,
+          sessionId,
+          chatHistory,
         )
 
         let assistantContent = ''
         if (result.success && result.data) {
-          assistantContent = result.data.answer
+          assistantContent = result.data.response
+          // Update session ID if returned
+          if (result.data.session_id) {
+            setSessionId(result.data.session_id)
+          }
         } else {
           throw new Error(
-            result.error || 'Failed to get response from LangGraph agent',
+            result.error || 'Failed to get response from chat agent',
           )
         }
 
@@ -403,7 +414,7 @@ const ChatInterface: FC = () => {
 
         setMessages((prev) => [...prev, assistantMessage])
       } catch (err: any) {
-        console.error('LangGraph API error:', err)
+        console.error('Chat Agent API error:', err)
         setError(
           err.response?.data?.message ||
             'Failed to get response. Please try again.',
@@ -799,7 +810,7 @@ const ChatInterface: FC = () => {
           {/* Input Form */}
           <div className="border-top pt-2 pt-md-3 chat-input-container flex-shrink-0">
             <Form onSubmit={handleSubmit}>
-              {/* LangGraph Agent and Controls */}
+              {/* Agent Controls */}
               <div className="mb-2 d-flex flex-wrap align-items-center gap-2">
                 <div className="d-flex align-items-center">
                   <Form.Check
@@ -813,7 +824,7 @@ const ChatInterface: FC = () => {
                 </div>
 
                 <Badge bg="info" className="small">
-                  LangGraph Agent - Multi-step reasoning & citations
+                  AI Assistant - Powered by Microsoft Agent Framework
                 </Badge>
               </div>
 

@@ -43,7 +43,7 @@ describe('Layout', () => {
 
       const header = screen.getByTestId('bc-header')
       expect(header).toBeInTheDocument()
-      expect(screen.getByRole('heading', { level: 1, name: 'AI Chat' })).toBeInTheDocument()
+      expect(screen.getByRole('heading', { level: 1, name: 'AI POC' })).toBeInTheDocument()
     })
 
     it('renders the BC Gov footer', () => {

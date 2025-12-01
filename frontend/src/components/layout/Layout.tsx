@@ -17,7 +17,7 @@ const Layout: FC<Props> = ({ children }) => {
   return (
     <div className="app-layout">
       <div className="app-header shadow-sm">
-        <Header title={'AI Chat'} titleElement="h1">
+        <Header title={'AI POC'} titleElement="h1">
           <div className="d-flex align-items-center gap-3">
             {isLoggedIn && (
               <div className="d-flex align-items-center gap-3">
