@@ -50,16 +50,16 @@ describe('ChatInput', () => {
     expect(mockSetStreaming).toHaveBeenCalledWith(false)
   })
 
-  it('should render LangGraph badge', () => {
+  it('should render AI Assistant badge', () => {
     render(<ChatInput {...defaultProps} />)
     
-    expect(screen.getByText(/LangGraph Agent/i)).toBeInTheDocument()
+    expect(screen.getByText(/AI Assistant/i)).toBeInTheDocument()
   })
 
   it('should display correct placeholder when no documents', () => {
     render(<ChatInput {...defaultProps} documentsCount={0} />)
     
-    const textarea = screen.getByPlaceholderText(/Please upload documents first/i)
+    const textarea = screen.getByPlaceholderText(/Please ask general questions/i)
     expect(textarea).toBeInTheDocument()
   })
 
@@ -76,11 +76,12 @@ describe('ChatInput', () => {
     expect(textarea).toBeInTheDocument()
   })
 
-  it('should disable textarea when no documents', () => {
+  it('should not disable textarea when no documents', () => {
     render(<ChatInput {...defaultProps} documentsCount={0} />)
     
     const textarea = screen.getByRole('textbox')
-    expect(textarea).toBeDisabled()
+    // With the new API, chat works without documents
+    expect(textarea).not.toBeDisabled()
   })
 
   it('should disable textarea when loading', () => {

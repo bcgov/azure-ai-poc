@@ -1,0 +1,45 @@
+"""Application settings using pydantic-settings."""
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """Application configuration loaded from environment variables."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    # Application settings
+    app_name: str = "API MS Agent"
+    debug: bool = False
+    environment: str = "local"  # local, development, production
+
+    # Azure OpenAI settings
+    azure_openai_endpoint: str = ""
+    azure_openai_api_key: str = ""  # Optional if using managed identity
+    azure_openai_deployment: str = "gpt-4o"
+    azure_openai_api_version: str = "2024-10-21"
+
+    # Azure OpenAI Embedding settings
+    azure_openai_embedding_endpoint: str = ""
+    azure_openai_embedding_deployment: str = "text-embedding-ada-002"
+
+    # LLM Configuration - Low temperature for high confidence responses
+    llm_temperature: float = 0.1  # Low temperature for consistent, high-confidence responses
+
+    # Cosmos DB settings
+    cosmos_db_endpoint: str = ""
+    cosmos_db_key: str = ""  # Optional if using managed identity
+    cosmos_db_database_name: str = "azure-ai-poc"
+
+    # Use managed identity (Azure CLI credential) if no API key provided
+    @property
+    def use_managed_identity(self) -> bool:
+        return not self.azure_openai_api_key
+
+
+settings = Settings()

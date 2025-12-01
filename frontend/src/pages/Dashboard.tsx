@@ -10,7 +10,7 @@ const Dashboard: FC = () => {
   const [activeView, setActiveView] = useState<'chat' | 'tenants'>('chat')
   const { hasRole } = useAuth()
 
-  const canManageTenants = hasRole(['azure-ai-poc-super-admin', 'TENANT_ADMIN'])
+  const canManageTenants = hasRole(['TENANT_ADMIN'])
 
   return (
     <Container fluid>

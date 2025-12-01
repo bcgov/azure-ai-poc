@@ -1,0 +1,235 @@
+"""Chat router - API endpoints for chat functionality."""
+
+from typing import Annotated
+from uuid import uuid4
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field
+
+from app.auth.dependencies import get_current_user_from_request
+from app.auth.models import KeycloakUser
+from app.services.chat_agent import ChatAgentService, get_chat_agent_service
+from app.services.cosmos_db_service import CosmosDbService, get_cosmos_db_service
+
+router = APIRouter()
+
+
+class ChatMessage(BaseModel):
+    """A single message in the conversation."""
+
+    role: str = Field(..., description="Message role: 'user' or 'assistant'")
+    content: str = Field(..., description="Message content")
+
+
+class ChatRequest(BaseModel):
+    """Request body for chat endpoint."""
+
+    message: str = Field(..., min_length=1, max_length=10000, description="User message")
+    session_id: str | None = Field(
+        default=None, description="Session ID for conversation continuity"
+    )
+    history: list[ChatMessage] | None = Field(default=None, description="Conversation history")
+
+
+class SourceInfoResponse(BaseModel):
+    """Information about a source used in the response."""
+
+    source_type: str = Field(
+        ..., description="Type of source: 'llm_knowledge', 'document', 'web', 'api'"
+    )
+    description: str = Field(..., description="Description of the source")
+    confidence: str = Field(default="high", description="Confidence level: 'high', 'medium', 'low'")
+    url: str | None = Field(default=None, description="URL of the source if available")
+
+
+class ChatResponse(BaseModel):
+    """Response from chat endpoint - always includes source attribution."""
+
+    response: str = Field(..., description="Assistant's response")
+    session_id: str = Field(..., description="Session ID for the conversation")
+    sources: list[SourceInfoResponse] = Field(
+        ..., description="Sources used to generate the response (REQUIRED for traceability)"
+    )
+    has_sufficient_info: bool = Field(
+        default=True, description="Whether the AI had sufficient information to answer"
+    )
+
+
+@router.post("/", response_model=ChatResponse)
+async def chat(
+    request: ChatRequest,
+    agent: Annotated[ChatAgentService, Depends(get_chat_agent_service)],
+    cosmos: Annotated[CosmosDbService, Depends(get_cosmos_db_service)],
+    current_user: Annotated[KeycloakUser, Depends(get_current_user_from_request)],
+) -> ChatResponse:
+    """
+    Send a message to the chat agent and receive a response with source attribution.
+
+    - **message**: The user's message to the agent
+    - **session_id**: Optional session ID for conversation continuity
+    - **history**: Optional list of previous messages in the conversation
+
+    Response always includes:
+    - **sources**: List of sources used to generate the response
+    - **has_sufficient_info**: Whether the AI had enough information to answer accurately
+
+    Chat history is persisted to Cosmos DB for session continuity.
+    """
+    session_id = request.session_id or str(uuid4())
+    user_id = current_user.sub
+
+    # If no history provided but session_id exists, try to load from Cosmos DB
+    history = None
+    if request.history:
+        history = [{"role": msg.role, "content": msg.content} for msg in request.history]
+    elif request.session_id:
+        # Load history from Cosmos DB
+        stored_messages = await cosmos.get_chat_history(session_id, user_id)
+        if stored_messages:
+            history = [{"role": msg.role, "content": msg.content} for msg in stored_messages]
+
+    try:
+        # Save user message to Cosmos DB
+        await cosmos.save_message(
+            session_id=session_id,
+            user_id=user_id,
+            role="user",
+            content=request.message,
+        )
+
+        result = await agent.chat(
+            message=request.message,
+            history=history,
+            session_id=session_id,
+        )
+
+        # Convert sources to response format
+        sources = [
+            SourceInfoResponse(
+                source_type=src.source_type,
+                description=src.description,
+                confidence=src.confidence,
+                url=src.url,
+            )
+            for src in result.sources
+        ]
+
+        # Save assistant response to Cosmos DB
+        await cosmos.save_message(
+            session_id=session_id,
+            user_id=user_id,
+            role="assistant",
+            content=result.response,
+            sources=[
+                {
+                    "source_type": src.source_type,
+                    "description": src.description,
+                    "confidence": src.confidence,
+                    "url": src.url,
+                }
+                for src in result.sources
+            ],
+        )
+
+        return ChatResponse(
+            response=result.response,
+            session_id=session_id,
+            sources=sources,
+            has_sufficient_info=result.has_sufficient_info,
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Chat error: {str(e)}") from e
+
+
+class SessionResponse(BaseModel):
+    """Response for session creation."""
+
+    session_id: str = Field(..., description="The created session ID")
+    title: str = Field(..., description="Session title")
+
+
+class SessionListResponse(BaseModel):
+    """Response for listing sessions."""
+
+    sessions: list[dict] = Field(..., description="List of user sessions")
+
+
+@router.post("/sessions", response_model=SessionResponse)
+async def create_session(
+    cosmos: Annotated[CosmosDbService, Depends(get_cosmos_db_service)],
+    current_user: Annotated[KeycloakUser, Depends(get_current_user_from_request)],
+    title: str | None = None,
+) -> SessionResponse:
+    """Create a new chat session."""
+    user_id = current_user.sub
+    session = await cosmos.create_session(user_id, title)
+    return SessionResponse(session_id=session.session_id, title=session.title)
+
+
+@router.get("/sessions", response_model=SessionListResponse)
+async def list_sessions(
+    cosmos: Annotated[CosmosDbService, Depends(get_cosmos_db_service)],
+    current_user: Annotated[KeycloakUser, Depends(get_current_user_from_request)],
+    limit: int = 20,
+) -> SessionListResponse:
+    """List user's chat sessions."""
+    user_id = current_user.sub
+    sessions = await cosmos.get_user_sessions(user_id, limit)
+    return SessionListResponse(
+        sessions=[
+            {
+                "session_id": s.session_id,
+                "title": s.title,
+                "created_at": s.created_at.isoformat(),
+                "last_updated": s.last_updated.isoformat(),
+                "message_count": s.message_count,
+            }
+            for s in sessions
+        ]
+    )
+
+
+@router.get("/sessions/{session_id}/history")
+async def get_session_history(
+    session_id: str,
+    cosmos: Annotated[CosmosDbService, Depends(get_cosmos_db_service)],
+    current_user: Annotated[KeycloakUser, Depends(get_current_user_from_request)],
+    limit: int = 50,
+) -> dict:
+    """Get chat history for a session."""
+    user_id = current_user.sub
+    messages = await cosmos.get_chat_history(session_id, user_id, limit)
+    return {
+        "session_id": session_id,
+        "messages": [
+            {
+                "id": m.id,
+                "role": m.role,
+                "content": m.content,
+                "timestamp": m.timestamp.isoformat(),
+                "sources": m.sources,
+            }
+            for m in messages
+        ],
+    }
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_session(
+    session_id: str,
+    cosmos: Annotated[CosmosDbService, Depends(get_cosmos_db_service)],
+    current_user: Annotated[KeycloakUser, Depends(get_current_user_from_request)],
+) -> dict:
+    """Delete a chat session and all its messages."""
+    user_id = current_user.sub
+    success = await cosmos.delete_session(session_id, user_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {"status": "deleted", "session_id": session_id}
+
+
+@router.get("/health")
+async def chat_health() -> dict[str, str]:
+    """Health check for the chat service."""
+    return {"status": "ok", "service": "chat"}
