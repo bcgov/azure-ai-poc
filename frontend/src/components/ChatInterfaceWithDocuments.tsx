@@ -170,8 +170,22 @@ const ChatInterface: FC = () => {
       'text/x-markdown',
       'text/html',
       'text/plain',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'application/vnd.ms-powerpoint',
+      'image/jpeg',
+      'image/png',
+      'image/bmp',
+      'image/tiff',
     ]
-    const allowedExtensions = ['.pdf', '.md', '.markdown', '.html', '.htm']
+    const allowedExtensions = [
+      '.pdf', '.md', '.markdown', '.html', '.htm', '.txt',
+      '.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt',
+      '.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif'
+    ]
     const fileExtension = '.' + file.name.toLowerCase().split('.').pop()
 
     const isValidType =
@@ -180,7 +194,7 @@ const ChatInterface: FC = () => {
 
     if (!isValidType) {
       setError(
-        'Only PDF, Markdown (.md), and HTML (.html, .htm) files are supported',
+        'Unsupported file format. Supported: PDF, Word, Excel, PowerPoint, HTML, Markdown, TXT, and images (JPEG, PNG, BMP, TIFF)',
       )
       return
     }
@@ -603,7 +617,7 @@ const ChatInterface: FC = () => {
                     <div className="d-flex gap-3 justify-content-center flex-wrap small text-muted">
                       <span>
                         <i className="bi bi-check-circle-fill text-success me-1"></i>
-                        PDF, Markdown, HTML
+                        PDF, Word, Excel, PowerPoint
                       </span>
                       <span>
                         <i className="bi bi-lightning-fill text-warning me-1"></i>
@@ -616,7 +630,7 @@ const ChatInterface: FC = () => {
                     <i className="bi bi-chat-quote empty-state-icon d-block"></i>
                     <h5>Welcome to AI Document Assistant</h5>
                     <p>
-                      Upload documents (PDF, Markdown, or HTML) and ask
+                      Upload documents (PDF, Word, Excel, PowerPoint, HTML, Markdown, or images) and ask
                       questions about them, or search across all your uploaded
                       documents.
                     </p>
@@ -925,7 +939,7 @@ const ChatInterface: FC = () => {
                 const file = e.target.files?.[0]
                 if (file) handleFileUpload(file)
               }}
-              accept=".pdf,.md,.markdown,.html,.htm"
+              accept=".pdf,.md,.markdown,.html,.htm,.txt,.docx,.doc,.xlsx,.xls,.pptx,.ppt,.jpg,.jpeg,.png,.bmp,.tiff,.tif"
               style={{ display: 'none' }}
             />
 
@@ -934,7 +948,7 @@ const ChatInterface: FC = () => {
                 <i className="bi bi-files display-4 text-primary mb-3"></i>
                 <h5>Select a document to upload</h5>
                 <p className="text-muted">
-                  Supported formats: PDF, Markdown (.md), HTML (.html, .htm)
+                  Supported formats: PDF, Word, Excel, PowerPoint, HTML, Markdown, TXT, Images
                   <br />
                   Maximum file size: 100MB
                 </p>

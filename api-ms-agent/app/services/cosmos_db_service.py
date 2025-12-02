@@ -225,27 +225,27 @@ class CosmosDbService:
         Returns:
             The created conversation session
         """
+        session_id = f"session_{uuid.uuid4()}"
+
         if not self._ensure_initialized():
-            session_id = str(uuid.uuid4())
             return ConversationSession(
-                id=f"session_{session_id}",
+                id=f"sess_{session_id}",
                 session_id=session_id,
                 user_id=user_id,
-                title=title or f"Conversation {datetime.now(UTC).strftime('%Y-%m-%d %H:%M')}",
+                title=title or "New conversation",
             )
 
-        session_id = str(uuid.uuid4())
         session = ConversationSession(
-            id=f"session_{session_id}",
+            id=f"sess_{session_id}",
             session_id=session_id,
             user_id=user_id,
-            title=title or f"Conversation {datetime.now(UTC).strftime('%Y-%m-%d %H:%M')}",
+            title=title or "New conversation",
         )
 
         item = {
             "id": session.id,
             "type": "session",
-            "session_id": session.session_id,
+            "session_id": session_id,
             "user_id": user_id,
             "title": session.title,
             "created_at": session.created_at.isoformat(),
@@ -315,8 +315,9 @@ class CosmosDbService:
             self.chat_container.create_item(body=item)
             logger.debug("message_saved", message_id=message_id, session_id=session_id)
 
-            # Update session metadata
-            await self._update_session_message_count(session_id, user_id)
+            # Update session metadata - pass content for title if user message
+            first_msg = content if role == "user" else None
+            await self._update_session_message_count(session_id, user_id, first_msg)
             return message
         except Exception as error:
             logger.error(
@@ -474,37 +475,59 @@ class CosmosDbService:
             return False
 
         try:
-            # Delete all messages in the session
-            query = """
-                SELECT c.id FROM c
-                WHERE c.type = 'message'
-                AND c.session_id = @session_id
-            """
-            parameters = [{"name": "@session_id", "value": session_id}]
+            # Delete all messages in the session - try both with and without prefix
+            session_ids_to_try = [session_id]
+            if not session_id.startswith("session_"):
+                session_ids_to_try.append(f"session_{session_id}")
 
-            items = list(
-                self.chat_container.query_items(
-                    query=query,
-                    parameters=parameters,
-                    enable_cross_partition_query=True,
+            for sid in session_ids_to_try:
+                query = """
+                    SELECT c.id FROM c
+                    WHERE c.type = 'message'
+                    AND c.session_id = @session_id
+                """
+                parameters = [{"name": "@session_id", "value": sid}]
+
+                items = list(
+                    self.chat_container.query_items(
+                        query=query,
+                        parameters=parameters,
+                        enable_cross_partition_query=True,
+                    )
                 )
-            )
 
-            for item in items:
-                self.chat_container.delete_item(item=item["id"], partition_key=user_id)
+                for item in items:
+                    try:
+                        self.chat_container.delete_item(item=item["id"], partition_key=user_id)
+                    except CosmosResourceNotFoundError:
+                        pass
 
-            # Delete the session metadata
-            self.chat_container.delete_item(
-                item=f"session_{session_id}",
-                partition_key=user_id,
-            )
+            # Delete the session metadata - try multiple ID formats
+            doc_ids_to_try = [
+                f"sess_{session_id}",
+                f"session_{session_id}",
+                session_id,
+            ]
 
-            logger.info("session_deleted", session_id=session_id, user_id=user_id)
-            return True
+            deleted = False
+            for doc_id in doc_ids_to_try:
+                try:
+                    self.chat_container.delete_item(
+                        item=doc_id,
+                        partition_key=user_id,
+                    )
+                    deleted = True
+                    break
+                except CosmosResourceNotFoundError:
+                    continue
 
-        except CosmosResourceNotFoundError:
-            logger.warning("session_not_found", session_id=session_id)
-            return False
+            if deleted:
+                logger.info("session_deleted", session_id=session_id, user_id=user_id)
+                return True
+            else:
+                logger.warning("session_not_found", session_id=session_id)
+                return False
+
         except Exception as error:
             logger.error(
                 "session_delete_failed",
@@ -513,10 +536,14 @@ class CosmosDbService:
             )
             return False
 
-    async def _update_session_message_count(self, session_id: str, user_id: str) -> None:
-        """Update the message count and last_updated for a session."""
+    async def _update_session_message_count(
+        self, session_id: str, user_id: str, first_message: str | None = None
+    ) -> None:
+        """Update the message count and last_updated for a session, creating if needed."""
+        # Use session_id as-is for item_id (consistent with how messages store it)
+        item_id = f"sess_{session_id}"  # Unique document ID
+
         try:
-            item_id = f"session_{session_id}"
             existing = self.chat_container.read_item(
                 item=item_id,
                 partition_key=user_id,
@@ -524,8 +551,50 @@ class CosmosDbService:
             existing["message_count"] = existing.get("message_count", 0) + 1
             existing["last_updated"] = datetime.now(UTC).isoformat()
             self.chat_container.replace_item(item=item_id, body=existing)
+        except CosmosResourceNotFoundError:
+            # Session doesn't exist yet - create it
+            now = datetime.now(UTC)
+            # Generate a better title from first message
+            title = self._generate_session_title(first_message) if first_message else None
+            if not title:
+                title = "New conversation"
+
+            new_session = {
+                "id": item_id,
+                "type": "session",
+                "session_id": session_id,  # Keep original session_id
+                "user_id": user_id,
+                "title": title,
+                "created_at": now.isoformat(),
+                "last_updated": now.isoformat(),
+                "message_count": 1,
+                "tags": [],
+            }
+            try:
+                self.chat_container.create_item(body=new_session)
+                logger.info("session_auto_created", session_id=session_id, user_id=user_id)
+            except Exception as create_error:
+                logger.debug(
+                    "session_auto_create_failed",
+                    error=str(create_error),
+                    session_id=session_id,
+                )
         except Exception as error:
             logger.debug("session_update_failed", error=str(error), session_id=session_id)
+
+    def _generate_session_title(self, message: str) -> str:
+        """Generate a short title from the first message."""
+        if not message:
+            return ""
+        # Take first 50 chars, cut at word boundary
+        title = message.strip()[:50]
+        if len(message) > 50:
+            # Cut at last space to avoid cutting words
+            last_space = title.rfind(" ")
+            if last_space > 20:
+                title = title[:last_space]
+            title += "..."
+        return title
 
     # ============= Vector Search Operations =============
 
@@ -766,6 +835,10 @@ class CosmosDbService:
             logger.info("documents_listed", user_id=user_id, count=len(result))
             return result
 
+        except CosmosResourceNotFoundError:
+            # Container or partition doesn't exist yet - return empty list
+            logger.info("documents_list_empty", user_id=user_id, reason="partition_not_found")
+            return []
         except Exception as error:
             logger.error("documents_list_failed", error=str(error), user_id=user_id)
             return []

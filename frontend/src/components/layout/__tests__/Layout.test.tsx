@@ -10,6 +10,13 @@ vi.mock('@/stores', () => ({
   useAuth: vi.fn(),
 }))
 
+const mockNavigate = vi.fn()
+const mockUseLocation = vi.fn()
+vi.mock('@tanstack/react-router', () => ({
+  useNavigate: () => mockNavigate,
+  useLocation: () => mockUseLocation(),
+}))
+
 vi.mock('@bcgov/design-system-react-components', () => ({
   Header: ({ title, titleElement, children }: { title: string; titleElement?: string; children?: React.ReactNode }) => (
     <div data-testid="bc-header">
@@ -25,6 +32,8 @@ describe('Layout', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    mockNavigate.mockClear()
+    mockUseLocation.mockReturnValue({ pathname: '/' })
   })
 
   describe('Header and Footer', () => {
@@ -46,12 +55,15 @@ describe('Layout', () => {
       expect(screen.getByRole('heading', { level: 1, name: 'AI POC' })).toBeInTheDocument()
     })
 
-    it('renders the BC Gov footer', () => {
+    it('renders the BC Gov footer on non-chat pages', () => {
       vi.mocked(useAuth).mockReturnValue({
         isLoggedIn: false,
         username: null,
         logout: mockLogout,
       } as any)
+
+      // Mock non-chat page location
+      mockUseLocation.mockReturnValue({ pathname: '/other-page' })
 
       render(
         <Layout>
@@ -94,7 +106,7 @@ describe('Layout', () => {
       expect(container.querySelector('.app-layout')).toBeInTheDocument()
       expect(container.querySelector('.app-header')).toBeInTheDocument()
       expect(container.querySelector('.app-content')).toBeInTheDocument()
-      expect(container.querySelector('.app-footer')).toBeInTheDocument()
+      // Footer is conditionally hidden on chat page (pathname '/')
     })
   })
 

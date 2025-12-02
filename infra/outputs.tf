@@ -20,8 +20,8 @@ output "azure_openai_embedding_deployment_name" {
   value       = module.azure_openai.embedding_deployment_name
 }
 
-# Azure AI Search outputs
-output "azure_search_service_name" {
+# Azure AI Search outputs (module disabled)
+/* output "azure_search_service_name" {
   description = "The name of the Azure AI Search service"
   value       = module.azure_ai_search.search_service_name
 }
@@ -29,7 +29,7 @@ output "azure_search_service_name" {
 output "azure_search_service_url" {
   description = "The URL of the Azure AI Search service"
   value       = module.azure_ai_search.search_service_url
-}
+} */
 
 # Azure Document Intelligence outputs
 output "azure_document_intelligence_endpoint" {

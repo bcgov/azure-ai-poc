@@ -1,16 +1,25 @@
 """Documents router - API endpoints for document indexing and vector search."""
 
+import logging
+from datetime import datetime, UTC
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 
 from app.auth.dependencies import get_current_user_from_request
 from app.auth.models import KeycloakUser
 from app.services.cosmos_db_service import CosmosDbService, get_cosmos_db_service
+from app.services.document_intelligence_service import (
+    DocumentIntelligenceService,
+    get_document_intelligence_service,
+    SUPPORTED_EXTENSIONS,
+)
 from app.services.embedding_service import EmbeddingService, get_embedding_service
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 
 class IndexDocumentRequest(BaseModel):
@@ -74,6 +83,141 @@ class DocumentListResponse(BaseModel):
 
     documents: list[DocumentItem] = Field(..., description="List of documents")
     total: int = Field(..., description="Total number of documents")
+
+
+class UploadDocumentResponse(BaseModel):
+    """Response from document upload."""
+
+    id: str = Field(..., description="Document ID")
+    filename: str = Field(..., description="Original filename")
+    user_id: str | None = Field(None, description="User ID who uploaded")
+    total_chunks: int = Field(..., description="Number of chunks created")
+    total_pages: int | None = Field(None, description="Total pages (for PDFs)")
+    uploaded_at: str = Field(..., description="Upload timestamp")
+
+
+@router.post(
+    "/upload",
+    response_model=UploadDocumentResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Upload and process a document",
+)
+async def upload_document(
+    file: UploadFile,
+    embedding_service: Annotated[EmbeddingService, Depends(get_embedding_service)],
+    doc_intelligence: Annotated[
+        DocumentIntelligenceService, Depends(get_document_intelligence_service)
+    ],
+    current_user: Annotated[KeycloakUser, Depends(get_current_user_from_request)],
+) -> UploadDocumentResponse:
+    """
+    Upload and process a document for indexing.
+
+    Supports multiple formats including:
+    - PDF (including scanned/image-based with OCR)
+    - Microsoft Office: DOCX, XLSX, PPTX
+    - Web: HTML
+    - Text: Markdown, plain text
+    - Images: JPEG, PNG, BMP, TIFF
+    """
+    if not file:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No file uploaded")
+
+    # Validate file type
+    file_extension = f".{file.filename.lower().split('.')[-1]}" if file.filename else ""
+
+    if not doc_intelligence.is_supported_format(file.filename or ""):
+        supported = ", ".join(sorted(SUPPORTED_EXTENSIONS.keys()))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported file format. Supported formats: {supported}",
+        )
+
+    user_id = current_user.sub if current_user else "anonymous"
+
+    try:
+        content_bytes = await file.read()
+
+        # Use Azure Document Intelligence to analyze the document
+        result = await doc_intelligence.analyze_document(
+            content=content_bytes,
+            filename=file.filename or "unknown",
+            content_type=file.content_type,
+        )
+
+        content = result.content
+        total_pages = result.pages
+
+        if not content.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Could not extract text from document. "
+                "The document may be empty or corrupted.",
+            )
+
+        # Index the document with embeddings
+        document = await embedding_service.index_document(
+            content=content,
+            user_id=user_id,
+            document_id=None,  # Auto-generate
+            metadata={
+                "title": file.filename,
+                "filename": file.filename,
+                "content_type": file.content_type,
+                "pages": total_pages,
+                "tables_count": len(result.tables),
+                "source": result.metadata.get("source", "unknown"),
+            },
+            chunk_size=1000,
+            chunk_overlap=200,
+        )
+
+        return UploadDocumentResponse(
+            id=document.id,
+            filename=file.filename or "unknown",
+            user_id=user_id,
+            total_chunks=len(document.chunks),
+            total_pages=total_pages,
+            uploaded_at=datetime.now(UTC).isoformat(),
+        )
+
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    except Exception as e:
+        logger.error(f"Error processing document upload: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Upload error: {str(e)}",
+        ) from e
+
+
+@router.get("/supported-formats")
+async def get_supported_formats() -> dict:
+    """Get list of supported document formats."""
+    return {
+        "formats": list(SUPPORTED_EXTENSIONS.keys()),
+        "descriptions": {
+            ".pdf": "PDF documents (including scanned with OCR)",
+            ".docx": "Microsoft Word documents",
+            ".doc": "Microsoft Word (legacy)",
+            ".xlsx": "Microsoft Excel spreadsheets",
+            ".xls": "Microsoft Excel (legacy)",
+            ".pptx": "Microsoft PowerPoint presentations",
+            ".ppt": "Microsoft PowerPoint (legacy)",
+            ".html": "HTML web pages",
+            ".htm": "HTML web pages",
+            ".md": "Markdown files",
+            ".txt": "Plain text files",
+            ".jpg": "JPEG images",
+            ".jpeg": "JPEG images",
+            ".png": "PNG images",
+            ".bmp": "BMP images",
+            ".tiff": "TIFF images",
+            ".tif": "TIFF images",
+        },
+    }
 
 
 @router.get("/", response_model=DocumentListResponse)

@@ -26,6 +26,8 @@ export interface SourceInfo {
   description: string
   confidence: string // 'high', 'medium', 'low'
   url?: string | null
+  api_endpoint?: string // API endpoint path for API sources
+  api_params?: Record<string, string> // Query parameters for API sources
 }
 
 export interface ChatResponse {
