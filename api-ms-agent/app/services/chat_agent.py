@@ -19,12 +19,20 @@ logger = get_logger(__name__)
 
 @dataclass
 class SourceInfo:
-    """Information about a source used in the response."""
+    """Information about a source used in the response.
 
-    source_type: str  # 'llm_knowledge', 'document', 'web', 'api', etc.
-    description: str
+    MANDATORY: All sources must include detailed citation information.
+    For API sources, include endpoint, params, and full URL.
+    For web sources, include full URL with query parameters.
+    For LLM knowledge, include topic area and confidence reasoning.
+    """
+
+    source_type: str  # 'llm_knowledge', 'document', 'web', 'api', 'unknown'
+    description: str  # Detailed description including topic/query details
     confidence: str = "high"  # 'high', 'medium', 'low'
-    url: str | None = None
+    url: str | None = None  # Full URL with query parameters when applicable
+    api_endpoint: str | None = None  # API endpoint path for API sources
+    api_params: dict | None = None  # Query parameters for API sources
 
 
 @dataclass
@@ -39,24 +47,33 @@ class ChatResult:
 class ChatAgentService:
     """Simple chat agent service using Azure OpenAI."""
 
-    SYSTEM_PROMPT = """You are a helpful AI assistant that provides accurate, well-sourced responses.
+    # noqa: E501 - Line length exceptions for LLM prompt readability
+    SYSTEM_PROMPT = """You are a helpful AI assistant that provides accurate, \
+well-sourced responses.
 
 CRITICAL REQUIREMENTS:
 1. You MUST ALWAYS provide source attribution for your information.
-2. If you cannot provide verifiable sources or don't have enough information, you MUST say:
-   "I don't have enough information to answer this question accurately."
+2. If you cannot provide verifiable sources or don't have enough information, \
+you MUST say: "I don't have enough information to answer this question accurately."
 3. Be clear about what you know vs. what you're uncertain about.
 
 SOURCE TYPE RULES (follow strictly):
-- Use "llm_knowledge" for general knowledge from your training data (this is the DEFAULT for most questions)
-- Use "document" ONLY when explicitly referencing an uploaded document provided in the conversation
-- Use "web" ONLY when you have an actual URL to cite (do NOT use for general knowledge)
+- Use "llm_knowledge" for general knowledge from your training data \
+(this is the DEFAULT for most questions)
+- Use "document" ONLY when explicitly referencing an uploaded document
+- Use "web" ONLY when you have an actual URL to cite
 - Use "api" ONLY when data comes from a specific API call
 - Use "unknown" if you cannot determine the source
 
-For general knowledge questions (facts, common information, explanations), ALWAYS use:
+DETAILED CITATION REQUIREMENTS (MANDATORY - NO EXCEPTIONS):
+- For "llm_knowledge": Include the topic area and reasoning for confidence level
+- For "document": Include document name, section/page if known
+- For "web": Include the full URL with any query parameters
+- For "api": Include the full API URL, endpoint path, and query parameters used
+
+For general knowledge questions, ALWAYS use:
 - source_type: "llm_knowledge"
-- description: "General knowledge from AI training data"
+- description: "General knowledge about [TOPIC]. [Explain confidence reasoning]"
 - confidence: based on how certain you are (high/medium/low)
 
 You MUST respond with ONLY valid JSON using this exact format:
@@ -65,7 +82,7 @@ You MUST respond with ONLY valid JSON using this exact format:
     "sources": [
         {
             "source_type": "llm_knowledge",
-            "description": "General knowledge from AI training data",
+            "description": "General knowledge about [topic]. [Confidence reasoning].",
             "confidence": "high|medium|low",
             "url": null
         }
@@ -75,7 +92,7 @@ You MUST respond with ONLY valid JSON using this exact format:
 
 If you don't have sufficient information, respond with:
 {
-    "response": "I don't have enough information to answer this question accurately. [Explain what information is missing]",
+    "response": "I don't have enough information to answer this accurately.",
     "sources": [],
     "has_sufficient_info": false
 }"""

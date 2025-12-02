@@ -16,6 +16,7 @@ from app.middleware.auth_middleware import AuthMiddleware
 from app.middleware.security_middleware import SecurityMiddleware
 from app.routers import api_router
 from app.services import get_chat_agent_service, get_cosmos_db_service, get_embedding_service
+from app.services.orchestrator_agent import shutdown_orchestrator
 from app.services.research_agent import get_deep_research_service
 from app.services.workflow_research_agent import get_workflow_research_service
 
@@ -37,6 +38,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await research_service.close()
     workflow_research_service = get_workflow_research_service()
     await workflow_research_service.close()
+    await shutdown_orchestrator()
     embedding_service = get_embedding_service()
     await embedding_service.close()
     cosmos_service = get_cosmos_db_service()

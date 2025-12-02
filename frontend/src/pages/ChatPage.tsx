@@ -3,26 +3,24 @@ import { chatAgentService, type ChatMessage as ChatAgentMessage } from '@/servic
 import { documentService } from '@/services/documentService'
 import type { FC } from 'react'
 import { useEffect, useRef, useState } from 'react'
-import { Alert, Button, Col, Container, Row } from 'react-bootstrap'
 import {
-  ChatMessage,
-  ChatInput,
-  DocumentList,
+  Message,
+  Input,
   DocumentUploadModal,
   DocumentDeleteConfirm,
-  ChatEmptyState,
+  SessionsSidebar,
   type Document,
 } from '@/components/chat'
 import type { SourceInfo } from '@/services/chatAgentService'
+import '@/styles/chat.css'
 
 interface ChatMessageType {
   id: string
   type: 'user' | 'assistant'
   content: string
-  timestamp: Date
-  documentId?: string
   sources?: SourceInfo[]
   hasSufficientInfo?: boolean
+  isStreaming?: boolean
 }
 
 const ChatPage: FC = () => {
@@ -30,8 +28,6 @@ const ChatPage: FC = () => {
   const [sessionId, setSessionId] = useState<string>(`session_${Date.now()}`)
   const [currentQuestion, setCurrentQuestion] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [isStreaming, setIsStreaming] = useState(false)
-  const [streamingEnabled, setStreamingEnabled] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [documents, setDocuments] = useState<Document[]>([])
   const [selectedDocument, setSelectedDocument] = useState<string | null>(null)
@@ -41,16 +37,12 @@ const ChatPage: FC = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [documentToDelete, setDocumentToDelete] = useState<Document | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
-  const [isLoadingDocuments, setIsLoadingDocuments] = useState(true)
   const [pendingDocumentSelection, setPendingDocumentSelection] = useState<string | null>(null)
+  const [sessionRefreshTrigger, setSessionRefreshTrigger] = useState(0)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const messagesContainerRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const previousMessageCount = useRef(0)
-  const shouldAutoScrollOnNewMessage = useRef(true)
 
-  // Helper function to get appropriate icon for file type
   const getFileIcon = (filename: string): string => {
     const extension = filename.toLowerCase().split('.').pop() || ''
     switch (extension) {
@@ -68,25 +60,26 @@ const ChatPage: FC = () => {
   }
 
   const loadDocuments = async () => {
-    setIsLoadingDocuments(true)
     try {
       const result = await documentService.listDocuments()
       if (result.success && result.data) {
         setDocuments(result.data.documents)
-        return result.data.documents
       }
-      return []
     } catch (err: any) {
       console.error('Error loading documents:', err)
-      return []
-    } finally {
-      setIsLoadingDocuments(false)
     }
   }
 
   useEffect(() => {
     loadDocuments()
   }, [])
+
+  // Auto-scroll to bottom when messages change
+  useEffect(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [messages])
 
   useEffect(() => {
     if (
@@ -97,34 +90,6 @@ const ChatPage: FC = () => {
       setPendingDocumentSelection(null)
     }
   }, [documents, pendingDocumentSelection])
-
-  // Scroll helper - only called explicitly when needed
-  const scrollToBottom = () => {
-    if (shouldAutoScrollOnNewMessage.current) {
-      requestAnimationFrame(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-      })
-    }
-  }
-
-  // Track message count for reference only (no auto-scroll here)
-  useEffect(() => {
-    previousMessageCount.current = messages.length
-  }, [messages.length])
-
-  useEffect(() => {
-    const container = messagesContainerRef.current
-    if (!container) return
-
-    const handleScroll = () => {
-      const { scrollTop, scrollHeight, clientHeight } = container
-      const distanceFromBottom = scrollHeight - (scrollTop + clientHeight)
-      shouldAutoScrollOnNewMessage.current = distanceFromBottom < 100
-    }
-
-    container.addEventListener('scroll', handleScroll)
-    return () => container.removeEventListener('scroll', handleScroll)
-  }, [])
 
   const handleUploadDocument = async (file: File) => {
     setIsUploading(true)
@@ -162,8 +127,6 @@ const ChatPage: FC = () => {
         id: Date.now().toString(),
         type: 'assistant',
         content: `Document "${file.name}" uploaded successfully! You can now ask questions about this document.`,
-        timestamp: new Date(),
-        documentId: response.data.id,
       }
       setMessages((prev) => [...prev, successMessage])
 
@@ -205,7 +168,6 @@ const ChatPage: FC = () => {
         id: Date.now().toString(),
         type: 'assistant',
         content: `Document "${documentToDelete.filename}" has been deleted successfully.`,
-        timestamp: new Date(),
       }
       setMessages((prev) => [...prev, successMessage])
 
@@ -224,247 +186,201 @@ const ChatPage: FC = () => {
     setDocumentToDelete(null)
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleSubmit = async () => {
     if (!currentQuestion.trim() || isLoading) return
 
     const userMessage: ChatMessageType = {
       id: Date.now().toString(),
       type: 'user',
       content: currentQuestion,
-      timestamp: new Date(),
-      documentId: selectedDocument || undefined,
     }
 
-    setMessages((prev) => [...prev, userMessage])
-    // Don't scroll here - let the message appear naturally above the input
-    
+    const assistantMessageId = (Date.now() + 1).toString()
+    const placeholderMessage: ChatMessageType = {
+      id: assistantMessageId,
+      type: 'assistant',
+      content: '',
+      isStreaming: true,
+    }
+
+    setMessages((prev) => [...prev, userMessage, placeholderMessage])
     const questionToSend = currentQuestion
     setCurrentQuestion('')
     setError(null)
+    setIsLoading(true)
 
-    // Build chat history from messages for context
+    // Build chat history
     const chatHistory: ChatAgentMessage[] = messages.map((msg) => ({
       role: msg.type === 'user' ? 'user' : 'assistant',
       content: msg.content,
     }))
 
-    if (streamingEnabled) {
-      setIsStreaming(true)
-      const assistantMessageId = (Date.now() + 1).toString()
-      const placeholderMessage: ChatMessageType = {
-        id: assistantMessageId,
-        type: 'assistant',
-        content: '',
-        timestamp: new Date(),
-        documentId: selectedDocument || undefined,
-      }
-      // Add placeholder without scrolling - content will grow naturally
-      setMessages((prev) => [...prev, placeholderMessage])
-
-      try {
-        const onChunk = (chunk: string) => {
-          setMessages((prev) =>
-            prev.map((msg) =>
-              msg.id === assistantMessageId ? { ...msg, content: chunk } : msg,
-            ),
-          )
-        }
-
-        const onError = (error: string) => {
-          setError(error)
-          setMessages((prev) => prev.filter((msg) => msg.id !== assistantMessageId))
-        }
-
-        const streamResult = await chatAgentService.streamMessage(
-          questionToSend,
-          sessionId,
-          chatHistory,
-          onChunk,
-          onError,
+    try {
+      const onChunk = (chunk: string) => {
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === assistantMessageId 
+              ? { ...msg, content: chunk, isStreaming: true } 
+              : msg,
+          ),
         )
+      }
 
-        // Update message with sources after streaming completes
-        if (streamResult) {
-          setMessages((prev) =>
-            prev.map((msg) =>
-              msg.id === assistantMessageId
-                ? {
-                    ...msg,
-                    sources: streamResult.sources,
-                    hasSufficientInfo: streamResult.hasSufficientInfo,
-                  }
-                : msg,
-            ),
-          )
-          // Update session ID if returned
-          if (streamResult.sessionId) {
-            setSessionId(streamResult.sessionId)
-          }
-        }
-      } catch (err: any) {
-        console.error('Chat Agent streaming error:', err)
-        setError(err.message || 'Failed to stream response. Please try again.')
+      const onError = (error: string) => {
+        setError(error)
         setMessages((prev) => prev.filter((msg) => msg.id !== assistantMessageId))
-      } finally {
-        setIsStreaming(false)
       }
-    } else {
-      setIsLoading(true)
-      try {
-        const result = await chatAgentService.sendMessage(
-          questionToSend,
-          sessionId,
-          chatHistory,
+
+      const streamResult = await chatAgentService.streamMessage(
+        questionToSend,
+        sessionId,
+        chatHistory,
+        onChunk,
+        onError,
+      )
+
+      // Update message with sources after streaming completes
+      if (streamResult) {
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === assistantMessageId
+              ? {
+                  ...msg,
+                  sources: streamResult.sources,
+                  hasSufficientInfo: streamResult.hasSufficientInfo,
+                  isStreaming: false,
+                }
+              : msg,
+          ),
         )
-
-        let assistantContent = ''
-        let sources: SourceInfo[] = []
-        let hasSufficientInfo = true
-        if (result.success && result.data) {
-          assistantContent = result.data.response
-          sources = result.data.sources || []
-          hasSufficientInfo = result.data.has_sufficient_info
-          // Update session ID if returned
-          if (result.data.session_id) {
-            setSessionId(result.data.session_id)
-          }
-        } else {
-          throw new Error(result.error || 'Failed to get response from chat agent')
+        if (streamResult.sessionId) {
+          setSessionId(streamResult.sessionId)
         }
-
-        const assistantMessage: ChatMessageType = {
-          id: (Date.now() + 1).toString(),
-          type: 'assistant',
-          content: assistantContent,
-          timestamp: new Date(),
-          documentId: selectedDocument || undefined,
-          sources,
-          hasSufficientInfo,
-        }
-
-        setMessages((prev) => [...prev, assistantMessage])
-        // Don't auto-scroll - let user control their view
-      } catch (err: any) {
-        console.error('Chat Agent API error:', err)
-        setError(err.message || 'Failed to get response. Please try again.')
-      } finally {
-        setIsLoading(false)
+        // Trigger sidebar refresh after successful message
+        setSessionRefreshTrigger((prev) => prev + 1)
+      } else {
+        // Remove streaming flag even if no result
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === assistantMessageId
+              ? { ...msg, isStreaming: false }
+              : msg,
+          ),
+        )
       }
+    } catch (err: any) {
+      console.error('Chat error:', err)
+      setError(err.message || 'Failed to get response. Please try again.')
+      setMessages((prev) => prev.filter((msg) => msg.id !== assistantMessageId))
+    } finally {
+      setIsLoading(false)
     }
   }
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSubmit(e as any)
+  const handleSessionSelect = (
+    newSessionId: string,
+    historyMessages?: Array<{ role: string; content: string }>,
+  ) => {
+    setSessionId(newSessionId)
+    if (historyMessages) {
+      const loadedMessages: ChatMessageType[] = historyMessages.map((msg, index) => ({
+        id: `loaded_${index}`,
+        type: msg.role === 'user' ? 'user' : 'assistant',
+        content: msg.content,
+      }))
+      setMessages(loadedMessages)
+    } else {
+      setMessages([])
     }
+    setError(null)
   }
 
-  const selectedDocumentName = selectedDocument
-    ? documents.find((doc) => doc.id === selectedDocument)?.filename ?? null
-    : null
+  const handleNewSession = () => {
+    setSessionId(`session_${Date.now()}`)
+    setMessages([])
+    setError(null)
+    setSelectedDocument(null)
+  }
 
   return (
-    <Container fluid className="chat-interface-container p-0">
-      <Row className="flex-grow-1 overflow-hidden g-0 h-100">
-        <Col
-          xs={12}
-          sm={12}
-          md={11}
-          lg={10}
-          xl={8}
-          xxl={7}
-          className="mx-auto d-flex flex-column h-100 position-relative px-2 px-md-3"
-        >
-          {/* Chat Header */}
-          <div className="chat-header py-2 py-md-3 border-bottom flex-shrink-0">
-            <div className="d-flex justify-content-between align-items-center mb-2">
-              <h4 className="mb-0">
-                <i className="bi bi-chat-dots me-2"></i>
-                AI Document Assistant
-              </h4>
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => setShowUploadModal(true)}
-              >
-                <i className="bi bi-cloud-upload me-1"></i>
-                Upload Document
-              </Button>
-            </div>
-
-            {/* Document Selection */}
-            <div className="mb-2">
-              <DocumentList
-                documents={documents}
-                selectedDocument={selectedDocument}
-                onSelectDocument={setSelectedDocument}
-                onDeleteDocument={handleDeleteDocument}
-                isLoadingDocuments={isLoadingDocuments}
-                getFileIcon={getFileIcon}
-              />
-            </div>
-          </div>
-
-          {/* Error Alert */}
+    <div className="chat-layout">
+      <SessionsSidebar
+        currentSessionId={sessionId}
+        onSessionSelect={handleSessionSelect}
+        onNewSession={handleNewSession}
+        refreshTrigger={sessionRefreshTrigger}
+      />
+      <div className="chat-main">
+        <div className="copilot-chat-container">
+          {/* Error */}
           {error && (
-            <Alert variant="danger" onClose={() => setError(null)} dismissible>
-              <i className="bi bi-exclamation-triangle me-2"></i>
-              {error}
-            </Alert>
+            <div style={{ padding: '0.5rem 2rem' }}>
+              <div 
+                style={{ 
+                  background: '#ffebe9', 
+                  border: '1px solid #ff8182', 
+                  borderRadius: '0.5rem',
+                  padding: '0.75rem 1rem',
+                  color: '#a40e26',
+                  fontSize: '0.875rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between'
+                }}
+              >
+                <span>
+                  <i className="bi bi-exclamation-triangle me-2"></i>
+                  {error}
+                </span>
+                <button 
+                  onClick={() => setError(null)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#a40e26' }}
+                >
+                  <i className="bi bi-x-lg"></i>
+                </button>
+              </div>
+            </div>
           )}
 
-          {/* Messages Area */}
-          <div
-            ref={messagesContainerRef}
-            className="chat-messages flex-grow-1 overflow-auto px-1 px-md-2"
-          >
-            {messages.length === 0 ? (
-              <ChatEmptyState
-                documentsCount={documents.length}
-                onUploadClick={() => setShowUploadModal(true)}
-              />
-            ) : (
-              <div className="space-y-3">
-                {messages.map((message) => (
-                  <ChatMessage
-                    key={message.id}
-                    type={message.type}
-                    content={message.content}
-                    timestamp={message.timestamp}
-                    documentId={message.documentId}
-                    documentName={
-                      message.documentId
-                        ? documents.find((doc) => doc.id === message.documentId)?.filename
-                        : undefined
-                    }
-                    getFileIcon={getFileIcon}
-                    sources={message.sources}
-                    hasSufficientInfo={message.hasSufficientInfo}
-                  />
-                ))}
-                <div ref={messagesEndRef} />
-              </div>
-            )}
+          {/* Messages */}
+          <div className="copilot-messages">
+        {messages.length === 0 ? (
+          <div className="copilot-empty">
+            <div className="copilot-empty-icon">
+              <i className="bi bi-stars"></i>
+            </div>
+            <div className="copilot-empty-title">How can I help you today?</div>
+            <div className="copilot-empty-subtitle">
+              Ask me anything. I can help you with questions, analysis, coding, and more.
+            </div>
           </div>
+        ) : (
+          <>
+            {messages.map((message) => (
+              <Message
+                key={message.id}
+                type={message.type}
+                content={message.content}
+                sources={message.sources}
+                hasSufficientInfo={message.hasSufficientInfo}
+                isStreaming={message.isStreaming}
+              />
+            ))}
+            <div ref={messagesEndRef} />
+          </>
+        )}
+      </div>
 
-          {/* Chat Input */}
-          <ChatInput
-            currentQuestion={currentQuestion}
-            setCurrentQuestion={setCurrentQuestion}
-            onSubmit={handleSubmit}
-            isLoading={isLoading}
-            isStreaming={isStreaming}
-            streamingEnabled={streamingEnabled}
-            setStreamingEnabled={setStreamingEnabled}
-            documentsCount={documents.length}
-            selectedDocument={selectedDocument}
-            selectedDocumentName={selectedDocumentName}
-            onKeyPress={handleKeyPress}
-          />
-        </Col>
-      </Row>
+      {/* Input */}
+      <Input
+        value={currentQuestion}
+        onChange={setCurrentQuestion}
+        onSubmit={handleSubmit}
+        isLoading={isLoading}
+        placeholder="Ask anything"
+        onUploadClick={() => setShowUploadModal(true)}
+        selectedDocument={selectedDocument}
+      />
 
       {/* Upload Modal */}
       <DocumentUploadModal
@@ -486,7 +402,9 @@ const ChatPage: FC = () => {
         isDeleting={isDeleting}
         getFileIcon={getFileIcon}
       />
-    </Container>
+        </div>
+      </div>
+    </div>
   )
 }
 

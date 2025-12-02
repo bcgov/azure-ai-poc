@@ -69,7 +69,8 @@ resource "azurerm_linux_web_app" "backend" {
     WEBSITE_ENABLE_SYNC_UPDATE_SITE       = "1"
     IMAGE_TAG                             = var.image_tag
     # Azure OpenAI Configuration
-    AZURE_OPENAI_LLM_DEPLOYMENT_NAME       = var.azure_openai_deployment_name
+    AZURE_OPENAI_DEPLOYMENT                = var.azure_openai_deployment_name
+    AZURE_OPENAI_API_VERSION               = "2024-12-01-preview"
     AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME = var.azure_openai_embedding_deployment
     AZURE_OPENAI_LLM_ENDPOINT              = var.azure_openai_llm_endpoint
     AZURE_OPENAI_EMBEDDING_ENDPOINT        = var.azure_openai_embedding_endpoint
@@ -77,6 +78,8 @@ resource "azurerm_linux_web_app" "backend" {
     # Azure AI Search Configuration
     AZURE_SEARCH_ENDPOINT   = var.azure_search_endpoint
     AZURE_SEARCH_INDEX_NAME = var.azure_search_index_name
+    # Azure Document Intelligence Configuration
+    AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT = var.azure_document_intelligence_endpoint
     # CosmosDB Configuration (kept for backward compatibility)
     COSMOS_DB_ENDPOINT               = var.cosmosdb_endpoint
     COSMOS_DB_DATABASE_NAME          = var.cosmosdb_db_name

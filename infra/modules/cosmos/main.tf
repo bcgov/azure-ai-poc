@@ -85,6 +85,10 @@ resource "azurerm_cosmosdb_sql_container" "cosmosdb_sql_db_container" {
   database_name       = azurerm_cosmosdb_sql_database.cosmosdb_sql_db.name
   partition_key_paths = ["/partitionKey"]
 
+  # Note: Vector embedding policy requires azapi provider or manual configuration
+  # The Cosmos DB account supports vector search natively once properly configured
+  # See: https://learn.microsoft.com/en-us/azure/cosmos-db/nosql/vector-search
+
   # Optimized indexing policy for document storage with embeddings
   indexing_policy {
     indexing_mode = "consistent"

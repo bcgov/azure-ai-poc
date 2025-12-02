@@ -26,7 +26,7 @@ class Settings(BaseSettings):
 
     # Azure OpenAI Embedding settings
     azure_openai_embedding_endpoint: str = ""
-    azure_openai_embedding_deployment: str = "text-embedding-ada-002"
+    azure_openai_embedding_deployment: str = "text-embedding-3-large"
 
     # LLM Configuration - Low temperature for high confidence responses
     llm_temperature: float = 0.1  # Low temperature for consistent, high-confidence responses
@@ -36,10 +36,16 @@ class Settings(BaseSettings):
     cosmos_db_key: str = ""  # Optional if using managed identity
     cosmos_db_database_name: str = "azure-ai-poc"
 
-    # Use managed identity (Azure CLI credential) if no API key provided
+    # Azure Document Intelligence settings
+    azure_document_intelligence_endpoint: str = ""
+    azure_document_intelligence_key: str = ""  # Optional if using managed identity
+
+    # Use managed identity for non-local environments
+    # Local uses API keys, cloud environments use managed identity
     @property
     def use_managed_identity(self) -> bool:
-        return not self.azure_openai_api_key
+        """Use managed identity for Azure services in non-local environments."""
+        return self.environment != "local"
 
 
 settings = Settings()

@@ -29,6 +29,12 @@ variable "app_service_sku_name_frontend" {
   default     = "B3" # Basic tier 
 }
 
+variable "app_service_sku_name_proxy" {
+  description = "SKU name for the frontend proxy App Service Plan"
+  type        = string
+  default     = "B2" # Basic tier 
+}
+
 variable "azure_openai_deployment_name" {
   description = "Azure OpenAI model deployment name"
   type        = string
