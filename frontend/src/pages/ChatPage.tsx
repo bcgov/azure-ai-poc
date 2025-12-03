@@ -9,6 +9,7 @@ import {
   DocumentUploadModal,
   DocumentDeleteConfirm,
   SessionsSidebar,
+  DocumentList,
   type Document,
 } from '@/components/chat'
 import type { SourceInfo } from '@/services/chatAgentService'
@@ -21,6 +22,8 @@ interface ChatMessageType {
   sources?: SourceInfo[]
   hasSufficientInfo?: boolean
   isStreaming?: boolean
+  isResearchPhase?: boolean
+  researchPhase?: string
 }
 
 const ChatPage: FC = () => {
@@ -39,6 +42,9 @@ const ChatPage: FC = () => {
   const [isDeleting, setIsDeleting] = useState(false)
   const [pendingDocumentSelection, setPendingDocumentSelection] = useState<string | null>(null)
   const [sessionRefreshTrigger, setSessionRefreshTrigger] = useState(0)
+  const [deepResearchEnabled, setDeepResearchEnabled] = useState(false)
+  const [deepResearchRunId, setDeepResearchRunId] = useState<string | null>(null)
+  const [isLoadingDocuments, setIsLoadingDocuments] = useState(false)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -60,13 +66,23 @@ const ChatPage: FC = () => {
   }
 
   const loadDocuments = async () => {
+    setIsLoadingDocuments(true)
     try {
       const result = await documentService.listDocuments()
       if (result.success && result.data) {
-        setDocuments(result.data.documents)
+        // Map DocumentItem to Document format
+        const mappedDocuments: Document[] = result.data.documents.map((doc) => ({
+          id: doc.id,
+          filename: doc.title,
+          uploadedAt: doc.created_at || new Date().toISOString(),
+          totalPages: doc.chunk_count,
+        }))
+        setDocuments(mappedDocuments)
       }
     } catch (err: any) {
       console.error('Error loading documents:', err)
+    } finally {
+      setIsLoadingDocuments(false)
     }
   }
 
@@ -201,6 +217,8 @@ const ChatPage: FC = () => {
       type: 'assistant',
       content: '',
       isStreaming: true,
+      isResearchPhase: deepResearchEnabled,
+      researchPhase: deepResearchEnabled ? 'Starting research...' : undefined,
     }
 
     setMessages((prev) => [...prev, userMessage, placeholderMessage])
@@ -216,57 +234,63 @@ const ChatPage: FC = () => {
     }))
 
     try {
-      const onChunk = (chunk: string) => {
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === assistantMessageId 
-              ? { ...msg, content: chunk, isStreaming: true } 
-              : msg,
-          ),
-        )
-      }
-
-      const onError = (error: string) => {
-        setError(error)
-        setMessages((prev) => prev.filter((msg) => msg.id !== assistantMessageId))
-      }
-
-      const streamResult = await chatAgentService.streamMessage(
-        questionToSend,
-        sessionId,
-        chatHistory,
-        onChunk,
-        onError,
-      )
-
-      // Update message with sources after streaming completes
-      if (streamResult) {
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === assistantMessageId
-              ? {
-                  ...msg,
-                  sources: streamResult.sources,
-                  hasSufficientInfo: streamResult.hasSufficientInfo,
-                  isStreaming: false,
-                }
-              : msg,
-          ),
-        )
-        if (streamResult.sessionId) {
-          setSessionId(streamResult.sessionId)
-        }
-        // Trigger sidebar refresh after successful message
-        setSessionRefreshTrigger((prev) => prev + 1)
+      if (deepResearchEnabled) {
+        // Deep Research Mode
+        await handleDeepResearch(questionToSend, assistantMessageId, chatHistory)
       } else {
-        // Remove streaming flag even if no result
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === assistantMessageId
-              ? { ...msg, isStreaming: false }
-              : msg,
-          ),
+        // Regular chat mode
+        const onChunk = (chunk: string) => {
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === assistantMessageId 
+                ? { ...msg, content: chunk, isStreaming: true } 
+                : msg,
+            ),
+          )
+        }
+
+        const onError = (error: string) => {
+          setError(error)
+          setMessages((prev) => prev.filter((msg) => msg.id !== assistantMessageId))
+        }
+
+        const streamResult = await chatAgentService.streamMessage(
+          questionToSend,
+          sessionId,
+          chatHistory,
+          onChunk,
+          onError,
         )
+
+        // Update message with sources after streaming completes
+        if (streamResult) {
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === assistantMessageId
+                ? {
+                    ...msg,
+                    sources: streamResult.sources,
+                    hasSufficientInfo: streamResult.hasSufficientInfo,
+                    isStreaming: false,
+                  }
+                : msg,
+            ),
+          )
+          if (streamResult.sessionId) {
+            setSessionId(streamResult.sessionId)
+          }
+          // Trigger sidebar refresh after successful message
+          setSessionRefreshTrigger((prev) => prev + 1)
+        } else {
+          // Remove streaming flag even if no result
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === assistantMessageId
+                ? { ...msg, isStreaming: false }
+                : msg,
+            ),
+          )
+        }
       }
     } catch (err: any) {
       console.error('Chat error:', err)
@@ -274,6 +298,104 @@ const ChatPage: FC = () => {
       setMessages((prev) => prev.filter((msg) => msg.id !== assistantMessageId))
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const handleDeepResearch = async (
+    question: string,
+    messageId: string,
+    chatHistory: ChatAgentMessage[],
+  ) => {
+    try {
+      // Start the deep research
+      const startResult = await chatAgentService.startDeepResearch(question)
+      
+      if (!startResult.success || !startResult.data?.run_id) {
+        throw new Error(startResult.error || 'Failed to start deep research')
+      }
+      
+      setDeepResearchRunId(startResult.data.run_id)
+      
+      // Update message with initial status
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === messageId
+            ? { 
+                ...msg, 
+                content: '🔬 **Deep Research Started**\n\nPlanning research strategy...', 
+                researchPhase: 'Planning',
+              }
+            : msg,
+        ),
+      )
+
+      // Run the research (non-streaming for now)
+      const runResult = await chatAgentService.runDeepResearch(startResult.data.run_id)
+      
+      if (!runResult.success || !runResult.data) {
+        throw new Error(runResult.error || 'Failed to run deep research')
+      }
+
+      // Update with final result
+      let finalContent = ''
+      if (runResult.data.final_report) {
+        finalContent = runResult.data.final_report
+      } else if (runResult.data.message) {
+        finalContent = runResult.data.message
+      } else if (runResult.data.findings && runResult.data.findings.length > 0) {
+        finalContent = '## Research Findings\n\n' + runResult.data.findings
+          .map((f, i) => `### Finding ${i + 1}\n${JSON.stringify(f, null, 2)}`)
+          .join('\n\n---\n\n')
+      } else {
+        finalContent = 'Research completed but no results were returned.'
+      }
+
+      // Append sources if available
+      if (runResult.data.sources && runResult.data.sources.length > 0) {
+        finalContent += '\n\n---\n\n## 📚 Sources\n\n'
+        runResult.data.sources.forEach((source, index) => {
+          const confidence = source.confidence === 'high' ? '🟢' : source.confidence === 'medium' ? '🟡' : '🔴'
+          finalContent += `${index + 1}. **${source.source_type}** ${confidence}\n`
+          finalContent += `   - ${source.description}\n`
+          if (source.url) {
+            finalContent += `   - [Link](${source.url})\n`
+          }
+          finalContent += '\n'
+        })
+      }
+
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === messageId
+            ? {
+                ...msg,
+                content: finalContent,
+                isStreaming: false,
+                isResearchPhase: false,
+                researchPhase: undefined,
+              }
+            : msg,
+        ),
+      )
+
+      setDeepResearchRunId(null)
+      setSessionRefreshTrigger((prev) => prev + 1)
+    } catch (err: any) {
+      console.error('Deep research error:', err)
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === messageId
+            ? {
+                ...msg,
+                content: `❌ **Research Failed**\n\n${err.message || 'An error occurred during research.'}`,
+                isStreaming: false,
+                isResearchPhase: false,
+              }
+            : msg,
+        ),
+      )
+      setDeepResearchRunId(null)
+      throw err
     }
   }
 
@@ -371,6 +493,20 @@ const ChatPage: FC = () => {
         )}
       </div>
 
+      {/* Document List */}
+      {documents.length > 0 && (
+        <div style={{ padding: '0 1rem', marginBottom: '0.5rem' }}>
+          <DocumentList
+            documents={documents}
+            selectedDocument={selectedDocument}
+            onSelectDocument={setSelectedDocument}
+            onDeleteDocument={handleDeleteDocument}
+            isLoadingDocuments={isLoadingDocuments}
+            getFileIcon={getFileIcon}
+          />
+        </div>
+      )}
+
       {/* Input */}
       <Input
         value={currentQuestion}
@@ -380,6 +516,8 @@ const ChatPage: FC = () => {
         placeholder="Ask anything"
         onUploadClick={() => setShowUploadModal(true)}
         selectedDocument={selectedDocument}
+        deepResearchEnabled={deepResearchEnabled}
+        onDeepResearchChange={setDeepResearchEnabled}
       />
 
       {/* Upload Modal */}

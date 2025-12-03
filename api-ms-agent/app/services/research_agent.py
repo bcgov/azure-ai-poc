@@ -63,6 +63,16 @@ class ResearchFinding:
 
 
 @dataclass
+class ResearchSource:
+    """A source citation."""
+
+    source_type: str  # 'llm_knowledge', 'document', 'web', 'api'
+    description: str
+    confidence: str = "medium"  # 'high', 'medium', 'low'
+    url: str | None = None
+
+
+@dataclass
 class ResearchState:
     """State passed through the workflow."""
 
@@ -71,29 +81,29 @@ class ResearchState:
     findings: list[ResearchFinding] = field(default_factory=list)
     synthesis: str = ""
     final_report: str = ""
+    sources: list[ResearchSource] = field(default_factory=list)
     current_phase: ResearchPhase = ResearchPhase.PLANNING
     feedback_history: list[str] = field(default_factory=list)
 
 
-# ==================== AI Functions with Human-in-the-Loop ====================
+# ==================== AI Functions for Research Workflow ====================
 
 
 # Global state storage for simulating research process
 _research_state_store: dict[str, ResearchState] = {}
 
 
-@ai_function(approval_mode="always_require")
-def approve_research_plan(
-    plan_json: Annotated[str, "JSON string containing the research plan to approve"],
+@ai_function()
+def save_research_plan(
+    plan_json: Annotated[str, "JSON string containing the research plan"],
     topic: Annotated[str, "The research topic"],
 ) -> str:
     """
-    Approve the research plan before proceeding with research.
-    This function requires human approval before execution.
+    Save the research plan and proceed with research.
     """
     try:
         plan_data = json.loads(plan_json)
-        # Store the approved plan
+        # Store the plan
         state = ResearchState(
             topic=topic,
             plan=ResearchPlan(
@@ -107,52 +117,123 @@ def approve_research_plan(
             current_phase=ResearchPhase.RESEARCHING,
         )
         _research_state_store[topic] = state
-        return f"Research plan approved for topic: {topic}. Proceeding with research."
-    except json.JSONDecodeError:
+        logger.info(
+            "research_plan_saved",
+            topic=topic,
+            questions_count=len(state.plan.research_questions),
+        )
+        return f"Research plan saved for topic: {topic}. Proceeding to research."
+    except json.JSONDecodeError as e:
+        logger.error("plan_json_decode_error", topic=topic, error=str(e))
         return "Error: Invalid plan JSON format"
 
 
-@ai_function(approval_mode="always_require")
-def approve_research_findings(
-    findings_json: Annotated[str, "JSON string containing the research findings to approve"],
+@ai_function()
+def save_research_findings(
+    findings_json: Annotated[str, "JSON string containing the research findings"],
     topic: Annotated[str, "The research topic"],
 ) -> str:
     """
-    Approve the research findings before synthesis.
-    This function requires human approval before execution.
+    Save the research findings and proceed with synthesis.
     """
     try:
         findings_data = json.loads(findings_json)
         if topic in _research_state_store:
             state = _research_state_store[topic]
-            state.findings = [
-                ResearchFinding(
-                    subtopic=f.get("subtopic", ""),
-                    content=f.get("content", ""),
-                    confidence=f.get("confidence", "medium"),
-                )
-                for f in findings_data
-            ]
-            state.current_phase = ResearchPhase.SYNTHESIZING
-        return f"Research findings approved for topic: {topic}. Proceeding with synthesis."
-    except json.JSONDecodeError:
+        else:
+            # Try partial match
+            state = None
+            for key in _research_state_store:
+                if topic.lower() in key.lower() or key.lower() in topic.lower():
+                    state = _research_state_store[key]
+                    break
+            if not state:
+                state = ResearchState(topic=topic)
+                _research_state_store[topic] = state
+
+        state.findings = [
+            ResearchFinding(
+                subtopic=f.get("subtopic", ""),
+                content=f.get("content", ""),
+                confidence=f.get("confidence", "medium"),
+                sources=f.get("sources", []),
+            )
+            for f in findings_data
+        ]
+        state.current_phase = ResearchPhase.SYNTHESIZING
+        logger.info("research_findings_saved", topic=topic, findings_count=len(state.findings))
+        return f"Research findings saved for topic: {topic}. Proceeding with synthesis phase."
+    except json.JSONDecodeError as e:
+        logger.error("findings_json_decode_error", topic=topic, error=str(e))
         return "Error: Invalid findings JSON format"
 
 
-@ai_function(approval_mode="always_require")
-def approve_final_report(
-    report: Annotated[str, "The final research report to approve"],
+@ai_function()
+def save_final_report(
+    report: Annotated[str, "The final research report with inline citations"],
     topic: Annotated[str, "The research topic"],
+    sources_json: Annotated[
+        str,
+        "JSON array of sources with source_type, description, confidence, url",
+    ] = "[]",
 ) -> str:
     """
-    Approve the final research report.
-    This function requires human approval before execution.
+    Save the final research report with sources. This completes the research.
+    Sources must include: source_type, description, confidence, url (optional).
     """
+    logger.info("save_final_report_called", topic=topic, report_length=len(report))
+
+    # Parse sources
+    try:
+        sources_data = json.loads(sources_json) if sources_json else []
+    except json.JSONDecodeError:
+        sources_data = []
+
+    sources = [
+        ResearchSource(
+            source_type=s.get("source_type", "llm_knowledge"),
+            description=s.get("description", ""),
+            confidence=s.get("confidence", "medium"),
+            url=s.get("url"),
+        )
+        for s in sources_data
+    ]
+
     if topic in _research_state_store:
         state = _research_state_store[topic]
         state.final_report = report
+        state.sources = sources
         state.current_phase = ResearchPhase.COMPLETED
-    return f"Final report approved for topic: {topic}. Research complete."
+        logger.info("final_report_saved", topic=topic, sources_count=len(sources))
+    else:
+        # Try to find by partial match
+        for key in _research_state_store:
+            if topic.lower() in key.lower() or key.lower() in topic.lower():
+                state = _research_state_store[key]
+                state.final_report = report
+                state.sources = sources
+                state.current_phase = ResearchPhase.COMPLETED
+                logger.info(
+                    "final_report_saved_partial_match",
+                    topic=topic,
+                    matched_key=key,
+                    sources_count=len(sources),
+                )
+                break
+        else:
+            # Store with new key
+            _research_state_store[topic] = ResearchState(
+                topic=topic,
+                final_report=report,
+                sources=sources,
+                current_phase=ResearchPhase.COMPLETED,
+            )
+            logger.info(
+                "final_report_saved_new_key",
+                topic=topic,
+                sources_count=len(sources),
+            )
+    return f"Final report saved for topic: {topic}. {len(sources)} sources."
 
 
 # ==================== Main Service Class ====================
@@ -162,10 +243,9 @@ class DeepResearchAgentService:
     """
     Deep Research Agent using Microsoft Agent Framework SDK.
 
-    Uses ChatAgent with ai_function approval_mode="always_require" for
-    native human-in-the-loop support at key decision points.
+    Uses ChatAgent with ai_function for tool-based research workflow.
 
-    Workflow: Planning -> [Approval] -> Research -> [Approval] -> Synthesis -> [Approval] -> Complete
+    Workflow: Planning -> Research -> Synthesis -> Complete
     """
 
     def __init__(self) -> None:
@@ -202,36 +282,50 @@ class DeepResearchAgentService:
         """Create a ChatAgent configured for deep research with approval checkpoints."""
         from agent_framework.openai import OpenAIChatClient
 
-        # Create OpenAI chat client pointing to Azure endpoint
+        # Create OpenAI chat client using the Azure OpenAI async client
         chat_client = OpenAIChatClient(
-            openai_client=self._get_client(),
+            async_client=self._get_client(),
             model_id=settings.azure_openai_deployment,
         )
 
         return ChatAgent(
             name="DeepResearchAgent",
-            instructions="""You are a thorough research assistant that helps users explore topics in depth.
+            instructions="""You are a thorough research assistant. You MUST complete all three phases using the provided tools.
 
-Your workflow involves three key phases, each requiring human approval:
+IMPORTANT: You MUST call the tool functions to save your work at each phase. Do not just describe what you would do - actually call the functions.
 
-1. PLANNING PHASE:
-   - Analyze the topic and create a comprehensive research plan
-   - Generate research questions, subtopics to explore, and methodology
-   - Call approve_research_plan() with the plan - this requires human approval
+CITATION REQUIREMENT: Every piece of information MUST include a source citation. For each fact or claim, you must track:
+- source_type: "llm_knowledge", "document", "web", or "api"
+- description: What the source is (e.g., "General AI knowledge about machine learning concepts")
+- confidence: "high", "medium", or "low"
+- url: If available, provide a URL (use null if not available)
 
-2. RESEARCH PHASE:
-   - After plan approval, conduct detailed research on each subtopic
-   - Gather findings with confidence levels
-   - Call approve_research_findings() with findings - this requires human approval
+## PHASE 1: PLANNING
+Create a research plan, then call save_research_plan() with:
+- plan_json: A JSON string like {"research_questions": ["q1", "q2"], "subtopics": ["s1", "s2"], "methodology": "description"}
+- topic: The exact research topic
 
-3. SYNTHESIS PHASE:
-   - After findings approval, synthesize everything into a final report
-   - Include executive summary, key findings, conclusions, and recommendations
-   - Call approve_final_report() with the report - this requires human approval
+## PHASE 2: RESEARCH  
+Research each subtopic WITH CITATIONS, then call save_research_findings() with:
+- findings_json: A JSON string like:
+  [{"subtopic": "name", "content": "detailed findings...", "confidence": "high", "sources": [{"source_type": "llm_knowledge", "description": "AI training knowledge on topic X", "confidence": "high", "url": null}]}]
+- topic: The exact research topic
 
-Always format plans, findings, and reports clearly. Wait for approval at each checkpoint.""",
+CRITICAL: Each finding MUST include a "sources" array with at least one source citation.
+
+## PHASE 3: SYNTHESIS
+Write a comprehensive final report (2000+ words with sections), then call save_final_report() with:
+- report: The complete markdown report including Executive Summary, Key Findings, Analysis, Conclusions, and Recommendations
+- sources_json: A JSON string with ALL sources used: [{"source_type": "llm_knowledge", "description": "...", "confidence": "high", "url": null}]
+- topic: The exact research topic
+
+CRITICAL: The sources_json MUST include ALL sources cited throughout the research. Every claim in the final report must be traceable to a source.
+
+After calling save_final_report(), provide a brief summary to the user.
+
+YOU MUST CALL ALL THREE FUNCTIONS IN ORDER. The report in save_final_report() should be the detailed, complete research report with full source attribution.""",
             chat_client=chat_client,
-            tools=[approve_research_plan, approve_research_findings, approve_final_report],
+            tools=[save_research_plan, save_research_findings, save_final_report],
         )
 
     async def start_research(self, topic: str, user_id: str | None = None) -> dict:
@@ -297,50 +391,66 @@ Always format plans, findings, and reports clearly. Wait for approval at each ch
         logger.info("executing_workflow", run_id=run_id, phase=state.current_phase.value)
 
         try:
-            # Run the agent with the research topic
-            query = f"Please research this topic thoroughly: {state.topic}"
+            # Run the agent with the research topic - it will complete all phases
+            query = f"""Please research this topic thoroughly: {state.topic}
+
+Complete all three phases of the research workflow:
+1. First, create a research plan and call save_research_plan()
+2. Then, conduct research and call save_research_findings()
+3. Finally, synthesize a report and call save_final_report()
+
+Provide comprehensive, detailed responses at each phase."""
+
             result = await agent.run(query, thread=thread)
 
-            # Check for approval requests
-            if result.user_input_requests:
-                # Store pending approvals
-                run_data["pending_approvals"] = list(result.user_input_requests)
+            # Log the result for debugging
+            logger.info(
+                "agent_run_result",
+                run_id=run_id,
+                result_type=type(result).__name__,
+                result_str=str(result)[:500],
+            )
 
-                approval_info = []
-                for req in result.user_input_requests:
-                    approval_info.append(
-                        {
-                            "request_id": req.id,
-                            "function_name": req.function_call.name,
-                            "arguments": req.function_call.arguments,
-                        }
-                    )
+            # Get stored state from global store if available
+            # Try exact match first, then partial match
+            stored_state = _research_state_store.get(state.topic)
+            if not stored_state:
+                # Try partial match
+                for key in _research_state_store:
+                    if state.topic.lower() in key.lower() or key.lower() in state.topic.lower():
+                        stored_state = _research_state_store[key]
+                        logger.info("found_state_partial_match", topic=state.topic, matched_key=key)
+                        break
 
-                # Update phase based on which approval is pending
-                if any("plan" in req.function_call.name for req in result.user_input_requests):
-                    state.current_phase = ResearchPhase.AWAITING_PLAN_APPROVAL
-                elif any(
-                    "findings" in req.function_call.name for req in result.user_input_requests
-                ):
-                    state.current_phase = ResearchPhase.AWAITING_FINDINGS_APPROVAL
-                elif any("report" in req.function_call.name for req in result.user_input_requests):
-                    state.current_phase = ResearchPhase.AWAITING_REPORT_APPROVAL
+            if stored_state:
+                state.plan = stored_state.plan
+                state.findings = stored_state.findings
+                state.final_report = stored_state.final_report
+                state.sources = stored_state.sources
+                logger.info(
+                    "retrieved_stored_state",
+                    has_plan=state.plan is not None,
+                    findings_count=len(state.findings),
+                    has_final_report=bool(state.final_report),
+                    final_report_length=len(state.final_report) if state.final_report else 0,
+                    sources_count=len(state.sources),
+                )
+            else:
+                logger.warning(
+                    "no_stored_state_found",
+                    topic=state.topic,
+                    store_keys=list(_research_state_store.keys()),
+                )
 
-                return {
-                    "run_id": run_id,
-                    "status": "awaiting_approval",
-                    "current_phase": state.current_phase.value,
-                    "pending_approvals": approval_info,
-                    "message": str(result),
-                }
-
-            # No approvals needed, workflow complete
+            # Workflow complete
             state.current_phase = ResearchPhase.COMPLETED
+            final_message = str(result)
+
             return {
                 "run_id": run_id,
                 "status": "completed",
                 "current_phase": state.current_phase.value,
-                "message": str(result),
+                "message": final_message,
                 "plan": {
                     "main_topic": state.plan.main_topic,
                     "research_questions": state.plan.research_questions,
@@ -357,7 +467,16 @@ Always format plans, findings, and reports clearly. Wait for approval at each ch
                     }
                     for f in state.findings
                 ],
-                "final_report": state.final_report,
+                "final_report": state.final_report or final_message,
+                "sources": [
+                    {
+                        "source_type": s.source_type,
+                        "description": s.description,
+                        "confidence": s.confidence,
+                        "url": s.url,
+                    }
+                    for s in state.sources
+                ],
             }
 
         except Exception as e:

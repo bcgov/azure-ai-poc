@@ -106,6 +106,14 @@ If you don't have sufficient information, respond with:
     async def _get_client(self) -> AsyncAzureOpenAI:
         """Get or create the Azure OpenAI client."""
         if self._client is None:
+            logger.debug(
+                "creating_openai_client",
+                endpoint=settings.azure_openai_endpoint,
+                deployment=settings.azure_openai_deployment,
+                api_version=settings.azure_openai_api_version,
+                use_managed_identity=settings.use_managed_identity,
+            )
+
             if settings.use_managed_identity:
                 # Use Azure CLI / Managed Identity
                 self._credential = DefaultAzureCredential()
@@ -117,15 +125,29 @@ If you don't have sufficient information, respond with:
                     azure_ad_token_provider=token_provider,
                     api_version=settings.azure_openai_api_version,
                 )
-                logger.info("Using managed identity for Azure OpenAI")
+                logger.info(
+                    "Using managed identity for Azure OpenAI",
+                    endpoint=settings.azure_openai_endpoint,
+                )
             else:
                 # Use API key
+                api_key = settings.azure_openai_api_key
+                logger.debug(
+                    "using_api_key_auth",
+                    key_length=len(api_key) if api_key else 0,
+                    key_preview=f"{api_key[:4]}...{api_key[-4:]}"
+                    if api_key and len(api_key) > 8
+                    else "***",
+                )
                 self._client = AsyncAzureOpenAI(
                     azure_endpoint=settings.azure_openai_endpoint,
-                    api_key=settings.azure_openai_api_key,
+                    api_key=api_key,
                     api_version=settings.azure_openai_api_version,
                 )
-                logger.info("Using API key for Azure OpenAI")
+                logger.info(
+                    "Using API key for Azure OpenAI",
+                    endpoint=settings.azure_openai_endpoint,
+                )
         return self._client
 
     async def chat(

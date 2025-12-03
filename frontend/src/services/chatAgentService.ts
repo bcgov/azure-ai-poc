@@ -272,6 +272,181 @@ class ChatAgentService {
       return { success: false, error: this._parseError(error, 'Failed to delete session') }
     }
   }
+
+  // ===================
+  // Deep Research
+  // ===================
+
+  /**
+   * Start a deep research workflow
+   * @param topic The research topic
+   * @param userId Optional user ID for tracking
+   */
+  async startDeepResearch(
+    topic: string,
+    userId?: string,
+  ): Promise<ApiResponse<DeepResearchStartResponse>> {
+    try {
+      await this.getAuthHeaders()
+
+      const resp = await httpClient.post('/api/v1/research/start', {
+        topic,
+        user_id: userId,
+      })
+      const data = resp.data as DeepResearchStartResponse
+      return { success: true, data }
+    } catch (error: any) {
+      console.error('Start deep research error:', error)
+      return { success: false, error: this._parseError(error, 'Failed to start deep research') }
+    }
+  }
+
+  /**
+   * Run the deep research workflow
+   * @param runId The workflow run ID
+   */
+  async runDeepResearch(runId: string): Promise<ApiResponse<DeepResearchResultResponse>> {
+    try {
+      await this.getAuthHeaders()
+
+      const resp = await httpClient.post(`/api/v1/research/run/${runId}`)
+      const data = resp.data as DeepResearchResultResponse
+      return { success: true, data }
+    } catch (error: any) {
+      console.error('Run deep research error:', error)
+      return { success: false, error: this._parseError(error, 'Failed to run deep research') }
+    }
+  }
+
+  /**
+   * Get the status of a deep research workflow
+   * @param runId The workflow run ID
+   */
+  async getDeepResearchStatus(runId: string): Promise<ApiResponse<DeepResearchStatusResponse>> {
+    try {
+      await this.getAuthHeaders()
+
+      const resp = await httpClient.get(`/api/v1/research/run/${runId}/status`)
+      const data = resp.data as DeepResearchStatusResponse
+      return { success: true, data }
+    } catch (error: any) {
+      console.error('Get deep research status error:', error)
+      return { success: false, error: this._parseError(error, 'Failed to get research status') }
+    }
+  }
+
+  /**
+   * Stream deep research workflow events
+   * @param runId The workflow run ID
+   * @param onEvent Callback for each event
+   * @param onError Callback for errors
+   */
+  async streamDeepResearch(
+    runId: string,
+    onEvent: (event: DeepResearchEvent) => void,
+    onError?: (error: string) => void,
+  ): Promise<void> {
+    try {
+      const authStore = (await import('../stores')).useAuthStore.getState()
+      const token = authStore.getToken()
+
+      const eventSource = new EventSource(
+        `/api/v1/research/run/${runId}/stream${token ? `?token=${token}` : ''}`,
+      )
+
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data) as DeepResearchEvent
+          onEvent(data)
+
+          // Close the connection if the workflow is complete
+          if (data.type === 'complete' || data.type === 'error') {
+            eventSource.close()
+          }
+        } catch (parseError) {
+          console.error('Failed to parse research event:', parseError)
+        }
+      }
+
+      eventSource.onerror = (error) => {
+        console.error('Deep research stream error:', error)
+        eventSource.close()
+        onError?.('Research stream connection error')
+      }
+    } catch (error: any) {
+      console.error('Stream deep research error:', error)
+      onError?.(this._parseError(error, 'Failed to stream research'))
+    }
+  }
+
+  /**
+   * Send approval for a research checkpoint
+   * @param runId The workflow run ID
+   * @param requestId The approval request ID
+   * @param approved Whether to approve
+   * @param feedback Optional feedback
+   */
+  async sendResearchApproval(
+    runId: string,
+    requestId: string,
+    approved: boolean,
+    feedback?: string,
+  ): Promise<ApiResponse<{ status: string }>> {
+    try {
+      await this.getAuthHeaders()
+
+      const resp = await httpClient.post(`/api/v1/research/run/${runId}/approve`, {
+        request_id: requestId,
+        approved,
+        feedback,
+      })
+      const data = resp.data as { status: string }
+      return { success: true, data }
+    } catch (error: any) {
+      console.error('Send research approval error:', error)
+      return { success: false, error: this._parseError(error, 'Failed to send approval') }
+    }
+  }
+}
+
+// Deep Research Types
+export interface DeepResearchStartResponse {
+  run_id: string
+  topic: string
+  status: string
+  current_phase: string
+}
+
+export interface DeepResearchStatusResponse {
+  run_id: string
+  current_phase: string
+  topic: string
+  has_plan: boolean
+  findings_count: number
+  has_report: boolean
+  pending_approvals: number
+}
+
+export interface DeepResearchResultResponse {
+  run_id: string
+  status: string
+  current_phase: string | null
+  plan: Record<string, unknown> | null
+  findings: Array<Record<string, unknown>>
+  final_report: string
+  message: string | null
+  workflow_state: string | null
+  error: string | null
+  sources: SourceInfo[]
+}
+
+export interface DeepResearchEvent {
+  type: 'phase_update' | 'approval_required' | 'finding' | 'complete' | 'error'
+  run_id: string
+  phase?: string
+  message?: string
+  data?: Record<string, unknown>
+  error?: string
 }
 
 // Export singleton instance

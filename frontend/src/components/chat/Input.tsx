@@ -1,5 +1,5 @@
 import type { FC } from 'react'
-import { useRef, useEffect } from 'react'
+import { useRef, useEffect, useState } from 'react'
 
 interface InputProps {
   value: string
@@ -9,6 +9,8 @@ interface InputProps {
   placeholder?: string
   onUploadClick?: () => void
   selectedDocument?: string | null
+  deepResearchEnabled?: boolean
+  onDeepResearchChange?: (enabled: boolean) => void
 }
 
 const Input: FC<InputProps> = ({
@@ -19,8 +21,11 @@ const Input: FC<InputProps> = ({
   placeholder = 'Ask anything',
   onUploadClick,
   selectedDocument,
+  deepResearchEnabled = false,
+  onDeepResearchChange,
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [showResearchInfo, setShowResearchInfo] = useState(false)
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -47,6 +52,59 @@ const Input: FC<InputProps> = ({
 
   return (
     <div className="copilot-input-area">
+      {/* Deep Research Info Panel */}
+      {showResearchInfo && (
+        <div 
+          style={{
+            background: 'linear-gradient(135deg, #003366 0%, #1a5a96 100%)',
+            borderRadius: '0.75rem',
+            padding: '1rem 1.25rem',
+            marginBottom: '0.75rem',
+            color: 'white',
+            fontSize: '0.875rem',
+            boxShadow: '0 4px 15px rgba(0, 51, 102, 0.3)',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div>
+              <div style={{ fontWeight: 600, marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <i className="bi bi-search-heart"></i>
+                About Deep Research
+              </div>
+              <p style={{ margin: '0 0 0.75rem 0', opacity: 0.95, lineHeight: 1.5 }}>
+                Deep Research uses an AI-powered multi-phase workflow for comprehensive analysis:
+              </p>
+              <ul style={{ margin: 0, paddingLeft: '1.25rem', opacity: 0.9, lineHeight: 1.6 }}>
+                <li><strong>Planning:</strong> Creates a research plan with questions and methodology</li>
+                <li><strong>Research:</strong> Gathers findings on each subtopic with confidence levels</li>
+                <li><strong>Synthesis:</strong> Produces a comprehensive report with conclusions</li>
+              </ul>
+              <p style={{ margin: '0.75rem 0 0 0', opacity: 0.85, fontSize: '0.8rem' }}>
+                <i className="bi bi-clock me-1"></i>
+                Takes 30-60 seconds for thorough, well-structured answers.
+              </p>
+            </div>
+            <button
+              onClick={() => setShowResearchInfo(false)}
+              style={{
+                background: 'rgba(255,255,255,0.2)',
+                border: 'none',
+                borderRadius: '50%',
+                width: '24px',
+                height: '24px',
+                color: 'white',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <i className="bi bi-x"></i>
+            </button>
+          </div>
+        </div>
+      )}
       <div className="copilot-input-wrapper">
         <textarea
           ref={textareaRef}
@@ -54,7 +112,7 @@ const Input: FC<InputProps> = ({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={placeholder}
+          placeholder={deepResearchEnabled ? 'Ask a research question...' : placeholder}
           disabled={isLoading}
           rows={1}
         />
@@ -76,6 +134,50 @@ const Input: FC<InputProps> = ({
                 <i className="bi bi-file-text"></i>
                 Document selected
               </span>
+            )}
+            {onDeepResearchChange && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <button
+                  type="button"
+                  onClick={() => onDeepResearchChange(!deepResearchEnabled)}
+                  style={{
+                    background: deepResearchEnabled 
+                      ? 'linear-gradient(135deg, #003366 0%, #1a5a96 100%)' 
+                      : 'transparent',
+                    border: deepResearchEnabled ? 'none' : '1px solid #d0d7de',
+                    borderRadius: '1rem',
+                    padding: '0.35rem 0.75rem',
+                    fontSize: '0.8rem',
+                    color: deepResearchEnabled ? 'white' : '#656d76',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.375rem',
+                    transition: 'all 0.2s ease',
+                    fontWeight: deepResearchEnabled ? 500 : 400,
+                  }}
+                  title={deepResearchEnabled ? 'Deep Research enabled' : 'Enable Deep Research'}
+                >
+                  <i className={`bi ${deepResearchEnabled ? 'bi-search-heart-fill' : 'bi-search-heart'}`}></i>
+                  Deep Research
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowResearchInfo(!showResearchInfo)}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    padding: '0.25rem',
+                    color: '#656d76',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                  }}
+                  title="Learn about Deep Research"
+                >
+                  <i className="bi bi-info-circle"></i>
+                </button>
+              </div>
             )}
           </div>
           <div className="copilot-input-right">
