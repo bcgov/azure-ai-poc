@@ -315,10 +315,12 @@ class DeepResearchAgentService:
             chunks = []
             doc_title = None
             for result in results:
-                chunks.append({
-                    "index": result.get("chunk_index", 0),
-                    "content": result.get("content", ""),
-                })
+                chunks.append(
+                    {
+                        "index": result.get("chunk_index", 0),
+                        "content": result.get("content", ""),
+                    }
+                )
                 if not doc_title:
                     doc_title = result.get("title") or result.get("filename")
 
@@ -327,9 +329,7 @@ class DeepResearchAgentService:
 
             # Sort by chunk index and concatenate
             chunks.sort(key=lambda x: x["index"])
-            content_parts = [
-                f"--- Document: {doc_title or document_id} ---\n"
-            ]
+            content_parts = [f"--- Document: {doc_title or document_id} ---\n"]
             for chunk in chunks:
                 content_parts.append(chunk["content"])
 
@@ -451,9 +451,7 @@ When citing from this document, use:
         # If document_id is provided, fetch document content for thorough scanning
         document_context = None
         if document_id and user_id:
-            document_context = await self._fetch_document_content(
-                document_id, user_id
-            )
+            document_context = await self._fetch_document_content(document_id, user_id)
 
         initial_state = ResearchState(
             topic=topic,
