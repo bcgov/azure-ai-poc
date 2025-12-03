@@ -1,14 +1,14 @@
 """
-Cosmos DB service for chat history and vector embeddings storage.
+Cosmos DB service for chat history, metadata, and workflow persistence.
 
 This service provides:
+- Chat session management
 - Chat history storage and retrieval
-- Vector similarity search using Cosmos DB's native vector capabilities
-- Document embeddings storage
+- Document metadata storage (not embeddings)
+- Workflow state persistence for Microsoft Agent Framework
 - Managed identity authentication with key fallback
 """
 
-import json
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -55,35 +55,45 @@ class ConversationSession:
 
 
 @dataclass
-class DocumentChunk:
-    """A document chunk with vector embedding stored in Cosmos DB."""
+class DocumentMetadata:
+    """Document metadata stored in Cosmos DB (embeddings stored in Azure AI Search)."""
 
     id: str
     document_id: str
-    user_id: str  # Partition key
-    content: str
-    embedding: list[float]
-    chunk_index: int
-    metadata: dict[str, Any] = field(default_factory=dict)
+    user_id: str
+    title: str
+    filename: str | None = None
+    content_type: str | None = None
+    chunk_count: int = 0
+    pages: int | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
-class VectorSearchOptions:
-    """Options for vector similarity search."""
+class WorkflowState:
+    """Workflow state for Microsoft Agent Framework distributed workflows."""
 
-    user_id: str | None = None
-    document_id: str | None = None
-    top_k: int = 5
-    min_similarity: float = 0.0
+    id: str
+    workflow_id: str
+    user_id: str
+    workflow_type: str
+    status: str  # "pending", "running", "completed", "failed"
+    current_step: str | None = None
+    context: dict[str, Any] = field(default_factory=dict)
+    result: dict[str, Any] | None = None
+    error: str | None = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 class CosmosDbService:
-    """Service for Cosmos DB operations including chat history and vector search."""
+    """Service for Cosmos DB operations for chat, metadata, and workflow persistence."""
 
     # Container names
     CHAT_CONTAINER = "chat_history"
     DOCUMENTS_CONTAINER = "documents"
+    WORKFLOWS_CONTAINER = "workflows"
 
     def __init__(self) -> None:
         """Initialize the Cosmos DB service."""
@@ -91,6 +101,7 @@ class CosmosDbService:
         self.database: DatabaseProxy | None = None
         self.chat_container: ContainerProxy | None = None
         self.documents_container: ContainerProxy | None = None
+        self.workflows_container: ContainerProxy | None = None
         self._initialized = False
 
     def _initialize_client(self) -> None:
@@ -104,7 +115,7 @@ class CosmosDbService:
         if not endpoint or not database_name:
             logger.warning(
                 "cosmos_db_config_missing",
-                message="Cosmos DB not configured - chat history will not be persisted",
+                message="Cosmos DB not configured - persistence will not be available",
             )
             return
 
@@ -138,6 +149,7 @@ class CosmosDbService:
             # Get container clients
             self.chat_container = self.database.get_container_client(self.CHAT_CONTAINER)
             self.documents_container = self.database.get_container_client(self.DOCUMENTS_CONTAINER)
+            self.workflows_container = self.database.get_container_client(self.WORKFLOWS_CONTAINER)
 
             self._initialized = True
             logger.info("cosmos_db_initialized", database=database_name)
@@ -167,35 +179,12 @@ class CosmosDbService:
                     error=str(e),
                 )
 
-        # Create documents container if it doesn't exist
-        # This container needs vector indexing policy for embeddings
+        # Create documents container for metadata only (embeddings in Azure AI Search)
         try:
-            # Define indexing policy with vector index for embeddings
-            indexing_policy = {
-                "indexingMode": "consistent",
-                "automatic": True,
-                "includedPaths": [{"path": "/*"}],
-                "excludedPaths": [{"path": '/"_etag"/?'}],
-            }
-
-            # Define vector embedding policy
-            vector_embedding_policy = {
-                "vectorEmbeddings": [
-                    {
-                        "path": "/embedding",
-                        "dataType": "float32",
-                        "distanceFunction": "cosine",
-                        "dimensions": 1536,  # text-embedding-ada-002 dimensions
-                    }
-                ]
-            }
-
             self.database.create_container_if_not_exists(
                 id=self.DOCUMENTS_CONTAINER,
                 partition_key=PartitionKey(path="/user_id"),
                 offer_throughput=400,
-                indexing_policy=indexing_policy,
-                vector_embedding_policy=vector_embedding_policy,
             )
             logger.info("container_ensured", container=self.DOCUMENTS_CONTAINER)
         except CosmosHttpResponseError as e:
@@ -203,6 +192,22 @@ class CosmosDbService:
                 logger.warning(
                     "container_create_warning",
                     container=self.DOCUMENTS_CONTAINER,
+                    error=str(e),
+                )
+
+        # Create workflows container for agent framework state persistence
+        try:
+            self.database.create_container_if_not_exists(
+                id=self.WORKFLOWS_CONTAINER,
+                partition_key=PartitionKey(path="/user_id"),
+                offer_throughput=400,
+            )
+            logger.info("container_ensured", container=self.WORKFLOWS_CONTAINER)
+        except CosmosHttpResponseError as e:
+            if e.status_code != 409:  # 409 = already exists
+                logger.warning(
+                    "container_create_warning",
+                    container=self.WORKFLOWS_CONTAINER,
                     error=str(e),
                 )
 
@@ -596,175 +601,77 @@ class CosmosDbService:
             title += "..."
         return title
 
-    # ============= Vector Search Operations =============
+    # ============= Document Metadata Operations =============
 
-    async def store_document_chunk(
+    async def save_document_metadata(
         self,
         document_id: str,
         user_id: str,
-        content: str,
-        embedding: list[float],
-        chunk_index: int,
+        title: str,
+        filename: str | None = None,
+        content_type: str | None = None,
+        chunk_count: int = 0,
+        pages: int | None = None,
         metadata: dict[str, Any] | None = None,
-    ) -> DocumentChunk:
+    ) -> DocumentMetadata:
         """
-        Store a document chunk with its vector embedding.
+        Save document metadata to Cosmos DB.
+
+        Note: Embeddings are stored in Azure AI Search, not here.
 
         Args:
-            document_id: The parent document identifier
-            user_id: The user identifier (partition key)
-            content: The text content of the chunk
-            embedding: The vector embedding
-            chunk_index: Index of this chunk in the document
-            metadata: Optional additional metadata
+            document_id: The document identifier
+            user_id: The user identifier
+            title: Document title
+            filename: Original filename
+            content_type: MIME type
+            chunk_count: Number of chunks in Azure AI Search
+            pages: Number of pages (for PDFs)
+            metadata: Additional metadata
 
         Returns:
-            The stored document chunk
+            The saved document metadata
         """
-        chunk_id = f"{document_id}_chunk_{chunk_index}"
-        chunk = DocumentChunk(
-            id=chunk_id,
+        doc_meta = DocumentMetadata(
+            id=f"doc_{document_id}",
             document_id=document_id,
             user_id=user_id,
-            content=content,
-            embedding=embedding,
-            chunk_index=chunk_index,
+            title=title,
+            filename=filename,
+            content_type=content_type,
+            chunk_count=chunk_count,
+            pages=pages,
             metadata=metadata or {},
         )
 
         if not self._ensure_initialized():
-            return chunk
+            return doc_meta
 
-        # Check embedding size (Cosmos DB has 2MB item limit)
         item = {
-            "id": chunk_id,
-            "type": "chunk",
+            "id": doc_meta.id,
+            "type": "document",
             "document_id": document_id,
             "user_id": user_id,
-            "content": content,
-            "embedding": embedding,
-            "chunk_index": chunk_index,
+            "title": title,
+            "filename": filename,
+            "content_type": content_type,
+            "chunk_count": chunk_count,
+            "pages": pages,
+            "created_at": doc_meta.created_at.isoformat(),
             "metadata": metadata or {},
-            "created_at": chunk.created_at.isoformat(),
         }
 
-        item_size = len(json.dumps(item).encode("utf-8"))
-        if item_size > 1500000:  # 1.5MB warning threshold
-            logger.warning(
-                "chunk_size_warning",
-                size_kb=item_size // 1024,
-                chunk_id=chunk_id,
-            )
-
         try:
-            self.documents_container.create_item(body=item)
-            logger.debug(
-                "chunk_stored",
-                chunk_id=chunk_id,
-                document_id=document_id,
-                embedding_dims=len(embedding),
-            )
-            return chunk
-        except CosmosHttpResponseError as error:
-            if error.status_code == 413:
-                logger.error("chunk_too_large", size_kb=item_size // 1024)
-                raise ValueError(f"Document chunk too large: {item_size // 1024}KB") from error
-            raise
+            self.documents_container.upsert_item(body=item)
+            logger.info("document_metadata_saved", document_id=document_id, user_id=user_id)
+            return doc_meta
         except Exception as error:
-            logger.error("chunk_store_failed", error=str(error), chunk_id=chunk_id)
-            raise
-
-    async def vector_search(
-        self,
-        embedding: list[float],
-        options: VectorSearchOptions | None = None,
-    ) -> list[dict[str, Any]]:
-        """
-        Perform vector similarity search using Cosmos DB's native vector search.
-
-        Args:
-            embedding: The query embedding vector
-            options: Vector search options
-
-        Returns:
-            List of similar document chunks with similarity scores
-        """
-        if not self._ensure_initialized():
-            return []
-
-        if options is None:
-            options = VectorSearchOptions()
-
-        try:
-            where_clause = "c.type = 'chunk' AND c.embedding != null"
-            parameters = [
-                {"name": "@embedding", "value": embedding},
-                {"name": "@topK", "value": options.top_k},
-            ]
-
-            # Filter by user if specified
-            if options.user_id:
-                where_clause += " AND c.user_id = @user_id"
-                parameters.append({"name": "@user_id", "value": options.user_id})
-
-            # Filter by document if specified
-            if options.document_id:
-                where_clause += " AND c.document_id = @document_id"
-                parameters.append({"name": "@document_id", "value": options.document_id})
-
-            # Filter by minimum similarity
-            if options.min_similarity > 0:
-                where_clause += " AND VectorDistance(c.embedding, @embedding) >= @minSimilarity"
-                parameters.append({"name": "@minSimilarity", "value": options.min_similarity})
-
-            query_spec = {
-                "query": f"""
-                    SELECT TOP @topK c.id, c.document_id, c.content, c.metadata,
-                           c.user_id, c.chunk_index,
-                           VectorDistance(c.embedding, @embedding) AS similarity
-                    FROM c
-                    WHERE {where_clause}
-                    ORDER BY VectorDistance(c.embedding, @embedding)
-                """,
-                "parameters": parameters,
-            }
-
-            start_time = time.time()
-
-            items = list(
-                self.documents_container.query_items(
-                    query=query_spec,
-                    enable_cross_partition_query=True,
-                    max_item_count=options.top_k,
-                )
-            )
-
-            query_time = (time.time() - start_time) * 1000
-            logger.info(
-                "vector_search_completed",
-                results=len(items),
-                query_time_ms=f"{query_time:.2f}",
-                top_k=options.top_k,
-            )
-
-            return items
-
-        except Exception as error:
-            error_message = str(error)
-
-            if "VectorDistance" in error_message:
-                logger.error(
-                    "vector_search_config_error",
-                    message="Check vector indexing configuration",
-                )
-                raise ValueError(f"Vector indexing error: {error_message}") from error
-
-            logger.error("vector_search_failed", error=error_message)
-            raise
+            logger.error("document_metadata_save_failed", error=str(error), document_id=document_id)
+            return doc_meta
 
     async def list_user_documents(self, user_id: str, limit: int = 50) -> list[dict]:
         """
-        List documents for a user by aggregating unique document IDs from chunks.
+        List document metadata for a user.
 
         Args:
             user_id: The user identifier
@@ -777,124 +684,292 @@ class CosmosDbService:
             return []
 
         try:
-            # Query to get unique documents with their metadata
             query = """
-                SELECT DISTINCT VALUE {
-                    'id': c.document_id,
-                    'document_id': c.document_id,
-                    'title': c.metadata.title,
-                    'created_at': c.created_at,
-                    'chunk_count': 1
-                }
-                FROM c
-                WHERE c.type = 'chunk' AND c.user_id = @user_id
+                SELECT * FROM c
+                WHERE c.type = 'document' AND c.user_id = @user_id
+                ORDER BY c.created_at DESC
+                OFFSET 0 LIMIT @limit
             """
-            parameters = [{"name": "@user_id", "value": user_id}]
+            parameters = [
+                {"name": "@user_id", "value": user_id},
+                {"name": "@limit", "value": limit},
+            ]
 
             items = list(
                 self.documents_container.query_items(
                     query=query,
                     parameters=parameters,
                     partition_key=user_id,
-                    max_item_count=limit,
                 )
             )
 
-            # Aggregate to get unique documents (query returns duplicates for each chunk)
-            documents_map: dict[str, dict] = {}
-            for item in items:
-                doc_id = item.get("document_id")
-                if doc_id and doc_id not in documents_map:
-                    documents_map[doc_id] = {
-                        "id": doc_id,
-                        "document_id": doc_id,
-                        "title": item.get("title") or f"Document {doc_id[:8]}...",
-                        "created_at": item.get("created_at"),
-                    }
+            result = [
+                {
+                    "id": item["document_id"],
+                    "document_id": item["document_id"],
+                    "title": item.get("title") or f"Document {item['document_id'][:8]}...",
+                    "filename": item.get("filename"),
+                    "created_at": item.get("created_at"),
+                    "chunk_count": item.get("chunk_count", 0),
+                }
+                for item in items
+            ]
 
-            # Now count chunks per document
-            for doc_id in documents_map:
-                count_query = """
-                    SELECT VALUE COUNT(1) FROM c
-                    WHERE c.type = 'chunk' AND c.document_id = @doc_id AND c.user_id = @user_id
-                """
-                count_params = [
-                    {"name": "@doc_id", "value": doc_id},
-                    {"name": "@user_id", "value": user_id},
-                ]
-                count_result = list(
-                    self.documents_container.query_items(
-                        query=count_query,
-                        parameters=count_params,
-                        partition_key=user_id,
-                    )
-                )
-                documents_map[doc_id]["chunk_count"] = count_result[0] if count_result else 0
-
-            result = list(documents_map.values())[:limit]
             logger.info("documents_listed", user_id=user_id, count=len(result))
             return result
 
         except CosmosResourceNotFoundError:
-            # Container or partition doesn't exist yet - return empty list
             logger.info("documents_list_empty", user_id=user_id, reason="partition_not_found")
             return []
         except Exception as error:
             logger.error("documents_list_failed", error=str(error), user_id=user_id)
             return []
 
-    async def delete_document_chunks(self, document_id: str, user_id: str) -> int:
+    async def delete_document_metadata(self, document_id: str, user_id: str) -> bool:
         """
-        Delete all chunks for a document.
+        Delete document metadata from Cosmos DB.
+
+        Note: Also delete chunks from Azure AI Search separately.
 
         Args:
             document_id: The document identifier
             user_id: The user identifier
 
         Returns:
-            Number of chunks deleted
+            True if deleted successfully
         """
         if not self._ensure_initialized():
-            return 0
+            return False
 
         try:
-            query = """
-                SELECT c.id FROM c
-                WHERE c.type = 'chunk'
-                AND c.document_id = @document_id
-            """
-            parameters = [{"name": "@document_id", "value": document_id}]
-
-            items = list(
-                self.documents_container.query_items(
-                    query=query,
-                    parameters=parameters,
-                    enable_cross_partition_query=True,
-                )
+            self.documents_container.delete_item(
+                item=f"doc_{document_id}",
+                partition_key=user_id,
             )
-
-            deleted_count = 0
-            for item in items:
-                self.documents_container.delete_item(
-                    item=item["id"],
-                    partition_key=user_id,
-                )
-                deleted_count += 1
-
-            logger.info(
-                "chunks_deleted",
-                document_id=document_id,
-                count=deleted_count,
-            )
-            return deleted_count
-
+            logger.info("document_metadata_deleted", document_id=document_id)
+            return True
+        except CosmosResourceNotFoundError:
+            logger.warning("document_metadata_not_found", document_id=document_id)
+            return False
         except Exception as error:
             logger.error(
-                "chunks_delete_failed",
-                error=str(error),
-                document_id=document_id,
+                "document_metadata_delete_failed", error=str(error), document_id=document_id
             )
-            return 0
+            return False
+
+    # ============= Workflow Persistence Operations (Microsoft Agent Framework) =============
+
+    async def save_workflow_state(
+        self,
+        workflow_id: str,
+        user_id: str,
+        workflow_type: str,
+        status: str,
+        current_step: str | None = None,
+        context: dict[str, Any] | None = None,
+        result: dict[str, Any] | None = None,
+        error: str | None = None,
+    ) -> WorkflowState:
+        """
+        Save or update workflow state for distributed workflow persistence.
+
+        Args:
+            workflow_id: The workflow identifier
+            user_id: The user identifier
+            workflow_type: Type of workflow (e.g., "research", "document_qa")
+            status: Workflow status (pending, running, completed, failed)
+            current_step: Current step in the workflow
+            context: Workflow context/state data
+            result: Workflow result (when completed)
+            error: Error message (when failed)
+
+        Returns:
+            The saved workflow state
+        """
+        now = datetime.now(UTC)
+        workflow_state = WorkflowState(
+            id=f"wf_{workflow_id}",
+            workflow_id=workflow_id,
+            user_id=user_id,
+            workflow_type=workflow_type,
+            status=status,
+            current_step=current_step,
+            context=context or {},
+            result=result,
+            error=error,
+            updated_at=now,
+        )
+
+        if not self._ensure_initialized():
+            return workflow_state
+
+        item = {
+            "id": workflow_state.id,
+            "type": "workflow",
+            "workflow_id": workflow_id,
+            "user_id": user_id,
+            "workflow_type": workflow_type,
+            "status": status,
+            "current_step": current_step,
+            "context": context or {},
+            "result": result,
+            "error": error,
+            "created_at": workflow_state.created_at.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        try:
+            self.workflows_container.upsert_item(body=item)
+            logger.info(
+                "workflow_state_saved",
+                workflow_id=workflow_id,
+                status=status,
+                current_step=current_step,
+            )
+            return workflow_state
+        except Exception as err:
+            logger.error("workflow_state_save_failed", error=str(err), workflow_id=workflow_id)
+            return workflow_state
+
+    async def get_workflow_state(self, workflow_id: str, user_id: str) -> WorkflowState | None:
+        """
+        Get workflow state by ID.
+
+        Args:
+            workflow_id: The workflow identifier
+            user_id: The user identifier
+
+        Returns:
+            The workflow state or None if not found
+        """
+        if not self._ensure_initialized():
+            return None
+
+        try:
+            item = self.workflows_container.read_item(
+                item=f"wf_{workflow_id}",
+                partition_key=user_id,
+            )
+
+            return WorkflowState(
+                id=item["id"],
+                workflow_id=item["workflow_id"],
+                user_id=item["user_id"],
+                workflow_type=item["workflow_type"],
+                status=item["status"],
+                current_step=item.get("current_step"),
+                context=item.get("context", {}),
+                result=item.get("result"),
+                error=item.get("error"),
+                created_at=datetime.fromisoformat(item["created_at"]),
+                updated_at=datetime.fromisoformat(item["updated_at"]),
+            )
+        except CosmosResourceNotFoundError:
+            return None
+        except Exception as error:
+            logger.error("workflow_state_get_failed", error=str(error), workflow_id=workflow_id)
+            return None
+
+    async def list_user_workflows(
+        self,
+        user_id: str,
+        workflow_type: str | None = None,
+        status: str | None = None,
+        limit: int = 20,
+    ) -> list[WorkflowState]:
+        """
+        List workflows for a user with optional filters.
+
+        Args:
+            user_id: The user identifier
+            workflow_type: Optional filter by workflow type
+            status: Optional filter by status
+            limit: Maximum number of workflows to return
+
+        Returns:
+            List of workflow states
+        """
+        if not self._ensure_initialized():
+            return []
+
+        try:
+            conditions = ["c.type = 'workflow'", "c.user_id = @user_id"]
+            parameters = [
+                {"name": "@user_id", "value": user_id},
+                {"name": "@limit", "value": limit},
+            ]
+
+            if workflow_type:
+                conditions.append("c.workflow_type = @workflow_type")
+                parameters.append({"name": "@workflow_type", "value": workflow_type})
+
+            if status:
+                conditions.append("c.status = @status")
+                parameters.append({"name": "@status", "value": status})
+
+            query = f"""
+                SELECT * FROM c
+                WHERE {" AND ".join(conditions)}
+                ORDER BY c.updated_at DESC
+                OFFSET 0 LIMIT @limit
+            """
+
+            items = list(
+                self.workflows_container.query_items(
+                    query=query,
+                    parameters=parameters,
+                    partition_key=user_id,
+                )
+            )
+
+            return [
+                WorkflowState(
+                    id=item["id"],
+                    workflow_id=item["workflow_id"],
+                    user_id=item["user_id"],
+                    workflow_type=item["workflow_type"],
+                    status=item["status"],
+                    current_step=item.get("current_step"),
+                    context=item.get("context", {}),
+                    result=item.get("result"),
+                    error=item.get("error"),
+                    created_at=datetime.fromisoformat(item["created_at"]),
+                    updated_at=datetime.fromisoformat(item["updated_at"]),
+                )
+                for item in items
+            ]
+
+        except Exception as error:
+            logger.error("workflows_list_failed", error=str(error), user_id=user_id)
+            return []
+
+    async def delete_workflow(self, workflow_id: str, user_id: str) -> bool:
+        """
+        Delete a workflow state.
+
+        Args:
+            workflow_id: The workflow identifier
+            user_id: The user identifier
+
+        Returns:
+            True if deleted successfully
+        """
+        if not self._ensure_initialized():
+            return False
+
+        try:
+            self.workflows_container.delete_item(
+                item=f"wf_{workflow_id}",
+                partition_key=user_id,
+            )
+            logger.info("workflow_deleted", workflow_id=workflow_id)
+            return True
+        except CosmosResourceNotFoundError:
+            logger.warning("workflow_not_found", workflow_id=workflow_id)
+            return False
+        except Exception as error:
+            logger.error("workflow_delete_failed", error=str(error), workflow_id=workflow_id)
+            return False
 
     # ============= Health Check =============
 
@@ -950,6 +1025,7 @@ class CosmosDbService:
             self.database = None
             self.chat_container = None
             self.documents_container = None
+            self.workflows_container = None
             self._initialized = False
             logger.info("cosmos_db_disposed")
 

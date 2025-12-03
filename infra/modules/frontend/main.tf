@@ -99,7 +99,7 @@ resource "azurerm_linux_web_app" "frontend_proxy" {
     health_check_path                       = "/healthz"
     health_check_eviction_time_in_min       = 2
     application_stack {
-      docker_image_name   = "ghcr.io/bcgov/nr-containers/proxy/caddy:2-alpine"
+      docker_image_name   = "ghcr.io/bcgov/nr-containers/proxy:2-alpine"
       docker_registry_url = var.container_registry_url
     }
     ftps_state = "Disabled"
