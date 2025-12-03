@@ -134,20 +134,23 @@ async def chat(
                             confidence = "medium"
                         else:
                             confidence = "low"
-                        document_sources.append({
-                            "source_type": "document",
-                            "description": (
-                                f"From document: {result['metadata'].get('title', 'Unknown')} "
-                                f"(chunk {result.get('chunk_index', 0) + 1})"
-                            ),
-                            "confidence": confidence,
-                            "url": None,
-                        })
+                        document_sources.append(
+                            {
+                                "source_type": "document",
+                                "description": (
+                                    f"From document: {result['metadata'].get('title', 'Unknown')} "
+                                    f"(chunk {result.get('chunk_index', 0) + 1})"
+                                ),
+                                "confidence": confidence,
+                                "url": None,
+                            }
+                        )
 
                     document_context = "\n\n---\n\n".join(context_parts)
         except Exception as e:
             # Log but don't fail the request if document search fails
             import logging
+
             logging.error(f"Document search failed: {e}")
 
     try:
