@@ -101,15 +101,17 @@ class ChatAgentService {
     message: string,
     sessionId?: string,
     history?: ChatMessage[],
+    documentId?: string,
   ): Promise<ApiResponse<ChatResponse>> {
     try {
       // Ensure token is refreshed before making the request via the http client
       await this.getAuthHeaders()
 
-      const request: ChatRequest = {
+      const request: ChatRequest & { document_id?: string } = {
         message,
         session_id: sessionId,
         history: history?.map((msg) => ({ role: msg.role, content: msg.content })),
+        document_id: documentId,
       }
 
       const resp = await httpClient.post(`${this.baseUrl}/`, request)
@@ -142,9 +144,10 @@ class ChatAgentService {
     history?: ChatMessage[],
     onChunk?: (chunk: string) => void,
     onError?: (error: string) => void,
+    documentId?: string,
   ): Promise<{ sources: SourceInfo[]; hasSufficientInfo: boolean; sessionId?: string } | null> {
     try {
-      const result = await this.sendMessage(message, sessionId, history)
+      const result = await this.sendMessage(message, sessionId, history, documentId)
 
       if (result.success && result.data) {
         const response = result.data.response
@@ -281,10 +284,12 @@ class ChatAgentService {
    * Start a deep research workflow
    * @param topic The research topic
    * @param userId Optional user ID for tracking
+   * @param documentId Optional document ID for document-based research
    */
   async startDeepResearch(
     topic: string,
     userId?: string,
+    documentId?: string,
   ): Promise<ApiResponse<DeepResearchStartResponse>> {
     try {
       await this.getAuthHeaders()
@@ -292,6 +297,7 @@ class ChatAgentService {
       const resp = await httpClient.post('/api/v1/research/start', {
         topic,
         user_id: userId,
+        document_id: documentId,
       })
       const data = resp.data as DeepResearchStartResponse
       return { success: true, data }

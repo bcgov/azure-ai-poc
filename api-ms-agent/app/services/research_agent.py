@@ -84,6 +84,8 @@ class ResearchState:
     sources: list[ResearchSource] = field(default_factory=list)
     current_phase: ResearchPhase = ResearchPhase.PLANNING
     feedback_history: list[str] = field(default_factory=list)
+    document_id: str | None = None  # For document-based research
+    document_context: str | None = None  # Full document content for scanning
 
 
 # ==================== AI Functions for Research Workflow ====================
@@ -278,8 +280,81 @@ class DeepResearchAgentService:
                 logger.info("Using API key for Azure OpenAI")
         return self._client
 
-    def _create_research_agent(self) -> ChatAgent:
-        """Create a ChatAgent configured for deep research with approval checkpoints."""
+    async def _fetch_document_content(
+        self,
+        document_id: str,
+        user_id: str,
+    ) -> str | None:
+        """
+        Fetch all chunks of a document for thorough scanning.
+
+        Args:
+            document_id: The document ID to fetch.
+            user_id: The user ID for authorization.
+
+        Returns:
+            Concatenated document content or None if not found.
+        """
+        try:
+            from app.services.azure_search_service import get_azure_search_service
+
+            search_service = get_azure_search_service()
+
+            # Get all chunks for the document
+            if not search_service._ensure_initialized():
+                return None
+
+            results = search_service._search_client.search(
+                search_text="*",
+                filter=f"document_id eq '{document_id}' and user_id eq '{user_id}'",
+                select=["content", "chunk_index", "title", "filename"],
+                order_by=["chunk_index asc"],
+                top=1000,
+            )
+
+            chunks = []
+            doc_title = None
+            for result in results:
+                chunks.append({
+                    "index": result.get("chunk_index", 0),
+                    "content": result.get("content", ""),
+                })
+                if not doc_title:
+                    doc_title = result.get("title") or result.get("filename")
+
+            if not chunks:
+                return None
+
+            # Sort by chunk index and concatenate
+            chunks.sort(key=lambda x: x["index"])
+            content_parts = [
+                f"--- Document: {doc_title or document_id} ---\n"
+            ]
+            for chunk in chunks:
+                content_parts.append(chunk["content"])
+
+            full_content = "\n\n".join(content_parts)
+            logger.info(
+                "document_content_fetched",
+                document_id=document_id,
+                chunks=len(chunks),
+                total_length=len(full_content),
+            )
+            return full_content
+
+        except Exception as e:
+            logger.error(
+                "document_fetch_failed",
+                document_id=document_id,
+                error=str(e),
+            )
+            return None
+
+    def _create_research_agent(
+        self,
+        document_context: str | None = None,
+    ) -> ChatAgent:
+        """Create a ChatAgent configured for deep research."""
         from agent_framework.openai import OpenAIChatClient
 
         # Create OpenAI chat client using the Azure OpenAI async client
@@ -288,9 +363,8 @@ class DeepResearchAgentService:
             model_id=settings.azure_openai_deployment,
         )
 
-        return ChatAgent(
-            name="DeepResearchAgent",
-            instructions="""You are a thorough research assistant. You MUST complete all three phases using the provided tools.
+        # Build instructions based on whether we have document context
+        base_instructions = """You are a thorough research assistant. You MUST complete all three phases using the provided tools.
 
 IMPORTANT: You MUST call the tool functions to save your work at each phase. Do not just describe what you would do - actually call the functions.
 
@@ -308,7 +382,7 @@ Create a research plan, then call save_research_plan() with:
 ## PHASE 2: RESEARCH  
 Research each subtopic WITH CITATIONS, then call save_research_findings() with:
 - findings_json: A JSON string like:
-  [{"subtopic": "name", "content": "detailed findings...", "confidence": "high", "sources": [{"source_type": "llm_knowledge", "description": "AI training knowledge on topic X", "confidence": "high", "url": null}]}]
+  [{"subtopic": "name", "content": "detailed findings...", "confidence": "high", "sources": [{"source_type": "document", "description": "From document section X", "confidence": "high", "url": null}]}]
 - topic: The exact research topic
 
 CRITICAL: Each finding MUST include a "sources" array with at least one source citation.
@@ -316,41 +390,88 @@ CRITICAL: Each finding MUST include a "sources" array with at least one source c
 ## PHASE 3: SYNTHESIS
 Write a comprehensive final report (2000+ words with sections), then call save_final_report() with:
 - report: The complete markdown report including Executive Summary, Key Findings, Analysis, Conclusions, and Recommendations
-- sources_json: A JSON string with ALL sources used: [{"source_type": "llm_knowledge", "description": "...", "confidence": "high", "url": null}]
+- sources_json: A JSON string with ALL sources used
 - topic: The exact research topic
 
-CRITICAL: The sources_json MUST include ALL sources cited throughout the research. Every claim in the final report must be traceable to a source.
+CRITICAL: Every claim in the final report must be traceable to a source.
 
 After calling save_final_report(), provide a brief summary to the user.
 
-YOU MUST CALL ALL THREE FUNCTIONS IN ORDER. The report in save_final_report() should be the detailed, complete research report with full source attribution.""",
+YOU MUST CALL ALL THREE FUNCTIONS IN ORDER."""
+
+        # Add document-specific instructions if we have document context
+        if document_context:
+            doc_instructions = f"""
+
+DOCUMENT-BASED RESEARCH MODE:
+You have been provided with a document to thoroughly analyze. You MUST:
+1. Carefully read and analyze ALL content from the document below
+2. Extract key information, themes, and insights from the document
+3. Use source_type="document" for ALL citations from this document
+4. Be comprehensive - scan the ENTIRE document, not just parts of it
+
+DOCUMENT CONTENT TO ANALYZE:
+{document_context}
+
+When citing from this document, use:
+- source_type: "document"
+- description: "From document: [document name], [section/topic being cited]"
+- confidence: "high" (since it's direct from the document)
+"""
+            full_instructions = base_instructions + doc_instructions
+        else:
+            full_instructions = base_instructions
+
+        return ChatAgent(
+            name="DeepResearchAgent",
+            instructions=full_instructions,
             chat_client=chat_client,
             tools=[save_research_plan, save_research_findings, save_final_report],
         )
 
-    async def start_research(self, topic: str, user_id: str | None = None) -> dict:
+    async def start_research(
+        self,
+        topic: str,
+        user_id: str | None = None,
+        document_id: str | None = None,
+    ) -> dict:
         """
         Start a new research workflow.
 
         Args:
             topic: The topic to research.
             user_id: Optional user ID for tracking.
+            document_id: Optional document ID for document-based research.
 
         Returns:
             Dictionary with run_id and initial status.
         """
         run_id = str(uuid4())
-        initial_state = ResearchState(topic=topic)
+
+        # If document_id is provided, fetch document content for thorough scanning
+        document_context = None
+        if document_id and user_id:
+            document_context = await self._fetch_document_content(
+                document_id, user_id
+            )
+
+        initial_state = ResearchState(
+            topic=topic,
+            document_id=document_id,
+            document_context=document_context,
+        )
 
         logger.info(
             "starting_research_workflow",
             run_id=run_id,
             topic=topic,
             user_id=user_id,
+            document_id=document_id,
+            has_document_context=document_context is not None,
         )
 
         # Create a fresh agent for this run
-        agent = self._create_research_agent()
+        agent = self._create_research_agent(document_context=document_context)
         thread = agent.get_new_thread()
 
         # Store the agent, thread, and state for tracking

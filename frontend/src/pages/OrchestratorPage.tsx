@@ -218,18 +218,18 @@ const OrchestratorPage: FC = () => {
                         borderRadius: '1rem',
                         border: '1px solid #d0d7de',
                         background: '#f6f8fa',
-                        color: '#0969da',
+                        color: '#003366',
                         fontSize: '0.875rem',
                         cursor: 'pointer',
                         transition: 'all 0.15s ease',
                       }}
                       onMouseOver={(e) => {
-                        e.currentTarget.style.background = '#0969da'
+                        e.currentTarget.style.background = '#003366'
                         e.currentTarget.style.color = '#ffffff'
                       }}
                       onMouseOut={(e) => {
                         e.currentTarget.style.background = '#f6f8fa'
-                        e.currentTarget.style.color = '#0969da'
+                        e.currentTarget.style.color = '#003366'
                       }}
                     >
                       {example}

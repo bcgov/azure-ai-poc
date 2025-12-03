@@ -7,6 +7,7 @@ import DocumentUploadModal from './DocumentUploadModal'
 import DocumentDeleteConfirm from './DocumentDeleteConfirm'
 import ChatEmptyState from './ChatEmptyState'
 import SessionsSidebar from './SessionsSidebar'
+import CombinedSidebar from './CombinedSidebar'
 
 export { 
   ChatMessage, 
@@ -18,5 +19,6 @@ export {
   DocumentDeleteConfirm, 
   ChatEmptyState,
   SessionsSidebar,
+  CombinedSidebar,
 }
 export type { Document } from './DocumentList'
