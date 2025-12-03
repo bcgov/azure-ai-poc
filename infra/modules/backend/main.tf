@@ -26,7 +26,7 @@ resource "azurerm_linux_web_app" "backend" {
     always_on                               = true
     container_registry_use_managed_identity = true
     minimum_tls_version                     = "1.3"
-    health_check_path                       = "/api/v1/health/"
+    health_check_path                       = "/health"
     health_check_eviction_time_in_min       = 2
     application_stack {
       docker_image_name   = var.api_image
@@ -73,6 +73,7 @@ resource "azurerm_linux_web_app" "backend" {
     AZURE_OPENAI_API_VERSION               = "2024-12-01-preview"
     AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME = var.azure_openai_embedding_deployment
     AZURE_OPENAI_LLM_ENDPOINT              = var.azure_openai_llm_endpoint
+    AZURE_OPENAI_ENDPOINT                  = var.azure_openai_llm_endpoint
     AZURE_OPENAI_EMBEDDING_ENDPOINT        = var.azure_openai_embedding_endpoint
     AZURE_OPENAI_API_KEY                   = var.azure_openai_api_key
     # Azure AI Search Configuration

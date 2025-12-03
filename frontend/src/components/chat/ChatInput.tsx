@@ -1,6 +1,6 @@
 import type { FC } from 'react'
-import { useRef, useEffect } from 'react'
-import { Form, Button, Badge, Spinner } from 'react-bootstrap'
+import { useRef, useEffect, useState } from 'react'
+import { Form, Button, Badge, Spinner, OverlayTrigger, Tooltip, Collapse } from 'react-bootstrap'
 
 interface ChatInputProps {
   currentQuestion: string
@@ -10,6 +10,8 @@ interface ChatInputProps {
   isStreaming: boolean
   streamingEnabled: boolean
   setStreamingEnabled: (value: boolean) => void
+  deepResearchEnabled: boolean
+  setDeepResearchEnabled: (value: boolean) => void
   documentsCount: number
   selectedDocument: string | null
   selectedDocumentName: string | null
@@ -24,12 +26,15 @@ const ChatInput: FC<ChatInputProps> = ({
   isStreaming,
   streamingEnabled,
   setStreamingEnabled,
+  deepResearchEnabled,
+  setDeepResearchEnabled,
   documentsCount,
   selectedDocument,
   selectedDocumentName,
   onKeyPress,
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [showDeepResearchInfo, setShowDeepResearchInfo] = useState(false)
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -52,6 +57,9 @@ const ChatInput: FC<ChatInputProps> = ({
   }
 
   const getHelpText = () => {
+    if (deepResearchEnabled) {
+      return 'Deep Research mode: AI will perform multi-step research with human approval checkpoints'
+    }
     if (documentsCount === 0) {
       return 'Please upload documents first to start asking questions'
     }
@@ -60,6 +68,12 @@ const ChatInput: FC<ChatInputProps> = ({
     }
     return `Questions will be answered by searching across all your uploaded documents${streamingEnabled ? ' with streaming' : ''}`
   }
+
+  const deepResearchTooltip = (
+    <Tooltip id="deep-research-tooltip">
+      Click the info icon for more details about Deep Research
+    </Tooltip>
+  )
 
   return (
     <div className="border-top pt-2 pt-md-3 chat-input-container flex-shrink-0">
@@ -74,13 +88,71 @@ const ChatInput: FC<ChatInputProps> = ({
               checked={streamingEnabled}
               onChange={(e) => setStreamingEnabled(e.target.checked)}
               className="small"
+              disabled={deepResearchEnabled}
             />
           </div>
 
-          <Badge bg="info" className="small">
-            AI Assistant - Powered by Microsoft Agent Framework
-          </Badge>
+          <div className="d-flex align-items-center">
+            <Form.Check
+              type="switch"
+              id="deep-research-toggle"
+              checked={deepResearchEnabled}
+              onChange={(e) => setDeepResearchEnabled(e.target.checked)}
+              className="small me-1"
+            />
+            <label htmlFor="deep-research-toggle" className="small mb-0 me-1" style={{ cursor: 'pointer' }}>
+              Deep Research
+            </label>
+            <OverlayTrigger placement="top" overlay={deepResearchTooltip}>
+              <Button
+                variant="link"
+                size="sm"
+                className="p-0 text-info"
+                onClick={() => setShowDeepResearchInfo(!showDeepResearchInfo)}
+                style={{ lineHeight: 1 }}
+              >
+                <i className="bi bi-info-circle"></i>
+              </Button>
+            </OverlayTrigger>
+          </div>
+
+          {deepResearchEnabled ? (
+            <Badge bg="warning" text="dark" className="small">
+              <i className="bi bi-search me-1"></i>
+              Deep Research Mode
+            </Badge>
+          ) : (
+            <Badge bg="info" className="small">
+              AI Assistant - Powered by Microsoft Agent Framework
+            </Badge>
+          )}
         </div>
+
+        {/* Deep Research Info Panel */}
+        <Collapse in={showDeepResearchInfo}>
+          <div className="mb-2">
+            <div className="alert alert-info py-2 mb-2" style={{ fontSize: '0.85rem' }}>
+              <h6 className="alert-heading mb-1">
+                <i className="bi bi-lightbulb me-1"></i>
+                What is Deep Research?
+              </h6>
+              <p className="mb-2">
+                Deep Research is an advanced AI-powered research workflow that performs <strong>multi-step, 
+                comprehensive analysis</strong> of complex topics. Unlike regular chat, it:
+              </p>
+              <ul className="mb-2 ps-3">
+                <li><strong>Creates a research plan</strong> - Breaks down your topic into subtopics and research questions</li>
+                <li><strong>Gathers findings</strong> - Systematically researches each aspect with confidence scoring</li>
+                <li><strong>Synthesizes a report</strong> - Produces a comprehensive final report with citations</li>
+                <li><strong>Human-in-the-loop</strong> - You can approve or provide feedback at each stage</li>
+              </ul>
+              <p className="mb-0 text-muted">
+                <i className="bi bi-clock me-1"></i>
+                <em>Deep Research takes longer but provides more thorough, verifiable results for complex questions.</em>
+              </p>
+            </div>
+          </div>
+        </Collapse>
 
         <div className="position-relative">
           <Form.Control

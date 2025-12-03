@@ -9,12 +9,15 @@ import {
   Button,
   Card,
   Col,
+  Collapse,
   Container,
   Form,
   Modal,
+  OverlayTrigger,
   ProgressBar,
   Row,
   Spinner,
+  Tooltip,
 } from 'react-bootstrap'
 
 interface ChatMessage {
@@ -39,6 +42,9 @@ const ChatInterface: FC = () => {
   const [isLoading, setIsLoading] = useState(false)
   const [isStreaming, setIsStreaming] = useState(false)
   const [streamingEnabled, setStreamingEnabled] = useState(true)
+  const [deepResearchEnabled, setDeepResearchEnabled] = useState(false)
+  const [deepResearchRunId, setDeepResearchRunId] = useState<string | null>(null)
+  const [showDeepResearchInfo, setShowDeepResearchInfo] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [documents, setDocuments] = useState<Document[]>([])
   const [selectedDocument, setSelectedDocument] = useState<string | null>(null)
@@ -335,6 +341,69 @@ const ChatInterface: FC = () => {
     setMessages((prev) => [...prev, userMessage])
     setCurrentQuestion('')
     setError(null)
+
+    // Handle Deep Research mode
+    if (deepResearchEnabled) {
+      setIsLoading(true)
+
+      try {
+        // Start deep research workflow
+        const startResult = await chatAgentService.startDeepResearch(questionText)
+
+        if (!startResult.success || !startResult.data) {
+          throw new Error(startResult.error || 'Failed to start deep research')
+        }
+
+        const runId = startResult.data.run_id
+        setDeepResearchRunId(runId)
+
+        // Add initial status message
+        const statusMessage: ChatMessage = {
+          id: (Date.now() + 1).toString(),
+          type: 'assistant',
+          content: `🔬 **Deep Research Started**\n\nResearching: "${questionText}"\n\nPhase: ${startResult.data.current_phase}\n\n_This may take a few moments as the AI creates a research plan, gathers findings, and synthesizes a comprehensive report..._`,
+          timestamp: new Date(),
+        }
+        setMessages((prev) => [...prev, statusMessage])
+
+        // Run the research workflow
+        const runResult = await chatAgentService.runDeepResearch(runId)
+
+        if (!runResult.success || !runResult.data) {
+          throw new Error(runResult.error || 'Failed to run deep research')
+        }
+
+        // Create the final response message
+        let finalContent = ''
+        if (runResult.data.final_report) {
+          finalContent = `## 📊 Deep Research Report\n\n${runResult.data.final_report}`
+        } else if (runResult.data.findings && runResult.data.findings.length > 0) {
+          finalContent = `## 📊 Research Findings\n\n`
+          runResult.data.findings.forEach((finding: any, index: number) => {
+            finalContent += `### ${index + 1}. ${finding.subtopic || 'Finding'}\n`
+            finalContent += `${finding.content || JSON.stringify(finding)}\n\n`
+          })
+        } else {
+          finalContent = `Research completed but no findings were generated. Status: ${runResult.data.status}`
+        }
+
+        // Update the status message with the final report
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === statusMessage.id
+              ? { ...msg, content: finalContent }
+              : msg,
+          ),
+        )
+      } catch (err: any) {
+        console.error('Deep Research error:', err)
+        setError(err.message || 'Failed to complete deep research. Please try again.')
+      } finally {
+        setIsLoading(false)
+        setDeepResearchRunId(null)
+      }
+      return
+    }
 
     // Build chat history from messages for context
     const chatHistory: ChatServiceMessage[] = messages.map((msg) => ({
@@ -834,13 +903,74 @@ const ChatInterface: FC = () => {
                     checked={streamingEnabled}
                     onChange={(e) => setStreamingEnabled(e.target.checked)}
                     className="small"
+                    disabled={deepResearchEnabled}
                   />
                 </div>
 
-                <Badge bg="info" className="small">
-                  AI Assistant - Powered by Microsoft Agent Framework
-                </Badge>
+                <div className="d-flex align-items-center">
+                  <Form.Check
+                    type="switch"
+                    id="deep-research-toggle"
+                    checked={deepResearchEnabled}
+                    onChange={(e) => setDeepResearchEnabled(e.target.checked)}
+                    className="small me-1"
+                  />
+                  <label htmlFor="deep-research-toggle" className="small mb-0 me-1" style={{ cursor: 'pointer' }}>
+                    Deep Research
+                  </label>
+                  <OverlayTrigger
+                    placement="top"
+                    overlay={<Tooltip id="deep-research-tooltip">Click for more info about Deep Research</Tooltip>}
+                  >
+                    <Button
+                      variant="link"
+                      size="sm"
+                      className="p-0 text-info"
+                      onClick={() => setShowDeepResearchInfo(!showDeepResearchInfo)}
+                      style={{ lineHeight: 1 }}
+                    >
+                      <i className="bi bi-info-circle"></i>
+                    </Button>
+                  </OverlayTrigger>
+                </div>
+
+                {deepResearchEnabled ? (
+                  <Badge bg="warning" text="dark" className="small">
+                    <i className="bi bi-search me-1"></i>
+                    Deep Research Mode
+                  </Badge>
+                ) : (
+                  <Badge bg="info" className="small">
+                    AI Assistant - Powered by Microsoft Agent Framework
+                  </Badge>
+                )}
               </div>
+
+              {/* Deep Research Info Panel */}
+              <Collapse in={showDeepResearchInfo}>
+                <div className="mb-2">
+                  <Alert variant="info" className="py-2 mb-2" style={{ fontSize: '0.85rem' }}>
+                    <Alert.Heading as="h6" className="mb-1">
+                      <i className="bi bi-lightbulb me-1"></i>
+                      What is Deep Research?
+                    </Alert.Heading>
+                    <p className="mb-2">
+                      Deep Research is an advanced AI-powered research workflow that performs <strong>multi-step, 
+                      comprehensive analysis</strong> of complex topics. Unlike regular chat, it:
+                    </p>
+                    <ul className="mb-2 ps-3">
+                      <li><strong>Creates a research plan</strong> - Breaks down your topic into subtopics and research questions</li>
+                      <li><strong>Gathers findings</strong> - Systematically researches each aspect with confidence scoring</li>
+                      <li><strong>Synthesizes a report</strong> - Produces a comprehensive final report with citations</li>
+                      <li><strong>Human-in-the-loop</strong> - You can approve or provide feedback at each stage</li>
+                    </ul>
+                    <p className="mb-0 text-muted">
+                      <i className="bi bi-clock me-1"></i>
+                      <em>Deep Research takes longer but provides more thorough, verifiable results for complex questions.</em>
+                    </p>
+                  </Alert>
+                </div>
+              </Collapse>
 
               <div className="position-relative">
                 <Form.Control
@@ -850,15 +980,17 @@ const ChatInterface: FC = () => {
                   onChange={(e) => setCurrentQuestion(e.target.value)}
                   onKeyDown={handleKeyPress}
                   placeholder={
-                    selectedDocument && selectedDocumentName
-                      ? `Ask a question about ${selectedDocumentName}...`
-                      : selectedDocument
-                        ? 'Ask a question about the selected document...'
-                        : documents.length === 0
-                          ? 'Please upload documents first to start asking questions...'
-                          : 'Ask a question across all your documents...'
+                    deepResearchEnabled
+                      ? 'Enter a topic or complex question for deep research...'
+                      : selectedDocument && selectedDocumentName
+                        ? `Ask a question about ${selectedDocumentName}...`
+                        : selectedDocument
+                          ? 'Ask a question about the selected document...'
+                          : documents.length === 0
+                            ? 'Ask a general question or upload documents...'
+                            : 'Ask a question across all your documents...'
                   }
-                  disabled={isLoading || documents.length === 0}
+                  disabled={isLoading}
                   style={{
                     minHeight: 'clamp(2.5rem, 2.75rem, 3rem)',
                     maxHeight: 'clamp(6rem, 8rem, 10rem)',
@@ -870,12 +1002,11 @@ const ChatInterface: FC = () => {
                 />
                 <Button
                   type="submit"
-                  variant="primary"
+                  variant={deepResearchEnabled ? 'warning' : 'primary'}
                   disabled={
                     !currentQuestion.trim() ||
                     isLoading ||
-                    isStreaming ||
-                    documents.length === 0
+                    isStreaming
                   }
                   className="position-absolute d-flex align-items-center justify-content-center p-0 border-0"
                   style={{
@@ -886,7 +1017,7 @@ const ChatInterface: FC = () => {
                     borderRadius: '50%',
                     transition: 'all 0.2s ease',
                   }}
-                  title="Send message (Enter)"
+                  title={deepResearchEnabled ? 'Start Deep Research (Enter)' : 'Send message (Enter)'}
                 >
                   {isLoading || isStreaming ? (
                     <Spinner
@@ -894,6 +1025,14 @@ const ChatInterface: FC = () => {
                       size="sm"
                       style={{ width: '1rem', height: '1rem' }}
                     />
+                  ) : deepResearchEnabled ? (
+                    <i
+                      className="bi bi-search"
+                      style={{
+                        fontSize: 'clamp(0.875rem, 1rem, 1.125rem)',
+                        fontWeight: 'bold',
+                      }}
+                    ></i>
                   ) : (
                     <i
                       className="bi bi-send"
@@ -907,11 +1046,13 @@ const ChatInterface: FC = () => {
               </div>
               <small className="text-muted">
                 <i className="bi bi-info-circle me-1"></i>
-                {documents.length === 0
-                  ? 'Please upload documents first to start asking questions'
-                  : selectedDocument
-                    ? `Questions will be answered based on the selected document${streamingEnabled ? ' with streaming' : ''}`
-                    : `Questions will be answered by searching across all your uploaded documents${streamingEnabled ? ' with streaming' : ''}`}
+                {deepResearchEnabled
+                  ? 'Deep Research: AI will create a plan, gather findings, and synthesize a comprehensive report'
+                  : documents.length === 0
+                    ? 'Upload documents to search them, or ask general questions'
+                    : selectedDocument
+                      ? `Questions will be answered based on the selected document${streamingEnabled ? ' with streaming' : ''}`
+                      : `Questions will be answered by searching across all your uploaded documents${streamingEnabled ? ' with streaming' : ''}`}
               </small>
             </Form>
           </div>

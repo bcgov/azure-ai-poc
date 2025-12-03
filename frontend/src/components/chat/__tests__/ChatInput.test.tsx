@@ -13,6 +13,8 @@ describe('ChatInput', () => {
     isStreaming: false,
     streamingEnabled: true,
     setStreamingEnabled: vi.fn(),
+    deepResearchEnabled: false,
+    setDeepResearchEnabled: vi.fn(),
     documentsCount: 5,
     selectedDocument: null,
     selectedDocumentName: null,
