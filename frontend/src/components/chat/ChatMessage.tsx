@@ -80,7 +80,7 @@ const ChatMessage: FC<ChatMessageProps> = ({
               {type === 'assistant' && (
                 <i
                   className="bi bi-robot me-2 mt-1"
-                  style={{ fontSize: '1.1em' }}
+                  style={{ fontSize: '1.1em', color: '#003366' }}
                 ></i>
               )}
               <div className="flex-grow-1">

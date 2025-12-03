@@ -3,6 +3,7 @@ import { Footer, Header } from '@bcgov/design-system-react-components'
 import { Button } from 'react-bootstrap'
 import { useAuth } from '@/stores'
 import { useNavigate, useLocation } from '@tanstack/react-router'
+import '@/styles/chat.css'
 
 type Props = {
   children: React.ReactNode
@@ -33,7 +34,10 @@ const Layout: FC<Props> = ({ children }) => {
               style={{ 
                 borderRadius: '1.5rem', 
                 fontWeight: '600',
-                padding: '0.375rem 1rem'
+                padding: '0.375rem 1rem',
+                backgroundColor: isOnChat ? '#003366' : undefined,
+                borderColor: '#003366',
+                color: isOnChat ? 'white' : '#003366'
               }}
             >
               <i className="bi bi-chat-dots me-1"></i>
@@ -48,7 +52,10 @@ const Layout: FC<Props> = ({ children }) => {
               style={{ 
                 borderRadius: '1.5rem', 
                 fontWeight: '600',
-                padding: '0.375rem 1rem'
+                padding: '0.375rem 1rem',
+                backgroundColor: isOnOrchestrator ? '#003366' : undefined,
+                borderColor: '#003366',
+                color: isOnOrchestrator ? 'white' : '#003366'
               }}
             >
               <i className="bi bi-diagram-3 me-1"></i>
@@ -65,7 +72,12 @@ const Layout: FC<Props> = ({ children }) => {
                   variant="primary" 
                   size="sm" 
                   onClick={handleLogout}
-                  style={{ borderRadius: '0.5rem', fontWeight: '600' }}
+                  style={{ 
+                    borderRadius: '0.5rem', 
+                    fontWeight: '600',
+                    backgroundColor: '#003366',
+                    borderColor: '#003366'
+                  }}
                 >
                   <i
                     className="bi bi-box-arrow-right"

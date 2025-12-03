@@ -1,13 +1,10 @@
 import type { FC } from 'react'
 import { Button } from 'react-bootstrap'
 import LoadingSpinner from '../common/LoadingSpinner'
+import type { DocumentItem } from '@/services/documentService'
 
-export interface Document {
-  id: string
-  filename: string
-  uploadedAt: string
-  totalPages?: number
-}
+// Re-export DocumentItem as Document for backward compatibility
+export type Document = DocumentItem
 
 interface DocumentListProps {
   documents: Document[]
@@ -56,11 +53,11 @@ const DocumentList: FC<DocumentListProps> = ({
             style={{
               backgroundColor:
                 selectedDocument === doc.id
-                  ? 'rgba(13, 110, 253, 0.1)'
+                  ? 'rgba(0, 51, 102, 0.1)'
                   : 'transparent',
               border:
                 selectedDocument === doc.id
-                  ? '0.125rem solid #0d6efd'
+                  ? '0.125rem solid #003366'
                   : '0.125rem solid #dee2e6',
             }}
           >
@@ -72,17 +69,17 @@ const DocumentList: FC<DocumentListProps> = ({
               style={{
                 border: 'none',
                 background: 'transparent',
-                color: selectedDocument === doc.id ? '#0d6efd' : '#6c757d',
+                color: selectedDocument === doc.id ? '#003366' : '#6c757d',
                 padding: '0.25rem 0.5rem',
               }}
             >
-              <i className={`${getFileIcon(doc.filename)}`}></i>
+              <i className={`${getFileIcon(doc.title)}`}></i>
               <span
                 className="text-truncate"
                 style={{ maxWidth: '9.375rem' }}
-                title={doc.filename}
+                title={doc.title}
               >
-                {doc.filename}
+                {doc.title}
               </span>
             </Button>
             <Button

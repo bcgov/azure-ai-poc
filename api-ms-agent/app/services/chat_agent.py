@@ -155,6 +155,7 @@ If you don't have sufficient information, respond with:
         message: str,
         history: list[dict[str, str]] | None = None,
         session_id: str | None = None,
+        document_context: str | None = None,
     ) -> ChatResult:
         """
         Process a chat message and return a response with source attribution.
@@ -163,6 +164,7 @@ If you don't have sufficient information, respond with:
             message: The user's message
             history: Optional conversation history
             session_id: Optional session identifier for logging
+            document_context: Optional document context from RAG search
 
         Returns:
             ChatResult containing the response and source information
@@ -171,6 +173,17 @@ If you don't have sufficient information, respond with:
 
         # Build messages list
         messages = [{"role": "system", "content": self.SYSTEM_PROMPT}]
+
+        # Add document context if provided
+        if document_context:
+            context_message = (
+                "The following document context is relevant to the user's question. "
+                "You MUST use this context to answer the question and cite the document "
+                "as a source. If the answer is found in the document, use "
+                "source_type='document'.\n\n"
+                f"DOCUMENT CONTEXT:\n{document_context}"
+            )
+            messages.append({"role": "system", "content": context_message})
 
         # Add history if provided
         if history:

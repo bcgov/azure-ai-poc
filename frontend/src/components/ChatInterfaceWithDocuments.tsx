@@ -1,6 +1,6 @@
 import apiService from '@/service/api-service'
 import { chatAgentService, type ChatMessage as ChatServiceMessage } from '@/services/chatAgentService'
-import { documentService } from '@/services/documentService'
+import { documentService, type DocumentItem } from '@/services/documentService'
 import type { FC } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import {
@@ -28,12 +28,8 @@ interface ChatMessage {
   documentId?: string
 }
 
-interface Document {
-  id: string
-  filename: string
-  uploadedAt: string
-  totalPages?: number
-}
+// Use DocumentItem from documentService for consistency
+type Document = DocumentItem
 
 const ChatInterface: FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -235,9 +231,10 @@ const ChatInterface: FC = () => {
         })
       const newDocument: Document = {
         id: response.data.id,
-        filename: response.data.filename || file.name,
-        uploadedAt: response.data.uploadedAt || new Date().toISOString(),
-        totalPages: response.data.totalPages,
+        document_id: response.data.document_id || response.data.id,
+        title: response.data.title || response.data.filename || file.name,
+        created_at: response.data.created_at || new Date().toISOString(),
+        chunk_count: response.data.chunk_count || 0,
       }
       // Add the new document to the state immediately
       setDocuments((prev) => [...prev, newDocument])
@@ -297,7 +294,7 @@ const ChatInterface: FC = () => {
       const successMessage: ChatMessage = {
         id: Date.now().toString(),
         type: 'assistant',
-        content: `Document "${documentToDelete.filename}" has been deleted successfully.`,
+        content: `Document "${documentToDelete.title}" has been deleted successfully.`,
         timestamp: new Date(),
       }
       setMessages((prev) => [...prev, successMessage])
@@ -318,7 +315,7 @@ const ChatInterface: FC = () => {
   }
 
   const selectedDocumentName = selectedDocument
-    ? documents.find((doc) => doc.id === selectedDocument)?.filename
+    ? documents.find((doc) => doc.id === selectedDocument)?.title
     : null
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -528,7 +525,7 @@ const ChatInterface: FC = () => {
       console.log('Selected document ID:', selectedDocument)
       console.log(
         'Available documents:',
-        documents.map((d) => ({ id: d.id, filename: d.filename })),
+        documents.map((d) => ({ id: d.id, title: d.title })),
       )
       console.log('Selected document name:', selectedDocumentName)
     }
@@ -592,7 +589,7 @@ const ChatInterface: FC = () => {
                       style={{
                         backgroundColor:
                           selectedDocument === doc.id
-                            ? 'rgba(13, 110, 253, 0.1)'
+                            ? 'rgba(0, 51, 102, 0.1)'
                             : '#f8f9fa',
                       }}
                     >
@@ -610,8 +607,8 @@ const ChatInterface: FC = () => {
                           fontWeight: selectedDocument === doc.id ? '600' : '400',
                         }}
                       >
-                        <i className={`${getFileIcon(doc.filename)} me-1`}></i>
-                        {doc.filename}
+                        <i className={`${getFileIcon(doc.title)} me-1`}></i>
+                        {doc.title}
                       </Button>
                       <Button
                         variant="link"
@@ -619,7 +616,7 @@ const ChatInterface: FC = () => {
                         onClick={() => handleDeleteDocument(doc)}
                         className="document-delete-btn border-0 p-1 d-flex align-items-center justify-content-center text-danger"
                         style={{ width: '1.75rem', height: '1.75rem' }}
-                        title={`Remove ${doc.filename}`}
+                        title={`Remove ${doc.title}`}
                       >
                         <i
                           className="bi bi-x-circle-fill"
@@ -737,7 +734,7 @@ const ChatInterface: FC = () => {
                             {message.type === 'assistant' && (
                               <i
                                 className="bi bi-robot me-2 mt-1"
-                                style={{ fontSize: '1.1em' }}
+                                style={{ fontSize: '1.1em', color: '#003366' }}
                               ></i>
                             )}
                             <div className="flex-grow-1">
@@ -766,12 +763,12 @@ const ChatInterface: FC = () => {
                                         documents.find(
                                           (doc) =>
                                             doc.id === message.documentId,
-                                        )?.filename || '',
+                                        )?.title || '',
                                       )} me-1`}
                                     ></i>
                                     {documents.find(
                                       (doc) => doc.id === message.documentId,
-                                    )?.filename || 'Document'}
+                                    )?.title || 'Document'}
                                   </Badge>
                                 </div>
                               )}
@@ -808,7 +805,7 @@ const ChatInterface: FC = () => {
                       <Card className="bg-light">
                         <Card.Body className="py-2 px-3">
                           <div className="d-flex align-items-center">
-                            <i className="bi bi-robot me-2"></i>
+                            <i className="bi bi-robot me-2" style={{ color: '#003366' }}></i>
                             {isStreaming ? (
                               <>
                                 <div
@@ -1130,13 +1127,13 @@ const ChatInterface: FC = () => {
             <i
               className={`${
                 documentToDelete
-                  ? getFileIcon(documentToDelete.filename)
+                  ? getFileIcon(documentToDelete.title)
                   : 'bi-file-text'
               } display-4 text-danger mb-3`}
             ></i>
             <h5>Delete Document</h5>
             <p className="text-muted">
-              Are you sure you want to delete "{documentToDelete?.filename}"?
+              Are you sure you want to delete "{documentToDelete?.title}"?
             </p>
             <p className="text-warning small">
               <i className="bi bi-exclamation-triangle me-1"></i>

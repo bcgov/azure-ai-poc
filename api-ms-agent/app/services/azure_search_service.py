@@ -325,6 +325,7 @@ class AzureSearchService:
             List of similar document chunks with similarity scores
         """
         if not self._ensure_initialized():
+            logger.warning("azure_search_not_initialized")
             return []
 
         if options is None:
@@ -397,6 +398,7 @@ class AzureSearchService:
                 results=len(items),
                 query_time_ms=f"{query_time:.2f}",
                 top_k=options.top_k,
+                document_id=options.document_id,
             )
 
             return items

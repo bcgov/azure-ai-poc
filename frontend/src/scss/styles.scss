@@ -1,5 +1,6 @@
 // A custom theme for this app, see: https://getbootstrap.com/docs/5.3/customize/sass/#maps-and-loops
-$primary: #0d6efd;  // Bootstrap blue instead of white
+// BC Gov official colors
+$primary: #003366;  // BC Gov dark blue
 $secondary: #385a8a;
 $success: #234720;
 $warning: #81692c;
@@ -227,14 +228,14 @@ body {
     margin-left: auto;
     
     .card {
-      background: linear-gradient(135deg, #0d6efd 0%, #0b5ed7 100%);
+      background: linear-gradient(135deg, #003366 0%, #1a5a96 100%);
       border: none;
       color: white;
-      box-shadow: 0 0.125rem 0.5rem rgba(13, 110, 253, 0.25);
+      box-shadow: 0 0.125rem 0.5rem rgba(0, 51, 102, 0.25);
       border-radius: 1rem 1rem 0.25rem 1rem;
       
       &:hover {
-        box-shadow: 0 0.25rem 0.75rem rgba(13, 110, 253, 0.3);
+        box-shadow: 0 0.25rem 0.75rem rgba(0, 51, 102, 0.3);
         transform: translateY(-0.0625rem);
       }
     }
@@ -308,8 +309,8 @@ body {
     }
     
     &:focus {
-      border-color: #0d6efd;
-      box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.15);
+      border-color: #003366;
+      box-shadow: 0 0 0 0.2rem rgba(0, 51, 102, 0.15);
       background: #ffffff;
     }
   }
@@ -321,7 +322,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 0.125rem 0.375rem rgba(13, 110, 253, 0.25);
+    box-shadow: 0 0.125rem 0.375rem rgba(0, 51, 102, 0.25);
     
     @media (max-width: 576px) {
       min-width: 2.375rem;
@@ -329,7 +330,7 @@ body {
     }
     
     &:hover:not(:disabled) {
-      box-shadow: 0 0.25rem 0.625rem rgba(13, 110, 253, 0.35);
+      box-shadow: 0 0.25rem 0.625rem rgba(0, 51, 102, 0.35);
       transform: scale(1.05);
     }
   }
@@ -356,9 +357,9 @@ body {
   box-shadow: 0 0.0625rem 0.1875rem rgba(0, 0, 0, 0.08);
   
   &.selected {
-    border-color: #0d6efd;
-    background: linear-gradient(135deg, rgba(13, 110, 253, 0.12) 0%, rgba(13, 110, 253, 0.06) 100%);
-    box-shadow: 0 0.125rem 0.375rem rgba(13, 110, 253, 0.2);
+    border-color: #003366;
+    background: linear-gradient(135deg, rgba(0, 51, 102, 0.12) 0%, rgba(0, 51, 102, 0.06) 100%);
+    box-shadow: 0 0.125rem 0.375rem rgba(0, 51, 102, 0.2);
   }
   
   &:hover {
@@ -396,7 +397,7 @@ body {
   
   .card-header {
     background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-    border-bottom: 0.125rem solid rgba(13, 110, 253, 0.1);
+    border-bottom: 0.125rem solid rgba(0, 51, 102, 0.1);
   }
   
   .card-body {
@@ -474,7 +475,7 @@ body {
       font-size: 0.75rem;
       letter-spacing: 0.03125em;
       color: #495057;
-      border-bottom: 0.125rem solid rgba(13, 110, 253, 0.1);
+      border-bottom: 0.125rem solid rgba(0, 51, 102, 0.1);
       position: sticky;
       top: 0;
       z-index: 10;
@@ -484,7 +485,7 @@ body {
       transition: var(--transition-fast);
       
       &:hover {
-        background: rgba(13, 110, 253, 0.03);
+        background: rgba(0, 51, 102, 0.03);
         transform: scale(1.002);
       }
     }
@@ -504,8 +505,8 @@ body {
   }
   
   .card-header {
-    background: linear-gradient(135deg, rgba(13, 110, 253, 0.05) 0%, rgba(13, 110, 253, 0.02) 100%);
-    border-bottom: 0.125rem solid rgba(13, 110, 253, 0.1);
+    background: linear-gradient(135deg, rgba(0, 51, 102, 0.05) 0%, rgba(0, 51, 102, 0.02) 100%);
+    border-bottom: 0.125rem solid rgba(0, 51, 102, 0.1);
   }
 }
 
@@ -532,7 +533,7 @@ body {
     opacity: 0.2;
     margin-bottom: 0.75rem;
     animation: float 3s ease-in-out infinite;
-    color: #0d6efd;
+    color: #003366;
   }
   
   h5 {
@@ -585,7 +586,7 @@ body {
   
   .modal-header {
     background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-    border-bottom: 0.125rem solid rgba(13, 110, 253, 0.1);
+    border-bottom: 0.125rem solid rgba(0, 51, 102, 0.1);
     border-radius: 1rem 1rem 0 0;
   }
   

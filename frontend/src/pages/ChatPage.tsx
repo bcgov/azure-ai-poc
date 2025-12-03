@@ -8,8 +8,7 @@ import {
   Input,
   DocumentUploadModal,
   DocumentDeleteConfirm,
-  SessionsSidebar,
-  DocumentList,
+  CombinedSidebar,
   type Document,
 } from '@/components/chat'
 import type { SourceInfo } from '@/services/chatAgentService'
@@ -70,14 +69,8 @@ const ChatPage: FC = () => {
     try {
       const result = await documentService.listDocuments()
       if (result.success && result.data) {
-        // Map DocumentItem to Document format
-        const mappedDocuments: Document[] = result.data.documents.map((doc) => ({
-          id: doc.id,
-          filename: doc.title,
-          uploadedAt: doc.created_at || new Date().toISOString(),
-          totalPages: doc.chunk_count,
-        }))
-        setDocuments(mappedDocuments)
+        // Use documents directly - they are already DocumentItem type
+        setDocuments(result.data.documents)
       }
     } catch (err: any) {
       console.error('Error loading documents:', err)
@@ -130,9 +123,10 @@ const ChatPage: FC = () => {
 
       const newDocument: Document = {
         id: response.data.id,
-        filename: response.data.filename || file.name,
-        uploadedAt: response.data.uploadedAt || new Date().toISOString(),
-        totalPages: response.data.totalPages,
+        document_id: response.data.document_id || response.data.id,
+        title: response.data.title || response.data.filename || file.name,
+        created_at: response.data.created_at || new Date().toISOString(),
+        chunk_count: response.data.chunk_count || 0,
       }
 
       setDocuments((prev) => [...prev, newDocument])
@@ -183,7 +177,7 @@ const ChatPage: FC = () => {
       const successMessage: ChatMessageType = {
         id: Date.now().toString(),
         type: 'assistant',
-        content: `Document "${documentToDelete.filename}" has been deleted successfully.`,
+        content: `Document "${documentToDelete.title}" has been deleted successfully.`,
       }
       setMessages((prev) => [...prev, successMessage])
 
@@ -235,10 +229,10 @@ const ChatPage: FC = () => {
 
     try {
       if (deepResearchEnabled) {
-        // Deep Research Mode
+        // Deep Research Mode - pass document_id if selected
         await handleDeepResearch(questionToSend, assistantMessageId, chatHistory)
       } else {
-        // Regular chat mode
+        // Regular chat mode - pass document_id if selected
         const onChunk = (chunk: string) => {
           setMessages((prev) =>
             prev.map((msg) =>
@@ -260,6 +254,7 @@ const ChatPage: FC = () => {
           chatHistory,
           onChunk,
           onError,
+          selectedDocument || undefined, // Pass document ID for RAG
         )
 
         // Update message with sources after streaming completes
@@ -307,8 +302,12 @@ const ChatPage: FC = () => {
     chatHistory: ChatAgentMessage[],
   ) => {
     try {
-      // Start the deep research
-      const startResult = await chatAgentService.startDeepResearch(question)
+      // Start the deep research - pass document_id if selected for thorough scanning
+      const startResult = await chatAgentService.startDeepResearch(
+        question,
+        undefined, // userId handled by backend auth
+        selectedDocument || undefined, // Pass document ID for document-based research
+      )
       
       if (!startResult.success || !startResult.data?.run_id) {
         throw new Error(startResult.error || 'Failed to start deep research')
@@ -316,14 +315,18 @@ const ChatPage: FC = () => {
       
       setDeepResearchRunId(startResult.data.run_id)
       
-      // Update message with initial status
+      // Update message with initial status - indicate if document is being scanned
+      const statusMessage = selectedDocument 
+        ? '🔬 **Deep Research Started**\n\n📄 Scanning document thoroughly...'
+        : '🔬 **Deep Research Started**\n\nPlanning research strategy...'
+      
       setMessages((prev) =>
         prev.map((msg) =>
           msg.id === messageId
             ? { 
                 ...msg, 
-                content: '🔬 **Deep Research Started**\n\nPlanning research strategy...', 
-                researchPhase: 'Planning',
+                content: statusMessage, 
+                researchPhase: selectedDocument ? 'Scanning Document' : 'Planning',
               }
             : msg,
         ),
@@ -426,14 +429,41 @@ const ChatPage: FC = () => {
 
   return (
     <div className="chat-layout">
-      <SessionsSidebar
+      <CombinedSidebar
         currentSessionId={sessionId}
         onSessionSelect={handleSessionSelect}
         onNewSession={handleNewSession}
         refreshTrigger={sessionRefreshTrigger}
+        documents={documents}
+        selectedDocument={selectedDocument}
+        onSelectDocument={setSelectedDocument}
+        onDeleteDocument={handleDeleteDocument}
+        onUploadClick={() => setShowUploadModal(true)}
+        isLoadingDocuments={isLoadingDocuments}
+        getFileIcon={getFileIcon}
+        onDocumentsRefresh={loadDocuments}
       />
       <div className="chat-main">
         <div className="copilot-chat-container">
+          {/* Selected Document Indicator */}
+          {selectedDocument && (
+            <div className="selected-document-banner">
+              <i className="bi bi-file-earmark-text me-2"></i>
+              <span>
+                Asking about: <strong>
+                  {documents.find(d => d.id === selectedDocument)?.title || 'Selected document'}
+                </strong>
+              </span>
+              <button 
+                onClick={() => setSelectedDocument(null)}
+                className="clear-doc-btn"
+                title="Clear document selection"
+              >
+                <i className="bi bi-x-lg"></i>
+              </button>
+            </div>
+          )}
+
           {/* Error */}
           {error && (
             <div style={{ padding: '0.5rem 2rem' }}>
@@ -469,11 +499,14 @@ const ChatPage: FC = () => {
         {messages.length === 0 ? (
           <div className="copilot-empty">
             <div className="copilot-empty-icon">
-              <i className="bi bi-stars"></i>
+              <i className="bi bi-robot"></i>
             </div>
             <div className="copilot-empty-title">How can I help you today?</div>
             <div className="copilot-empty-subtitle">
-              Ask me anything. I can help you with questions, analysis, coding, and more.
+              {selectedDocument 
+                ? 'Ask questions about the selected document, or use Deep Research for thorough analysis.'
+                : 'Ask me anything. Select a document from the sidebar to ask questions about it.'
+              }
             </div>
           </div>
         ) : (
@@ -493,27 +526,13 @@ const ChatPage: FC = () => {
         )}
       </div>
 
-      {/* Document List */}
-      {documents.length > 0 && (
-        <div style={{ padding: '0 1rem', marginBottom: '0.5rem' }}>
-          <DocumentList
-            documents={documents}
-            selectedDocument={selectedDocument}
-            onSelectDocument={setSelectedDocument}
-            onDeleteDocument={handleDeleteDocument}
-            isLoadingDocuments={isLoadingDocuments}
-            getFileIcon={getFileIcon}
-          />
-        </div>
-      )}
-
       {/* Input */}
       <Input
         value={currentQuestion}
         onChange={setCurrentQuestion}
         onSubmit={handleSubmit}
         isLoading={isLoading}
-        placeholder="Ask anything"
+        placeholder={selectedDocument ? "Ask about the selected document..." : "Ask anything"}
         onUploadClick={() => setShowUploadModal(true)}
         selectedDocument={selectedDocument}
         deepResearchEnabled={deepResearchEnabled}

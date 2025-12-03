@@ -6,6 +6,7 @@ Provides endpoints for:
 - Running workflows with streaming support
 - Handling human approval checkpoints
 - Getting workflow status and results
+- Document-based deep research
 """
 
 from typing import Annotated
@@ -14,6 +15,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from app.auth.dependencies import get_current_user_from_request
+from app.auth.models import KeycloakUser
 from app.logger import get_logger
 from app.services.research_agent import (
     DeepResearchAgentService,
@@ -34,6 +37,9 @@ class StartResearchRequest(BaseModel):
 
     topic: str = Field(..., min_length=3, max_length=500, description="The topic to research")
     user_id: str | None = Field(None, description="Optional user ID for tracking")
+    document_id: str | None = Field(
+        None, description="Optional document ID for document-based research"
+    )
 
 
 class ApprovalRequest(BaseModel):
@@ -118,19 +124,29 @@ ResearchServiceDep = Annotated[DeepResearchAgentService, Depends(get_research_se
     
     This creates a new workflow run and returns the run_id.
     Use the /run/{run_id} endpoint to execute the workflow.
+    
+    If document_id is provided, the research will thoroughly scan the document.
     """,
 )
 async def start_research(
     request: StartResearchRequest,
     service: ResearchServiceDep,
+    current_user: Annotated[KeycloakUser, Depends(get_current_user_from_request)],
 ) -> WorkflowStartResponse:
     """Start a new research workflow."""
-    logger.info("starting_research_workflow", topic=request.topic, user_id=request.user_id)
+    user_id = current_user.sub if current_user else request.user_id
+    logger.info(
+        "starting_research_workflow",
+        topic=request.topic,
+        user_id=user_id,
+        document_id=request.document_id,
+    )
 
     try:
         result = await service.start_research(
             topic=request.topic,
-            user_id=request.user_id,
+            user_id=user_id,
+            document_id=request.document_id,
         )
         return WorkflowStartResponse(**result)
     except Exception as e:

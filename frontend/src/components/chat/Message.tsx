@@ -1,5 +1,7 @@
 import type { FC } from 'react'
 import { useState } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { SourceInfo } from '@/services/chatAgentService'
 
 interface MessageProps {
@@ -70,11 +72,13 @@ const Message: FC<MessageProps> = ({
   return (
     <div className="copilot-message assistant">
       <div className="message-avatar">
-        <i className="bi bi-stars"></i>
+        <i className="bi bi-robot"></i>
       </div>
       <div className="message-content">
         {content ? (
-          <div style={{ whiteSpace: 'pre-wrap' }}>{content}</div>
+          <div className="markdown-content">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+          </div>
         ) : isStreaming ? (
           <div className="copilot-streaming">
             <span className="copilot-streaming-dot"></span>
