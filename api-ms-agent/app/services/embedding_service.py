@@ -2,7 +2,11 @@
 Embedding service for generating and storing document embeddings.
 
 This service uses Azure OpenAI to generate embeddings and stores them
-in Cosmos DB for vector similarity search.
+in Azure AI Search for vector similarity search.
+
+Storage Architecture:
+- Vector embeddings: Azure AI Search (for similarity search)
+- Document metadata: Cosmos DB (for user document listing)
 """
 
 import uuid
@@ -14,9 +18,13 @@ from openai import AsyncAzureOpenAI
 
 from app.config import settings
 from app.logger import get_logger
+from app.services.azure_search_service import (
+    AzureSearchService,
+    VectorSearchOptions,
+    get_azure_search_service,
+)
 from app.services.cosmos_db_service import (
     CosmosDbService,
-    VectorSearchOptions,
     get_cosmos_db_service,
 )
 
@@ -54,18 +62,21 @@ class EmbeddingService:
 
     def __init__(
         self,
+        search_service: AzureSearchService | None = None,
         cosmos_service: CosmosDbService | None = None,
     ) -> None:
         """
         Initialize the embedding service.
 
         Args:
-            cosmos_service: Optional Cosmos DB service instance
+            search_service: Optional Azure Search service instance for vector operations
+            cosmos_service: Optional Cosmos DB service instance for metadata
         """
         self._client: AsyncAzureOpenAI | None = None
         self._credential: DefaultAzureCredential | None = None
+        self.search = search_service or get_azure_search_service()
         self.cosmos = cosmos_service or get_cosmos_db_service()
-        logger.info("EmbeddingService initialized")
+        logger.info("EmbeddingService initialized with Azure AI Search backend")
 
     async def _get_client(self) -> AsyncAzureOpenAI:
         """Get or create the Azure OpenAI client for embeddings."""
@@ -174,7 +185,9 @@ class EmbeddingService:
         chunk_overlap: int = DEFAULT_CHUNK_OVERLAP,
     ) -> Document:
         """
-        Index a document by chunking it and storing embeddings in Cosmos DB.
+        Index a document by chunking it and storing embeddings in Azure AI Search.
+
+        Also stores document metadata in Cosmos DB for listing.
 
         Args:
             content: The document content
@@ -197,10 +210,10 @@ class EmbeddingService:
             num_chunks=len(chunks),
         )
 
-        # Generate embeddings and store chunks
+        # Generate embeddings and store chunks in Azure AI Search
         for i, chunk in enumerate(chunks):
             embedding = await self.generate_embedding(chunk)
-            await self.cosmos.store_document_chunk(
+            await self.search.store_document_chunk(
                 document_id=doc_id,
                 user_id=user_id,
                 content=chunk,
@@ -211,6 +224,18 @@ class EmbeddingService:
                     "total_chunks": len(chunks),
                 },
             )
+
+        # Store document metadata in Cosmos DB
+        await self.cosmos.save_document_metadata(
+            document_id=doc_id,
+            user_id=user_id,
+            title=(metadata or {}).get("title") or f"Document {doc_id[:8]}...",
+            filename=(metadata or {}).get("filename"),
+            content_type=(metadata or {}).get("content_type"),
+            chunk_count=len(chunks),
+            pages=(metadata or {}).get("pages"),
+            metadata=metadata,
+        )
 
         document = Document(
             id=doc_id,
@@ -237,7 +262,7 @@ class EmbeddingService:
         min_similarity: float = 0.0,
     ) -> list[SearchResult]:
         """
-        Perform vector similarity search.
+        Perform vector similarity search using Azure AI Search.
 
         Args:
             query: The search query
@@ -252,7 +277,7 @@ class EmbeddingService:
         # Generate embedding for the query
         query_embedding = await self.generate_embedding(query)
 
-        # Perform vector search
+        # Perform vector search in Azure AI Search
         options = VectorSearchOptions(
             user_id=user_id,
             document_id=document_id,
@@ -260,7 +285,7 @@ class EmbeddingService:
             min_similarity=min_similarity,
         )
 
-        results = await self.cosmos.vector_search(query_embedding, options)
+        results = await self.search.vector_search(query_embedding, options)
 
         search_results = [
             SearchResult(
@@ -293,7 +318,12 @@ class EmbeddingService:
         Returns:
             Number of chunks deleted
         """
-        count = await self.cosmos.delete_document_chunks(document_id, user_id)
+        # Delete chunks from Azure AI Search
+        count = await self.search.delete_document_chunks(document_id, user_id)
+
+        # Delete metadata from Cosmos DB
+        await self.cosmos.delete_document_metadata(document_id, user_id)
+
         logger.info(
             "document_deleted",
             document_id=document_id,
@@ -304,6 +334,8 @@ class EmbeddingService:
     async def list_documents(self, user_id: str, limit: int = 50) -> list[dict]:
         """
         List documents for a user.
+
+        Uses Cosmos DB for fast metadata retrieval.
 
         Args:
             user_id: The user identifier

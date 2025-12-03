@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from app.auth.dependencies import get_current_user_from_request
 from app.auth.models import KeycloakUser
+from app.services.azure_search_service import AzureSearchService, get_azure_search_service
 from app.services.cosmos_db_service import CosmosDbService, get_cosmos_db_service
 from app.services.document_intelligence_service import (
     DocumentIntelligenceService,
@@ -348,11 +349,14 @@ async def delete_document(
 @router.get("/health")
 async def documents_health(
     cosmos: Annotated[CosmosDbService, Depends(get_cosmos_db_service)],
+    search: Annotated[AzureSearchService, Depends(get_azure_search_service)],
 ) -> dict:
-    """Health check for the documents service including Cosmos DB status."""
+    """Health check for the documents service including Cosmos DB and Azure AI Search status."""
     cosmos_health = await cosmos.health_check()
+    search_health = await search.health_check()
     return {
         "status": "ok",
         "service": "documents",
         "cosmos_db": cosmos_health,
+        "azure_search": search_health,
     }

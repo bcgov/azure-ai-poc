@@ -31,10 +31,15 @@ class Settings(BaseSettings):
     # LLM Configuration - Low temperature for high confidence responses
     llm_temperature: float = 0.1  # Low temperature for consistent, high-confidence responses
 
-    # Cosmos DB settings
+    # Cosmos DB settings - for chat history, metadata, and workflow persistence
     cosmos_db_endpoint: str = ""
     cosmos_db_key: str = ""  # Optional if using managed identity
     cosmos_db_database_name: str = "azure-ai-poc"
+
+    # Azure AI Search settings - for vector embeddings storage
+    azure_search_endpoint: str = ""
+    azure_search_key: str = ""  # Optional if using managed identity
+    azure_search_index_name: str = "documents-index"
 
     # Azure Document Intelligence settings
     azure_document_intelligence_endpoint: str = ""

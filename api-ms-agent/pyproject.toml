@@ -9,6 +9,7 @@ dependencies = [
     "azure-ai-documentintelligence>=1.0.0",
     "azure-cosmos>=4.9.0",
     "azure-identity>=1.25.1",
+    "azure-search-documents>=11.6.0",
     "fastapi>=0.122.0",
     "openai>=2.8.1",
     "pydantic-settings>=2.12.0",

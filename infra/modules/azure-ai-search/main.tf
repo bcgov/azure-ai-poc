@@ -63,7 +63,7 @@ resource "azurerm_private_endpoint" "search" {
 
 # Diagnostic settings for monitoring
 resource "azurerm_monitor_diagnostic_setting" "search" {
-  name                       = "${var.app_name}-search-diagnostics-${var.app_env}"
+  name                       = "${var.app_name}-search-monitor-${var.app_env}"
   target_resource_id         = azurerm_search_service.main.id
   log_analytics_workspace_id = var.log_analytics_workspace_id
 
