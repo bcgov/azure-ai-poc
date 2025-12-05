@@ -136,32 +136,6 @@ async def query_orchestrator(
 
 @router.get("/health")
 async def orchestrator_health():
-    """Check health of the orchestrator and its sub-agents."""
-    import httpx
-
-    health_status = {
-        "orchestrator": "healthy",
-        "orgbook_api": "unknown",
-        "geocoder_api": "unknown",
-    }
-
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        # Check OrgBook API
-        try:
-            response = await client.get("https://orgbook.gov.bc.ca/api/v4/search/topic?q=test")
-            health_status["orgbook_api"] = "healthy" if response.status_code == 200 else "degraded"
-        except Exception:
-            health_status["orgbook_api"] = "unhealthy"
-
-        # Check Geocoder API
-        try:
-            response = await client.get(
-                "https://geocoder.api.gov.bc.ca/addresses.json?addressString=victoria"
-            )
-            health_status["geocoder_api"] = "healthy" if response.status_code == 200 else "degraded"
-        except Exception:
-            health_status["geocoder_api"] = "unhealthy"
-
-    overall = "healthy" if all(v == "healthy" for v in health_status.values()) else "degraded"
-
-    return {"status": overall, "services": health_status}
+    """Check health of the orchestrator and all MCP-wrapped APIs."""
+    orchestrator = get_orchestrator_agent()
+    return await orchestrator.health_check()

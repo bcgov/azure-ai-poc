@@ -19,10 +19,6 @@ interface ChatMessageType {
 }
 
 const EXAMPLE_QUERIES = [
-  'Find information about TELUS Communications',
-  'Is BC Hydro a registered business?',
-  'What is the address for 1234 Main St Vancouver?',
-  'Find schools near downtown Victoria',
 ]
 
 const OrchestratorPage: FC = () => {
@@ -133,7 +129,7 @@ const OrchestratorPage: FC = () => {
           {/* Health Status Bar */}
           {healthStatus && (
             <div style={{ padding: '0.5rem 2rem', borderBottom: '1px solid #d0d7de' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: '0.75rem', color: '#656d76' }}>
                   <i className="bi bi-diagram-3 me-1"></i>
                   Services:
@@ -145,6 +141,10 @@ const OrchestratorPage: FC = () => {
                 <span className={getHealthBadgeClass(healthStatus.services.geocoder_api)}>
                   <i className="bi bi-geo-alt me-1"></i>
                   Geocoder
+                </span>
+                <span className={getHealthBadgeClass(healthStatus.services.parks_api)}>
+                  <i className="bi bi-tree me-1"></i>
+                  Parks
                 </span>
               </div>
             </div>
@@ -196,7 +196,7 @@ const OrchestratorPage: FC = () => {
                   Query BC Government Data Sources
                 </div>
                 <div className="copilot-empty-subtitle">
-                  Ask about BC businesses (OrgBook) or locations (Geocoder).
+                  Ask about BC businesses (OrgBook), locations (Geocoder), or parks (BC Parks).
                   <br />
                   All responses include citations from official sources.
                 </div>
@@ -260,7 +260,7 @@ const OrchestratorPage: FC = () => {
             onChange={setCurrentQuestion}
             onSubmit={handleSubmit}
             isLoading={isLoading}
-            placeholder="Ask about BC businesses or locations..."
+            placeholder="Ask about BC businesses, locations, or parks..."
           />
         </div>
       </div>

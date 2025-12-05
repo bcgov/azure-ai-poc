@@ -4,12 +4,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.services.azure_search_service import DocumentChunk, VectorSearchOptions
 from app.services.cosmos_db_service import (
     ChatMessage,
     ConversationSession,
     CosmosDbService,
-    DocumentChunk,
-    VectorSearchOptions,
 )
 
 
