@@ -2,7 +2,7 @@
  * Orchestrator Agent Service
  *
  * Service for interacting with the multi-agent orchestrator that coordinates
- * OrgBook and Geocoder agents for BC government data queries.
+ * OrgBook, Geocoder, and Parks MCP-wrapped agents for BC government data queries.
  */
 
 import httpClient from './httpClient';
@@ -32,7 +32,7 @@ export interface OrchestratorQueryResponse {
 }
 
 /**
- * Health status of the orchestrator services
+ * Health status of the orchestrator services (now includes Parks)
  */
 export interface OrchestratorHealthStatus {
   status: 'healthy' | 'degraded' | 'unhealthy';
@@ -40,6 +40,7 @@ export interface OrchestratorHealthStatus {
     orchestrator: 'healthy' | 'degraded' | 'unhealthy';
     orgbook_api: 'healthy' | 'degraded' | 'unhealthy';
     geocoder_api: 'healthy' | 'degraded' | 'unhealthy';
+    parks_api: 'healthy' | 'degraded' | 'unhealthy';
   };
 }
 

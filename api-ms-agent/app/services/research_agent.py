@@ -6,6 +6,7 @@ approval_mode="always_require" for native human-in-the-loop support.
 """
 
 import json
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Annotated, Any
@@ -23,6 +24,106 @@ from app.config import settings
 from app.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+# ==================== JSON Repair Utilities ====================
+
+
+def repair_json_string(json_str: str) -> str:
+    """
+    Attempt to repair common JSON formatting issues from LLM output.
+
+    Common issues:
+    - Unescaped quotes inside string values
+    - Trailing commas
+    - Single quotes instead of double quotes
+    - Unescaped newlines in strings
+    """
+    if not json_str:
+        return json_str
+
+    # First, try to parse as-is
+    try:
+        json.loads(json_str)
+        return json_str  # Already valid
+    except json.JSONDecodeError:
+        pass
+
+    # Try common repairs
+    repaired = json_str
+
+    # Replace single quotes with double quotes (but be careful with apostrophes)
+    # Only do this if the string starts with single quote array/object
+    if repaired.strip().startswith("'") or "': '" in repaired:
+        # This is likely using single quotes for JSON - convert carefully
+        repaired = re.sub(r"(?<=[,\[\{])\s*'", ' "', repaired)
+        repaired = re.sub(r"'\s*(?=[,\]\}:])", '"', repaired)
+
+    # Remove trailing commas before ] or }
+    repaired = re.sub(r",\s*([}\]])", r"\1", repaired)
+
+    # Try to fix unescaped quotes in string values
+    # This is tricky - we look for patterns like "value with "quotes" inside"
+    # and try to escape the inner quotes
+
+    return repaired
+
+
+def safe_json_loads(json_str: str, fallback: Any = None) -> Any:
+    """
+    Safely parse JSON with repair attempts.
+
+    Args:
+        json_str: The JSON string to parse
+        fallback: Value to return if all parsing fails
+
+    Returns:
+        Parsed JSON or fallback value
+    """
+    if not json_str:
+        return fallback
+
+    # Try direct parse first
+    try:
+        return json.loads(json_str)
+    except json.JSONDecodeError:
+        pass
+
+    # Try with repairs
+    try:
+        repaired = repair_json_string(json_str)
+        return json.loads(repaired)
+    except json.JSONDecodeError:
+        pass
+
+    # Try extracting JSON from markdown code blocks
+    try:
+        # Look for ```json ... ``` blocks
+        match = re.search(r"```(?:json)?\s*(\[[\s\S]*?\]|\{[\s\S]*?\})\s*```", json_str)
+        if match:
+            return json.loads(match.group(1))
+    except (json.JSONDecodeError, AttributeError):
+        pass
+
+    # Try finding the first [ or { and matching ] or }
+    try:
+        start_array = json_str.find("[")
+        start_obj = json_str.find("{")
+
+        if start_array >= 0 and (start_obj < 0 or start_array < start_obj):
+            # It's an array
+            end = json_str.rfind("]")
+            if end > start_array:
+                return json.loads(json_str[start_array : end + 1])
+        elif start_obj >= 0:
+            # It's an object
+            end = json_str.rfind("}")
+            if end > start_obj:
+                return json.loads(json_str[start_obj : end + 1])
+    except json.JSONDecodeError:
+        pass
+
+    return fallback
 
 
 # ==================== Data Models ====================
@@ -103,8 +204,23 @@ def save_research_plan(
     """
     Save the research plan and proceed with research.
     """
+    # Use safe JSON parsing with repair attempts
+    plan_data = safe_json_loads(plan_json, fallback=None)
+
+    if plan_data is None:
+        logger.error(
+            "plan_json_decode_error",
+            topic=topic,
+            error="Could not parse plan JSON after repair attempts",
+            json_preview=plan_json[:200] if plan_json else "empty",
+        )
+        return (
+            "Error: Invalid plan JSON format. Please ensure plan is a valid "
+            'JSON object like: {"research_questions": [...], "subtopics": [...], '
+            '"methodology": "...", "estimated_depth": "medium"}'
+        )
+
     try:
-        plan_data = json.loads(plan_json)
         # Store the plan
         state = ResearchState(
             topic=topic,
@@ -125,9 +241,9 @@ def save_research_plan(
             questions_count=len(state.plan.research_questions),
         )
         return f"Research plan saved for topic: {topic}. Proceeding to research."
-    except json.JSONDecodeError as e:
-        logger.error("plan_json_decode_error", topic=topic, error=str(e))
-        return "Error: Invalid plan JSON format"
+    except Exception as e:
+        logger.error("plan_save_error", topic=topic, error=str(e))
+        return f"Error saving plan: {str(e)}"
 
 
 @ai_function()
@@ -138,8 +254,27 @@ def save_research_findings(
     """
     Save the research findings and proceed with synthesis.
     """
+    # Use safe JSON parsing with repair attempts
+    findings_data = safe_json_loads(findings_json, fallback=None)
+
+    if findings_data is None:
+        logger.error(
+            "findings_json_decode_error",
+            topic=topic,
+            error="Could not parse findings JSON after repair attempts",
+            json_preview=findings_json[:200] if findings_json else "empty",
+        )
+        return (
+            "Error: Invalid findings JSON format. Please ensure findings is a valid "
+            'JSON array like: [{"subtopic": "...", "content": "...", '
+            '"confidence": "high", "sources": [...]}]'
+        )
+
+    # Ensure it's a list
+    if not isinstance(findings_data, list):
+        findings_data = [findings_data]
+
     try:
-        findings_data = json.loads(findings_json)
         if topic in _research_state_store:
             state = _research_state_store[topic]
         else:
@@ -155,19 +290,19 @@ def save_research_findings(
 
         state.findings = [
             ResearchFinding(
-                subtopic=f.get("subtopic", ""),
-                content=f.get("content", ""),
-                confidence=f.get("confidence", "medium"),
-                sources=f.get("sources", []),
+                subtopic=f.get("subtopic", "") if isinstance(f, dict) else "",
+                content=f.get("content", "") if isinstance(f, dict) else str(f),
+                confidence=f.get("confidence", "medium") if isinstance(f, dict) else "medium",
+                sources=f.get("sources", []) if isinstance(f, dict) else [],
             )
             for f in findings_data
         ]
         state.current_phase = ResearchPhase.SYNTHESIZING
         logger.info("research_findings_saved", topic=topic, findings_count=len(state.findings))
         return f"Research findings saved for topic: {topic}. Proceeding with synthesis phase."
-    except json.JSONDecodeError as e:
-        logger.error("findings_json_decode_error", topic=topic, error=str(e))
-        return "Error: Invalid findings JSON format"
+    except Exception as e:
+        logger.error("findings_save_error", topic=topic, error=str(e))
+        return f"Error saving findings: {str(e)}"
 
 
 @ai_function()
@@ -185,18 +320,19 @@ def save_final_report(
     """
     logger.info("save_final_report_called", topic=topic, report_length=len(report))
 
-    # Parse sources
-    try:
-        sources_data = json.loads(sources_json) if sources_json else []
-    except json.JSONDecodeError:
-        sources_data = []
+    # Parse sources using safe JSON parsing
+    sources_data = safe_json_loads(sources_json, fallback=[])
+    if not isinstance(sources_data, list):
+        sources_data = [sources_data] if sources_data else []
 
     sources = [
         ResearchSource(
-            source_type=s.get("source_type", "llm_knowledge"),
-            description=s.get("description", ""),
-            confidence=s.get("confidence", "medium"),
-            url=s.get("url"),
+            source_type=s.get("source_type", "llm_knowledge")
+            if isinstance(s, dict)
+            else "llm_knowledge",
+            description=s.get("description", "") if isinstance(s, dict) else str(s),
+            confidence=s.get("confidence", "medium") if isinstance(s, dict) else "medium",
+            url=s.get("url") if isinstance(s, dict) else None,
         )
         for s in sources_data
     ]

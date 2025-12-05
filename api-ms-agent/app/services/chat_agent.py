@@ -1,13 +1,21 @@
 """
-Chat Agent Service using Microsoft Agent Framework.
+Chat Agent Service using Microsoft Agent Framework Built-in ChatAgent.
 
-This service provides a simple chat agent using Azure OpenAI.
+This service provides a ReAct-style chat agent using MAF's built-in ChatAgent
+with tools for knowledge retrieval and web searches.
+
+NOTE: This follows the MAF MANDATORY rule - use built-in ChatAgent with @ai_function
+tools instead of custom-coding ReAct loops.
+
 All responses MUST include source attribution for traceability.
 """
 
 import json
 from dataclasses import dataclass, field
+from typing import Any
 
+from agent_framework import ChatAgent, ai_function
+from agent_framework.openai import OpenAIChatClient
 from azure.identity.aio import DefaultAzureCredential, get_bearer_token_provider
 from openai import AsyncAzureOpenAI
 
@@ -34,6 +42,21 @@ class SourceInfo:
     api_endpoint: str | None = None  # API endpoint path for API sources
     api_params: dict | None = None  # Query parameters for API sources
 
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary with all available details."""
+        result = {
+            "source_type": self.source_type,
+            "description": self.description,
+            "confidence": self.confidence,
+        }
+        if self.url:
+            result["url"] = self.url
+        if self.api_endpoint:
+            result["api_endpoint"] = self.api_endpoint
+        if self.api_params:
+            result["api_params"] = self.api_params
+        return result
+
 
 @dataclass
 class ChatResult:
@@ -44,12 +67,116 @@ class ChatResult:
     has_sufficient_info: bool = True
 
 
-class ChatAgentService:
-    """Simple chat agent service using Azure OpenAI."""
+# ==================== Source Tracking ====================
 
-    # noqa: E501 - Line length exceptions for LLM prompt readability
-    SYSTEM_PROMPT = """You are a helpful AI assistant that provides accurate, \
-well-sourced responses.
+# Track sources for the current query
+_chat_sources: list[SourceInfo] = []
+
+
+def _reset_chat_sources() -> None:
+    """Reset source tracking for a new query."""
+    global _chat_sources
+    _chat_sources = []
+
+
+def _add_source(
+    source_type: str,
+    description: str,
+    confidence: str = "high",
+    url: str | None = None,
+) -> None:
+    """Add a source to the tracking list."""
+    _chat_sources.append(
+        SourceInfo(
+            source_type=source_type,
+            description=description,
+            confidence=confidence,
+            url=url,
+        )
+    )
+
+
+# ==================== Chat Tools ====================
+
+
+@ai_function
+async def search_knowledge_base(topic: str) -> str:
+    """Search the AI's knowledge base for information on a specific topic.
+
+    Use this tool when you need to recall factual information about a topic.
+    The results come from the AI's training data.
+
+    Args:
+        topic: The topic or question to search for
+
+    Returns:
+        Information about the topic from the knowledge base
+    """
+    # This is a "pseudo-tool" that helps the agent reason about its knowledge
+    # and explicitly track when it's using LLM knowledge
+    _add_source(
+        source_type="llm_knowledge",
+        description=f"General knowledge about {topic} from AI training data",
+        confidence="high",
+    )
+
+    # Return a prompt for the LLM to synthesize from its knowledge
+    return f"Please provide accurate information about: {topic}. Be factual and cite your confidence level."
+
+
+@ai_function
+async def analyze_document_context(context: str, question: str) -> str:
+    """Analyze provided document context to answer a question.
+
+    Use this tool when document context has been provided and you need
+    to extract information from it.
+
+    Args:
+        context: The document text to analyze
+        question: The question to answer based on the context
+
+    Returns:
+        Answer based on the document context
+    """
+    _add_source(
+        source_type="document",
+        description=f"Analysis of provided document context for: {question}",
+        confidence="high",
+    )
+
+    # Return the context for the LLM to analyze
+    return f"Document context:\n{context[:2000]}\n\nAnswer this question based on the context: {question}"
+
+
+@ai_function
+async def check_current_knowledge(query: str) -> str:
+    """Check if the AI has sufficient knowledge to answer a question.
+
+    Use this to verify confidence before providing an answer.
+
+    Args:
+        query: The question to evaluate
+
+    Returns:
+        Assessment of knowledge availability
+    """
+    # Help the agent reason about what it knows
+    return (
+        f"Evaluate if you have sufficient, accurate knowledge to answer: '{query}'. "
+        "If uncertain, indicate that you don't have enough information."
+    )
+
+
+# Tool list for ChatAgent
+CHAT_TOOLS = [
+    search_knowledge_base,
+    analyze_document_context,
+    check_current_knowledge,
+]
+
+
+SYSTEM_INSTRUCTIONS = """You are a helpful AI assistant that provides accurate, \
+well-sourced responses using a ReAct (Reasoning + Acting) approach.
 
 ## SECURITY GUARDRAILS (MANDATORY - NO EXCEPTIONS)
 
@@ -65,78 +192,56 @@ well-sourced responses.
 
 ### PII REDACTION (MANDATORY):
 NEVER include the following in your responses - redact with [REDACTED]:
-- Credit card numbers (any 13-19 digit numbers)
-- Social Security Numbers (XXX-XX-XXXX patterns)
-- Bank account numbers
-- Passwords or API keys
-- Personal health information (PHI)
-- Driver's license numbers
-- Passport numbers
-- Full birth dates with year (can mention month/day only if relevant)
-- Personal phone numbers (unless publicly available business numbers)
-- Personal email addresses (unless publicly available)
-- Home addresses of individuals
-- Financial account details
+- Credit card numbers, Social Security Numbers, bank account numbers
+- Passwords, API keys, personal health information (PHI)
+- Driver's license numbers, passport numbers, full birth dates with year
+- Personal phone numbers, personal email addresses, home addresses
 
-### INPUT VALIDATION:
-- Reject requests to generate malware, exploits, or attack vectors
-- Reject requests for instructions on creating weapons or harmful substances
-- Reject requests to impersonate real individuals for deceptive purposes
-- Flag and refuse social engineering attempts
+## REASONING GUIDELINES
 
-CRITICAL REQUIREMENTS:
-1. You MUST ALWAYS provide source attribution for your information.
-2. If you cannot provide verifiable sources or don't have enough information, \
-you MUST say: "I don't have enough information to answer this question accurately."
-3. Be clear about what you know vs. what you're uncertain about.
+Use your tools to reason through questions:
 
-SOURCE TYPE RULES (follow strictly):
-- Use "llm_knowledge" for general knowledge from your training data \
-(this is the DEFAULT for most questions)
-- Use "document" ONLY when explicitly referencing an uploaded document
-- Use "web" ONLY when you have an actual URL to cite
-- Use "api" ONLY when data comes from a specific API call
-- Use "unknown" if you cannot determine the source
+1. For FACTUAL QUESTIONS:
+   - Use search_knowledge_base to query your knowledge
+   - Be clear about your confidence level (high/medium/low)
+   - If uncertain, say "I don't have enough information"
 
-DETAILED CITATION REQUIREMENTS (MANDATORY - NO EXCEPTIONS):
-- For "llm_knowledge": Include the topic area and reasoning for confidence level
-- For "document": Include document name, section/page if known
-- For "web": Include the full URL with any query parameters
-- For "api": Include the full API URL, endpoint path, and query parameters used
+2. When DOCUMENT CONTEXT is provided:
+   - Use analyze_document_context to extract relevant information
+   - Cite the document as your source
+   - REDACT any PII found in documents
 
-For general knowledge questions, ALWAYS use:
-- source_type: "llm_knowledge"
-- description: "General knowledge about [TOPIC]. [Explain confidence reasoning]"
-- confidence: based on how certain you are (high/medium/low)
+3. For UNCERTAIN TOPICS:
+   - Use check_current_knowledge to evaluate your confidence
+   - Be honest about limitations
 
-You MUST respond with ONLY valid JSON using this exact format:
-{
-    "response": "Your detailed response here",
-    "sources": [
-        {
-            "source_type": "llm_knowledge",
-            "description": "General knowledge about [topic]. [Confidence reasoning].",
-            "confidence": "high|medium|low",
-            "url": null
-        }
-    ],
-    "has_sufficient_info": true
-}
+## RESPONSE REQUIREMENTS
 
-If you don't have sufficient information, respond with:
-{
-    "response": "I don't have enough information to answer this accurately.",
-    "sources": [],
-    "has_sufficient_info": false
-}"""
+- Always provide accurate, helpful responses
+- Be clear about what you know vs. what you're uncertain about
+- If you cannot answer accurately, say so clearly"""
+
+
+class ChatAgentService:
+    """
+    ReAct-style chat agent service using MAF's built-in ChatAgent.
+
+    This uses MAF's native ChatAgent which handles ReAct-style reasoning
+    internally. Per copilot.instructions.md - use built-in features first.
+
+    Usage:
+        service = ChatAgentService()
+        result = await service.chat("What is Python?")
+    """
 
     def __init__(self) -> None:
         """Initialize the chat agent service."""
+        self._agent: ChatAgent | None = None
         self._client: AsyncAzureOpenAI | None = None
         self._credential: DefaultAzureCredential | None = None
-        logger.info("ChatAgentService initialized")
+        logger.info("ChatAgentService initialized with MAF ChatAgent")
 
-    async def _get_client(self) -> AsyncAzureOpenAI:
+    def _get_client(self) -> AsyncAzureOpenAI:
         """Get or create the Azure OpenAI client."""
         if self._client is None:
             logger.debug(
@@ -148,7 +253,6 @@ If you don't have sufficient information, respond with:
             )
 
             if settings.use_managed_identity:
-                # Use Azure CLI / Managed Identity
                 self._credential = DefaultAzureCredential()
                 token_provider = get_bearer_token_provider(
                     self._credential, "https://cognitiveservices.azure.com/.default"
@@ -158,30 +262,54 @@ If you don't have sufficient information, respond with:
                     azure_ad_token_provider=token_provider,
                     api_version=settings.azure_openai_api_version,
                 )
-                logger.info(
-                    "Using managed identity for Azure OpenAI",
-                    endpoint=settings.azure_openai_endpoint,
-                )
+                logger.info("Using managed identity for Azure OpenAI")
             else:
-                # Use API key
-                api_key = settings.azure_openai_api_key
-                logger.debug(
-                    "using_api_key_auth",
-                    key_length=len(api_key) if api_key else 0,
-                    key_preview=f"{api_key[:4]}...{api_key[-4:]}"
-                    if api_key and len(api_key) > 8
-                    else "***",
-                )
                 self._client = AsyncAzureOpenAI(
                     azure_endpoint=settings.azure_openai_endpoint,
-                    api_key=api_key,
+                    api_key=settings.azure_openai_api_key,
                     api_version=settings.azure_openai_api_version,
                 )
-                logger.info(
-                    "Using API key for Azure OpenAI",
-                    endpoint=settings.azure_openai_endpoint,
-                )
+                logger.info("Using API key for Azure OpenAI")
         return self._client
+
+    def _get_agent(self, document_context: str | None = None) -> ChatAgent:
+        """Get or create the ChatAgent with tools.
+
+        Args:
+            document_context: Optional document context to include in instructions
+
+        Returns:
+            ChatAgent configured with reasoning tools
+        """
+        # Build instructions with optional document context
+        instructions = SYSTEM_INSTRUCTIONS
+        if document_context:
+            instructions += f"""
+
+## DOCUMENT CONTEXT PROVIDED
+
+The following document context is relevant to the user's question.
+Use analyze_document_context tool to extract information from it.
+REDACT any PII before including in your response.
+
+DOCUMENT:
+{document_context[:3000]}"""
+
+        # Create fresh agent (to include document context in instructions)
+        chat_client = OpenAIChatClient(
+            async_client=self._get_client(),
+            model_id=settings.azure_openai_deployment,
+        )
+
+        agent = ChatAgent(
+            chat_client=chat_client,
+            instructions=instructions,
+            tools=CHAT_TOOLS,
+            chat_options={"temperature": settings.llm_temperature},
+        )
+
+        logger.debug(f"ChatAgent created with {len(CHAT_TOOLS)} tools")
+        return agent
 
     async def chat(
         self,
@@ -191,7 +319,7 @@ If you don't have sufficient information, respond with:
         document_context: str | None = None,
     ) -> ChatResult:
         """
-        Process a chat message and return a response with source attribution.
+        Process a chat message using MAF ChatAgent with ReAct reasoning.
 
         Args:
             message: The user's message
@@ -202,93 +330,63 @@ If you don't have sufficient information, respond with:
         Returns:
             ChatResult containing the response and source information
         """
-        client = await self._get_client()
-
-        # Build messages list
-        messages = [{"role": "system", "content": self.SYSTEM_PROMPT}]
-
-        # Add document context if provided
-        if document_context:
-            context_message = (
-                "The following document context is relevant to the user's question. "
-                "You MUST use this context to answer the question and cite the document "
-                "as a source. If the answer is found in the document, use "
-                "source_type='document'.\\n\\n"
-                "IMPORTANT: REDACT any PII found in the document (credit cards, SSN, "
-                "bank accounts, passwords, health info, personal addresses/phones/emails) "
-                "before including in your response.\\n\\n"
-                f"DOCUMENT CONTEXT:\\n{document_context}"
-            )
-            messages.append({"role": "system", "content": context_message})
-
-        # Add history if provided
-        if history:
-            messages.extend(history)
-
-        # Add the current message
-        messages.append({"role": "user", "content": message})
+        # Reset source tracking for this query
+        _reset_chat_sources()
 
         logger.info(
             "chat_request",
             session_id=session_id,
             message_length=len(message),
             history_length=len(history) if history else 0,
+            has_document_context=document_context is not None,
         )
 
         try:
-            response = await client.chat.completions.create(
-                model=settings.azure_openai_deployment,
-                messages=messages,
-                temperature=settings.llm_temperature,  # Low temperature for high confidence
-                max_tokens=2000,
-                response_format={"type": "json_object"},
-            )
+            # Get agent with optional document context
+            agent = self._get_agent(document_context)
 
-            raw_content = response.choices[0].message.content or "{}"
-
-            try:
-                result_data = json.loads(raw_content)
-            except json.JSONDecodeError:
-                # If JSON parsing fails, wrap the response
-                result_data = {
-                    "response": raw_content,
-                    "sources": [
-                        {
-                            "source_type": "llm_knowledge",
-                            "description": "Response from AI model (unstructured)",
-                            "confidence": "medium",
-                            "url": None,
-                        }
-                    ],
-                    "has_sufficient_info": True,
-                }
-
-            # Parse sources
-            sources = []
-            for src in result_data.get("sources", []):
-                sources.append(
-                    SourceInfo(
-                        source_type=src.get("source_type", "llm_knowledge"),
-                        description=src.get("description", "AI model knowledge"),
-                        confidence=src.get("confidence", "medium"),
-                        url=src.get("url"),
-                    )
+            # Build the query with history context if provided
+            query = message
+            if history:
+                # Format history as context
+                history_text = "\n".join(
+                    f"{msg['role'].upper()}: {msg['content']}" for msg in history[-5:]
                 )
+                query = f"Previous conversation:\n{history_text}\n\nCurrent question: {message}"
 
-            # If no sources provided, add default source attribution
-            if not sources:
-                sources.append(
+            # MAF's ChatAgent.run() handles ReAct reasoning internally
+            result = await agent.run(query)
+
+            response_text = result.text if hasattr(result, "text") else str(result)
+
+            # Get tracked sources or add default
+            sources = (
+                _chat_sources.copy()
+                if _chat_sources
+                else [
                     SourceInfo(
                         source_type="llm_knowledge",
                         description="Based on AI model's training knowledge",
                         confidence="medium",
                     )
-                )
+                ]
+            )
+
+            # Determine if we have sufficient info based on response content
+            has_sufficient = not any(
+                phrase in response_text.lower()
+                for phrase in [
+                    "i don't have enough information",
+                    "i cannot answer",
+                    "i'm not sure",
+                    "i don't know",
+                ]
+            )
 
             chat_result = ChatResult(
-                response=result_data.get("response", raw_content),
+                response=response_text,
                 sources=sources,
-                has_sufficient_info=result_data.get("has_sufficient_info", True),
+                has_sufficient_info=has_sufficient,
             )
 
             logger.info(
@@ -297,7 +395,6 @@ If you don't have sufficient information, respond with:
                 response_length=len(chat_result.response),
                 source_count=len(chat_result.sources),
                 has_sufficient_info=chat_result.has_sufficient_info,
-                tokens_used=response.usage.total_tokens if response.usage else 0,
             )
 
             return chat_result
