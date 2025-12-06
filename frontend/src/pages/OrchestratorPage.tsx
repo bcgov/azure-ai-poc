@@ -27,6 +27,7 @@ const OrchestratorPage: FC = () => {
   const [currentQuestion, setCurrentQuestion] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [lastFailedQuestion, setLastFailedQuestion] = useState<string | null>(null)
   const [healthStatus, setHealthStatus] = useState<OrchestratorHealthStatus | null>(null)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -51,13 +52,14 @@ const OrchestratorPage: FC = () => {
     }
   }, [messages])
 
-  const handleSubmit = async () => {
-    if (!currentQuestion.trim() || isLoading) return
+  const handleSubmit = async (overrideQuestion?: string) => {
+    const question = (overrideQuestion ?? currentQuestion).trim()
+    if (!question || isLoading) return
 
     const userMessage: ChatMessageType = {
       id: Date.now().toString(),
       type: 'user',
-      content: currentQuestion,
+      content: question,
     }
 
     const assistantMessageId = (Date.now() + 1).toString()
@@ -69,9 +71,10 @@ const OrchestratorPage: FC = () => {
     }
 
     setMessages((prev) => [...prev, userMessage, placeholderMessage])
-    const questionToSend = currentQuestion
+    const questionToSend = question
     setCurrentQuestion('')
     setError(null)
+    setLastFailedQuestion(null)
     setIsLoading(true)
 
     try {
@@ -98,10 +101,18 @@ const OrchestratorPage: FC = () => {
           ? err.message
           : 'Failed to process query. Please try again.'
       setError(errorMessage)
+      setLastFailedQuestion(questionToSend)
       // Remove placeholder message on error
       setMessages((prev) => prev.filter((msg) => msg.id !== assistantMessageId))
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const handleRetry = () => {
+    if (lastFailedQuestion) {
+      setCurrentQuestion(lastFailedQuestion)
+      void handleSubmit(lastFailedQuestion)
     }
   }
 
@@ -170,17 +181,36 @@ const OrchestratorPage: FC = () => {
                   <i className="bi bi-exclamation-triangle me-2"></i>
                   {error}
                 </span>
-                <button
-                  onClick={() => setError(null)}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    color: '#a40e26',
-                  }}
-                >
-                  <i className="bi bi-x-lg"></i>
-                </button>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  {lastFailedQuestion && (
+                    <button
+                      onClick={handleRetry}
+                      style={{
+                        background: '#a40e26',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: '0.375rem',
+                        padding: '0.35rem 0.75rem',
+                        cursor: 'pointer',
+                        fontSize: '0.85rem',
+                      }}
+                      disabled={isLoading}
+                    >
+                      Retry
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setError(null)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      color: '#a40e26',
+                    }}
+                  >
+                    <i className="bi bi-x-lg"></i>
+                  </button>
+                </div>
               </div>
             </div>
           )}

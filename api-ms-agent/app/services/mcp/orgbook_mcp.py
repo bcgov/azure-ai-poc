@@ -7,6 +7,7 @@ API Documentation: https://orgbook.gov.bc.ca/api/
 
 from typing import Any
 
+from app.config import settings
 from app.logger import get_logger
 from app.services.mcp.base import ConfidenceLevel, MCPTool, MCPToolResult, MCPWrapper
 
@@ -26,9 +27,12 @@ class OrgBookMCP(MCPWrapper):
     - Checking organization credentials and status
     """
 
-    def __init__(self):
+    def __init__(self, base_url: str | None = None):
         """Initialize the OrgBook MCP wrapper."""
-        super().__init__(base_url=ORGBOOK_BASE_URL)
+        configured_base = (
+            base_url or getattr(settings, "orgbook_base_url", None) or ORGBOOK_BASE_URL
+        )
+        super().__init__(base_url=configured_base)
         logger.info("OrgBookMCP initialized")
 
     @property
@@ -108,6 +112,13 @@ class OrgBookMCP(MCPWrapper):
     async def execute_tool(self, tool_name: str, arguments: dict[str, Any]) -> MCPToolResult:
         """Execute an OrgBook MCP tool."""
         logger.info(f"[OrgBookMCP] Executing tool: {tool_name}")
+
+        # Validate arguments according to declared schema
+        tool = self._get_tool_by_name(tool_name)
+        if tool:
+            ok, err = self.validate_arguments(tool, arguments)
+            if not ok:
+                return MCPToolResult(success=False, error=f"Invalid arguments: {err}")
 
         try:
             if tool_name == "orgbook_search":

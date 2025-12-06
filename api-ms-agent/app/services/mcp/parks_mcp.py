@@ -6,8 +6,10 @@ API Base: https://bcparks.api.gov.bc.ca/api
 """
 
 import re
+import time
 from typing import Any
 
+from app.config import settings
 from app.logger import get_logger
 from app.services.mcp.base import ConfidenceLevel, MCPTool, MCPToolResult, MCPWrapper
 
@@ -28,9 +30,12 @@ class ParksMCP(MCPWrapper):
     - Getting campsite/reservation information
     """
 
-    def __init__(self):
+    def __init__(self, base_url: str | None = None, cache_ttl_seconds: int = 3600):
         """Initialize the Parks MCP wrapper."""
-        super().__init__(base_url=PARKS_BASE_URL)
+        configured_base = base_url or getattr(settings, "parks_base_url", None) or PARKS_BASE_URL
+        super().__init__(base_url=configured_base)
+        self._cache_ttl_seconds = cache_ttl_seconds
+        self._parks_cache: dict[str, Any] = {"timestamp": 0, "parks": []}
         logger.info("ParksMCP initialized")
 
     @property
@@ -177,6 +182,13 @@ class ParksMCP(MCPWrapper):
         """Execute a Parks MCP tool."""
         logger.info(f"[ParksMCP] Executing tool: {tool_name}")
 
+        # Validate arguments
+        tool = self._get_tool_by_name(tool_name)
+        if tool:
+            ok, err = self.validate_arguments(tool, arguments)
+            if not ok:
+                return MCPToolResult(success=False, error=f"Invalid arguments: {err}")
+
         try:
             if tool_name == "parks_search":
                 return await self._search_parks(arguments)
@@ -218,25 +230,42 @@ class ParksMCP(MCPWrapper):
         page = 1
         max_pages = 15  # Safety limit
 
-        while page <= max_pages:
-            params = {
-                "pagination[page]": page,
-                "pagination[pageSize]": 100,
-            }
-            try:
-                data = await self._request("GET", endpoint, params=params)
-                parks = data.get("data", [])
-                meta = data.get("meta", {}).get("pagination", {})
+        now = time.time()
+        if (
+            self._parks_cache["parks"]
+            and now - self._parks_cache["timestamp"] < self._cache_ttl_seconds
+        ):
+            all_parks = self._parks_cache["parks"]
+            logger.debug(f"[ParksMCP] Using cached parks list ({len(all_parks)})")
+        else:
+            while page <= max_pages:
+                params = {
+                    "pagination[page]": page,
+                    "pagination[pageSize]": 100,
+                }
+                try:
+                    data = await self._request("GET", endpoint, params=params)
+                    parks = data.get("data", [])
+                    meta = data.get("meta", {}).get("pagination", {})
 
-                all_parks.extend(parks)
+                    all_parks.extend(parks)
 
-                # Check if we've fetched all pages
-                if page >= meta.get("pageCount", 1):
+                    # Check if we've fetched all pages
+                    if page >= meta.get("pageCount", 1):
+                        break
+                    page += 1
+                except Exception as e:
+                    logger.warning(f"[ParksMCP] Pagination error at page {page}: {e}")
                     break
-                page += 1
-            except Exception as e:
-                logger.warning(f"[ParksMCP] Pagination error at page {page}: {e}")
-                break
+
+            # Persist cache
+            try:
+                self._parks_cache["parks"] = all_parks
+                self._parks_cache["timestamp"] = now
+            except Exception:
+                # Fail silently; caching is optional
+                pass
+        # (Pagination fetched above, or from cache)
 
         logger.info(f"[ParksMCP] Fetched {len(all_parks)} total parks")
 

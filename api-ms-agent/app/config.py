@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     azure_document_intelligence_endpoint: str = ""
     azure_document_intelligence_key: str = ""  # Optional if using managed identity
 
+    # MCP base URLs for BC APIs (override defaults if needed)
+    geocoder_base_url: str = ""
+    orgbook_base_url: str = ""
+    parks_base_url: str = ""
+
     # Use managed identity for non-local environments
     # Local uses API keys, cloud environments use managed identity
     @property

@@ -56,7 +56,9 @@ class ChatResponse(BaseModel):
     response: str = Field(..., description="Assistant's response")
     session_id: str = Field(..., description="Session ID for the conversation")
     sources: list[SourceInfoResponse] = Field(
-        ..., description="Sources used to generate the response (REQUIRED for traceability)"
+        ...,
+        min_length=1,
+        description="Sources used to generate the response (REQUIRED for traceability)",
     )
     has_sufficient_info: bool = Field(
         default=True, description="Whether the AI had sufficient information to answer"
@@ -196,6 +198,12 @@ async def chat(
                         url=src.url,
                     )
                 )
+
+        if not sources:
+            raise HTTPException(
+                status_code=500,
+                detail="Citations are required but none were returned by the chat agent",
+            )
 
         # Save assistant response to Cosmos DB
         all_sources = (

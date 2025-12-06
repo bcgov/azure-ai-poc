@@ -17,6 +17,7 @@ dependencies = [
     "python-jose[cryptography]>=3.5.0",
     "structlog>=25.5.0",
     "uvicorn>=0.38.0",
+    "psutil>=6.0.0",
 ]
 
 [dependency-groups]
