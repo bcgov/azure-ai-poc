@@ -317,11 +317,12 @@ DOCUMENT:
         )
 
         agent = ChatAgent(
+            name="Chat Agent",
             chat_client=chat_client,
             instructions=instructions,
             tools=CHAT_TOOLS,
             temperature=settings.llm_temperature,
-            max_tokens=settings.llm_max_output_tokens
+            max_tokens=settings.llm_max_output_tokens,
         )
 
         logger.debug(f"ChatAgent created with {len(CHAT_TOOLS)} tools")
