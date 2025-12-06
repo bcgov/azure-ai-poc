@@ -10,11 +10,17 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as TenantsRouteImport } from './routes/tenants'
+import { Route as BcDataQueryRouteImport } from './routes/bc-data-query'
 import { Route as IndexRouteImport } from './routes/index'
 
 const TenantsRoute = TenantsRouteImport.update({
   id: '/tenants',
   path: '/tenants',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BcDataQueryRoute = BcDataQueryRouteImport.update({
+  id: '/bc-data-query',
+  path: '/bc-data-query',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -25,27 +31,31 @@ const IndexRoute = IndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/bc-data-query': typeof BcDataQueryRoute
   '/tenants': typeof TenantsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/bc-data-query': typeof BcDataQueryRoute
   '/tenants': typeof TenantsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/bc-data-query': typeof BcDataQueryRoute
   '/tenants': typeof TenantsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/tenants'
+  fullPaths: '/' | '/bc-data-query' | '/tenants'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/tenants'
-  id: '__root__' | '/' | '/tenants'
+  to: '/' | '/bc-data-query' | '/tenants'
+  id: '__root__' | '/' | '/bc-data-query' | '/tenants'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  BcDataQueryRoute: typeof BcDataQueryRoute
   TenantsRoute: typeof TenantsRoute
 }
 
@@ -56,6 +66,13 @@ declare module '@tanstack/react-router' {
       path: '/tenants'
       fullPath: '/tenants'
       preLoaderRoute: typeof TenantsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/bc-data-query': {
+      id: '/bc-data-query'
+      path: '/bc-data-query'
+      fullPath: '/bc-data-query'
+      preLoaderRoute: typeof BcDataQueryRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -70,6 +87,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  BcDataQueryRoute: BcDataQueryRoute,
   TenantsRoute: TenantsRoute,
 }
 export const routeTree = rootRouteImport

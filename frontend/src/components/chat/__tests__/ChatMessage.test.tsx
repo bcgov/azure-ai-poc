@@ -181,4 +181,142 @@ describe('ChatMessage', () => {
     const timestamp = screen.getByText(/10:30/)
     expect(timestamp).toBeInTheDocument()
   })
+
+  describe('Source Attribution', () => {
+    const sourcesProps = {
+      ...defaultProps,
+      type: 'assistant' as const,
+      sources: [
+        {
+          source_type: 'llm_knowledge',
+          description: 'Based on general training data',
+          confidence: 'high',
+          url: null,
+        },
+        {
+          source_type: 'document',
+          description: 'From uploaded document',
+          confidence: 'medium',
+          url: 'https://example.com/doc',
+        },
+      ],
+    }
+
+    it('should render sources section for assistant messages with sources', () => {
+      render(<ChatMessage {...sourcesProps} />)
+      
+      expect(screen.getByText(/Sources \(2\)/)).toBeInTheDocument()
+    })
+
+    it('should display source type badges', () => {
+      render(<ChatMessage {...sourcesProps} />)
+      
+      expect(screen.getByText(/llm knowledge/i)).toBeInTheDocument()
+      expect(screen.getByText(/document/i)).toBeInTheDocument()
+    })
+
+    it('should not render sources section for user messages', () => {
+      render(
+        <ChatMessage
+          {...sourcesProps}
+          type="user"
+        />
+      )
+      
+      expect(screen.queryByText(/Sources/)).not.toBeInTheDocument()
+    })
+
+    it('should not render sources section when no sources provided', () => {
+      render(<ChatMessage {...defaultProps} type="assistant" />)
+      
+      expect(screen.queryByText(/Sources/)).not.toBeInTheDocument()
+    })
+
+    it('should not render sources section when sources array is empty', () => {
+      render(<ChatMessage {...defaultProps} type="assistant" sources={[]} />)
+      
+      expect(screen.queryByText(/Sources/)).not.toBeInTheDocument()
+    })
+
+    it('should render insufficient info warning when hasSufficientInfo is false', () => {
+      render(
+        <ChatMessage
+          {...defaultProps}
+          type="assistant"
+          hasSufficientInfo={false}
+        />
+      )
+      
+      expect(screen.getByText(/Limited information available/)).toBeInTheDocument()
+    })
+
+    it('should not render insufficient info warning when hasSufficientInfo is true', () => {
+      render(
+        <ChatMessage
+          {...defaultProps}
+          type="assistant"
+          hasSufficientInfo={true}
+        />
+      )
+      
+      expect(screen.queryByText(/Limited information available/)).not.toBeInTheDocument()
+    })
+
+    it('should apply correct badge color for high confidence', () => {
+      const { container } = render(
+        <ChatMessage
+          {...defaultProps}
+          type="assistant"
+          sources={[
+            {
+              source_type: 'llm_knowledge',
+              description: 'Test',
+              confidence: 'high',
+            },
+          ]}
+        />
+      )
+      
+      const badge = container.querySelector('.badge.bg-success')
+      expect(badge).toBeInTheDocument()
+    })
+
+    it('should apply correct badge color for medium confidence', () => {
+      const { container } = render(
+        <ChatMessage
+          {...defaultProps}
+          type="assistant"
+          sources={[
+            {
+              source_type: 'document',
+              description: 'Test',
+              confidence: 'medium',
+            },
+          ]}
+        />
+      )
+      
+      const badge = container.querySelector('.badge.bg-warning')
+      expect(badge).toBeInTheDocument()
+    })
+
+    it('should apply correct badge color for low confidence', () => {
+      const { container } = render(
+        <ChatMessage
+          {...defaultProps}
+          type="assistant"
+          sources={[
+            {
+              source_type: 'web',
+              description: 'Test',
+              confidence: 'low',
+            },
+          ]}
+        />
+      )
+      
+      const badge = container.querySelector('.badge.bg-danger')
+      expect(badge).toBeInTheDocument()
+    })
+  })
 })

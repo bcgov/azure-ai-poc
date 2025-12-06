@@ -59,12 +59,12 @@ const DocumentUploadModal: FC<DocumentUploadModalProps> = ({
             <Form.Control
               type="file"
               ref={fileInputRef}
-              accept=".pdf,.md,.html,.htm"
+              accept=".pdf,.md,.html,.htm,.txt,.docx,.doc,.xlsx,.xls,.pptx,.ppt,.jpg,.jpeg,.png,.bmp,.tiff,.tif"
               disabled={isUploading}
               onChange={handleFileChange}
             />
             <Form.Text className="text-muted">
-              Supported formats: PDF, Markdown (.md), HTML
+              Supported: PDF, Word, Excel, PowerPoint, HTML, Markdown, TXT, Images
             </Form.Text>
           </Form.Group>
 

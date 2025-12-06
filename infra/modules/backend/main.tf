@@ -26,7 +26,7 @@ resource "azurerm_linux_web_app" "backend" {
     always_on                               = true
     container_registry_use_managed_identity = true
     minimum_tls_version                     = "1.3"
-    health_check_path                       = "/api/v1/health/"
+    health_check_path                       = "/health"
     health_check_eviction_time_in_min       = 2
     application_stack {
       docker_image_name   = var.api_image
@@ -60,7 +60,7 @@ resource "azurerm_linux_web_app" "backend" {
   app_settings = {
     ENVIRONMENT                           = var.node_env
     PORT                                  = "80"
-    WEBSITES_PORT                         = "3000"
+    WEBSITES_PORT                         = "80"
     DOCKER_ENABLE_CI                      = "true"
     APPLICATIONINSIGHTS_CONNECTION_STRING = var.appinsights_connection_string
     APPINSIGHTS_INSTRUMENTATIONKEY        = var.appinsights_instrumentation_key
@@ -69,14 +69,18 @@ resource "azurerm_linux_web_app" "backend" {
     WEBSITE_ENABLE_SYNC_UPDATE_SITE       = "1"
     IMAGE_TAG                             = var.image_tag
     # Azure OpenAI Configuration
-    AZURE_OPENAI_LLM_DEPLOYMENT_NAME       = var.azure_openai_deployment_name
+    AZURE_OPENAI_DEPLOYMENT                = var.azure_openai_deployment_name
+    AZURE_OPENAI_API_VERSION               = "2024-12-01-preview"
     AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME = var.azure_openai_embedding_deployment
     AZURE_OPENAI_LLM_ENDPOINT              = var.azure_openai_llm_endpoint
+    AZURE_OPENAI_ENDPOINT                  = var.azure_openai_llm_endpoint
     AZURE_OPENAI_EMBEDDING_ENDPOINT        = var.azure_openai_embedding_endpoint
     AZURE_OPENAI_API_KEY                   = var.azure_openai_api_key
     # Azure AI Search Configuration
     AZURE_SEARCH_ENDPOINT   = var.azure_search_endpoint
     AZURE_SEARCH_INDEX_NAME = var.azure_search_index_name
+    # Azure Document Intelligence Configuration
+    AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT = var.azure_document_intelligence_endpoint
     # CosmosDB Configuration (kept for backward compatibility)
     COSMOS_DB_ENDPOINT               = var.cosmosdb_endpoint
     COSMOS_DB_DATABASE_NAME          = var.cosmosdb_db_name

@@ -6,6 +6,9 @@ import { RouterProvider, createRouter } from '@tanstack/react-router'
 // Import bootstrap styles
 import '@/scss/styles.scss'
 
+// Import BC Gov themed chat styles (applies global color overrides)
+import '@/styles/chat.css'
+
 // Import the generated route tree
 import { routeTree } from './routeTree.gen'
 import { useAuthStore } from './stores'

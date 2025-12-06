@@ -25,8 +25,8 @@ const Dashboard: FC = () => {
                 style={{ 
                   fontWeight: '600',
                   borderRadius: '0.75rem',
-                  boxShadow: activeView === 'chat' ? '0 0.125rem 0.375rem rgba(13, 110, 253, 0.25)' : '0 0.0625rem 0.1875rem rgba(0, 0, 0, 0.08)',
-                  border: activeView === 'chat' ? 'none' : '0.125rem solid #0d6efd'
+                  boxShadow: activeView === 'chat' ? '0 0.125rem 0.375rem rgba(0, 51, 102, 0.25)' : '0 0.0625rem 0.1875rem rgba(0, 0, 0, 0.08)',
+                  border: activeView === 'chat' ? 'none' : '0.125rem solid #003366'
                 }}
               >
                 <i className="bi bi-chat-dots me-2"></i>
@@ -42,8 +42,8 @@ const Dashboard: FC = () => {
                   style={{ 
                     fontWeight: '600',
                     borderRadius: '0.75rem',
-                    boxShadow: activeView === 'tenants' ? '0 0.125rem 0.375rem rgba(13, 110, 253, 0.25)' : '0 0.0625rem 0.1875rem rgba(0, 0, 0, 0.08)',
-                    border: activeView === 'tenants' ? 'none' : '0.125rem solid #0d6efd'
+                    boxShadow: activeView === 'tenants' ? '0 0.125rem 0.375rem rgba(0, 51, 102, 0.25)' : '0 0.0625rem 0.1875rem rgba(0, 0, 0, 0.08)',
+                    border: activeView === 'tenants' ? 'none' : '0.125rem solid #003366'
                   }}
                 >
                   <i className="bi bi-building me-2"></i>

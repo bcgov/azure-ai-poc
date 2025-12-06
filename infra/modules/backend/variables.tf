@@ -187,3 +187,10 @@ variable "keycloak_url" {
   nullable    = false
 }
 
+# Azure Document Intelligence Configuration
+variable "azure_document_intelligence_endpoint" {
+  description = "The endpoint for the Azure Document Intelligence service."
+  type        = string
+  nullable    = false
+}
+

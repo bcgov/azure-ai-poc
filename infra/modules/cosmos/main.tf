@@ -78,14 +78,16 @@ resource "azurerm_cosmosdb_sql_database" "cosmosdb_sql_db" {
   }
 }
 
+# Main container for chat history, sessions, and document metadata
+# Note: Vector embeddings are stored in Azure AI Search, not Cosmos DB
 resource "azurerm_cosmosdb_sql_container" "cosmosdb_sql_db_container" {
   name                = var.cosmosdb_sql_database_container_name
   resource_group_name = var.resource_group_name
   account_name        = azurerm_cosmosdb_account.cosmosdb_sql.name
   database_name       = azurerm_cosmosdb_sql_database.cosmosdb_sql_db.name
-  partition_key_paths = ["/partitionKey"]
+  partition_key_paths = ["/user_id"]
 
-  # Optimized indexing policy for document storage with embeddings
+  # Optimized indexing policy for chat, metadata, and workflow storage
   indexing_policy {
     indexing_mode = "consistent"
 
@@ -93,14 +95,10 @@ resource "azurerm_cosmosdb_sql_container" "cosmosdb_sql_db_container" {
       path = "/*"
     }
 
-    excluded_path {
-      path = "/embedding/?"
-    }
-
-    # Composite index for partitionKey + type queries (optimizes getAllDocuments performance)
+    # Composite index for user_id + type queries (optimizes session/document listing)
     composite_index {
       index {
-        path  = "/partitionKey"
+        path  = "/user_id"
         order = "ascending"
       }
       index {
@@ -109,26 +107,76 @@ resource "azurerm_cosmosdb_sql_container" "cosmosdb_sql_db_container" {
       }
     }
 
-    # Composite index for documentId + partitionKey + type queries (optimizes chunk retrieval)
+    # Composite index for session queries with timestamp ordering
     composite_index {
       index {
-        path  = "/documentId"
+        path  = "/session_id"
         order = "ascending"
       }
       index {
-        path  = "/partitionKey"
+        path  = "/timestamp"
         order = "ascending"
+      }
+    }
+
+    # Index for last_updated for session sorting
+    composite_index {
+      index {
+        path  = "/last_updated"
+        order = "descending"
       }
       index {
         path  = "/type"
         order = "ascending"
       }
     }
+  }
+}
 
-    # Index for uploadedAt for sorting (optional but recommended for admin queries)
+# Workflows container for Microsoft Agent Framework distributed workflow persistence
+resource "azurerm_cosmosdb_sql_container" "workflows_container" {
+  name                = "workflows"
+  resource_group_name = var.resource_group_name
+  account_name        = azurerm_cosmosdb_account.cosmosdb_sql.name
+  database_name       = azurerm_cosmosdb_sql_database.cosmosdb_sql_db.name
+  partition_key_paths = ["/user_id"]
+
+  # Indexing policy for workflow state queries
+  indexing_policy {
+    indexing_mode = "consistent"
+
+    included_path {
+      path = "/*"
+    }
+
+    # Composite index for user workflow listing with status filter
     composite_index {
       index {
-        path  = "/uploadedAt"
+        path  = "/user_id"
+        order = "ascending"
+      }
+      index {
+        path  = "/status"
+        order = "ascending"
+      }
+    }
+
+    # Composite index for workflow type filtering
+    composite_index {
+      index {
+        path  = "/user_id"
+        order = "ascending"
+      }
+      index {
+        path  = "/workflow_type"
+        order = "ascending"
+      }
+    }
+
+    # Index for updated_at for workflow sorting
+    composite_index {
+      index {
+        path  = "/updated_at"
         order = "descending"
       }
       index {

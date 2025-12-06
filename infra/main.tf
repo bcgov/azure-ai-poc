@@ -115,28 +115,31 @@ module "document_intelligence" {
 module "frontend" {
   source = "./modules/frontend"
 
-  app_env                              = var.app_env
-  app_name                             = var.app_name
-  app_service_sku_name_frontend        = var.app_service_sku_name_frontend
-  appinsights_connection_string        = module.monitoring.appinsights_connection_string
-  appinsights_instrumentation_key      = module.monitoring.appinsights_instrumentation_key
-  common_tags                          = var.common_tags
-  frontend_image                       = var.frontend_image
-  frontend_subnet_id                   = module.network.app_service_subnet_id
-  location                             = var.location
-  log_analytics_workspace_id           = module.monitoring.log_analytics_workspace_id
-  repo_name                            = var.repo_name
-  resource_group_name                  = azurerm_resource_group.main.name
-  azure_cosmos_endpoint                = module.cosmos.cosmosdb_endpoint
-  azure_cosmos_host                    = module.cosmos.cosmosdb_host
+  app_env                         = var.app_env
+  app_name                        = var.app_name
+  app_service_sku_name_frontend   = var.app_service_sku_name_frontend
+  app_service_sku_name_proxy      = var.app_service_sku_name_proxy
+  appinsights_connection_string   = module.monitoring.appinsights_connection_string
+  appinsights_instrumentation_key = module.monitoring.appinsights_instrumentation_key
+  common_tags                     = var.common_tags
+  frontend_image                  = var.frontend_image
+  frontend_subnet_id              = module.network.app_service_subnet_id
+  location                        = var.location
+  log_analytics_workspace_id      = module.monitoring.log_analytics_workspace_id
+  repo_name                       = var.repo_name
+  resource_group_name             = azurerm_resource_group.main.name
+  azure_cosmos_endpoint           = module.cosmos.cosmosdb_endpoint
+  azure_cosmos_host               = module.cosmos.cosmosdb_host
+  # Document Intelligence module
   azure_document_intelligence_endpoint = module.document_intelligence.endpoint
   azure_document_intelligence_host     = module.document_intelligence.host
   azure_openai_endpoint                = module.azure_openai.openai_endpoint
   azure_openai_host                    = module.azure_openai.openai_host
-  azure_search_endpoint                = module.azure_ai_search.search_service_url
-  azure_search_host                    = module.azure_ai_search.search_service_host
+  # Azure AI Search
+  azure_search_endpoint = module.azure_ai_search.search_service_url
+  azure_search_host     = module.azure_ai_search.search_service_host
 
-  depends_on = [module.monitoring, module.network]
+  depends_on = [module.monitoring, module.network, module.azure_ai_search]
 }
 
 module "backend" {
@@ -166,6 +169,8 @@ module "backend" {
   # Azure AI Search
   azure_search_endpoint   = module.azure_ai_search.search_service_url
   azure_search_index_name = var.azure_search_index_name
+  # Azure Document Intelligence
+  azure_document_intelligence_endpoint = module.document_intelligence.endpoint
   # CosmosDB
   cosmosdb_endpoint       = module.cosmos.cosmosdb_endpoint
   cosmosdb_db_name        = module.cosmos.cosmosdb_sql_database_name
@@ -173,7 +178,7 @@ module "backend" {
 
   #keycloak
   keycloak_url = var.keycloak_url
-  depends_on   = [module.frontend, module.azure_openai, module.azure_ai_search]
+  depends_on   = [module.frontend, module.azure_openai]
 }
 
 

@@ -79,6 +79,12 @@ variable "app_service_sku_name_frontend" {
   type        = string
   nullable    = false
 }
+
+variable "app_service_sku_name_proxy" {
+  description = "The SKU name for the frontend proxy App Service plan."
+  type        = string
+  nullable    = false
+}
 variable "azure_cosmos_endpoint" {
   description = "The Azure Cosmos DB endpoint URL."
   type        = string

@@ -12,6 +12,19 @@ resource "azurerm_service_plan" "frontend" {
   }
 }
 
+# App Service Plan for frontend proxy application
+resource "azurerm_service_plan" "frontend_proxy" {
+  name                = "${var.app_name}-proxy-asp"
+  resource_group_name = var.resource_group_name
+  location            = var.location
+  os_type             = "Linux"
+  sku_name            = var.app_service_sku_name_proxy
+  tags                = var.common_tags
+  lifecycle {
+    ignore_changes = [tags]
+  }
+}
+
 # App Service for Frontend with container
 resource "azurerm_linux_web_app" "frontend" {
   name                      = "${var.repo_name}-${var.app_env}-frontend"
@@ -73,7 +86,7 @@ resource "azurerm_linux_web_app" "frontend_proxy" {
   name                      = "${var.repo_name}-${var.app_env}-proxy"
   resource_group_name       = var.resource_group_name
   location                  = var.location
-  service_plan_id           = azurerm_service_plan.frontend.id
+  service_plan_id           = azurerm_service_plan.frontend_proxy.id
   virtual_network_subnet_id = var.frontend_subnet_id
   https_only                = true
   identity {
@@ -86,7 +99,7 @@ resource "azurerm_linux_web_app" "frontend_proxy" {
     health_check_path                       = "/healthz"
     health_check_eviction_time_in_min       = 2
     application_stack {
-      docker_image_name   = "ghcr.io/bcgov/nr-containers/proxy/caddy:2-alpine"
+      docker_image_name   = "ghcr.io/bcgov/nr-containers/proxy:2-alpine"
       docker_registry_url = var.container_registry_url
     }
     ftps_state = "Disabled"

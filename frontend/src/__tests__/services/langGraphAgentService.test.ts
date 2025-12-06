@@ -10,9 +10,7 @@ vi.stubGlobal('import', {
   },
 })
 
-// Mock fetch
-const mockFetch = vi.fn()
-vi.stubGlobal('fetch', mockFetch)
+import httpClient from '@/services/httpClient'
 
 // Mock auth store
 const mockAuthStore = {
@@ -35,6 +33,8 @@ describe('LangGraphAgentService', () => {
     vi.clearAllMocks()
     // Mock environment variable
     vi.stubEnv('VITE_API_URL', 'http://test-api.local')
+    vi.spyOn(httpClient, 'post').mockResolvedValue({ data: {} } as any)
+    vi.spyOn(httpClient, 'get').mockResolvedValue({ data: {} } as any)
   })
 
   afterEach(() => {
@@ -53,10 +53,7 @@ describe('LangGraphAgentService', () => {
         },
       }
 
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockResponse,
-      })
+      ;(httpClient.post as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ data: mockResponse })
 
       const request: LangGraphAgentRequest = {
         message: 'Test message',
@@ -68,14 +65,7 @@ describe('LangGraphAgentService', () => {
 
       expect(result.success).toBe(true)
       expect(result.data).toEqual(mockResponse)
-      expect(mockFetch).toHaveBeenCalledWith('/api/v1/chat/ask', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: 'Bearer mock-token',
-        },
-        body: JSON.stringify(request),
-      })
+      expect(httpClient.post).toHaveBeenCalledWith('/api/v1/chat/ask', expect.objectContaining(request))
     })
 
     it('should handle API errors', async () => {
@@ -83,11 +73,7 @@ describe('LangGraphAgentService', () => {
         detail: 'Invalid request',
       }
 
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 400,
-        json: async () => errorResponse,
-      })
+      ;(httpClient.post as ReturnType<typeof vi.fn>).mockRejectedValueOnce({ response: { data: errorResponse, status: 400 } })
 
       const request: LangGraphAgentRequest = {
         message: 'Test message',
@@ -100,7 +86,7 @@ describe('LangGraphAgentService', () => {
     })
 
     it('should handle network errors', async () => {
-      mockFetch.mockRejectedValueOnce(new Error('Network error'))
+      ;(httpClient.post as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('Network error'))
 
       const request: LangGraphAgentRequest = {
         message: 'Test message',
@@ -120,10 +106,7 @@ describe('LangGraphAgentService', () => {
         session_id: 'test-session',
       }
 
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockResponse,
-      })
+      ;(httpClient.post as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ data: mockResponse })
 
       const chunks: string[] = []
       const errors: string[] = []
@@ -162,10 +145,7 @@ describe('LangGraphAgentService', () => {
         ],
       }
 
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockCapabilities,
-      })
+      ;(httpClient.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ data: mockCapabilities })
 
       const result = await langGraphAgentService.getCapabilities()
 
@@ -174,10 +154,7 @@ describe('LangGraphAgentService', () => {
     })
 
     it('should return fallback capabilities when endpoint fails', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 404,
-      })
+      ;(httpClient.get as ReturnType<typeof vi.fn>).mockRejectedValueOnce({ response: { status: 404 } })
 
       const result = await langGraphAgentService.getCapabilities()
 

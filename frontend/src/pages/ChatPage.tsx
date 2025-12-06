@@ -1,33 +1,37 @@
 import apiService from '@/service/api-service'
-import { langGraphAgentService } from '@/services/langGraphAgentService'
+import { chatAgentService, type ChatMessage as ChatAgentMessage } from '@/services/chatAgentService'
+import { documentService } from '@/services/documentService'
 import type { FC } from 'react'
 import { useEffect, useRef, useState } from 'react'
-import { Alert, Button, Col, Container, Row } from 'react-bootstrap'
 import {
-  ChatMessage,
-  ChatInput,
-  DocumentList,
+  Message,
+  Input,
   DocumentUploadModal,
   DocumentDeleteConfirm,
-  ChatEmptyState,
+  CombinedSidebar,
   type Document,
 } from '@/components/chat'
+import type { SourceInfo } from '@/services/chatAgentService'
+import '@/styles/chat.css'
 
 interface ChatMessageType {
   id: string
   type: 'user' | 'assistant'
   content: string
-  timestamp: Date
-  documentId?: string
+  sources?: SourceInfo[]
+  hasSufficientInfo?: boolean
+  isStreaming?: boolean
+  isResearchPhase?: boolean
+  researchPhase?: string
 }
 
 const ChatPage: FC = () => {
   const [messages, setMessages] = useState<ChatMessageType[]>([])
+  const [sessionId, setSessionId] = useState<string>(`session_${Date.now()}`)
   const [currentQuestion, setCurrentQuestion] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [isStreaming, setIsStreaming] = useState(false)
-  const [streamingEnabled, setStreamingEnabled] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [lastFailedQuestion, setLastFailedQuestion] = useState<string | null>(null)
   const [documents, setDocuments] = useState<Document[]>([])
   const [selectedDocument, setSelectedDocument] = useState<string | null>(null)
   const [showUploadModal, setShowUploadModal] = useState(false)
@@ -36,16 +40,15 @@ const ChatPage: FC = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [documentToDelete, setDocumentToDelete] = useState<Document | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
-  const [isLoadingDocuments, setIsLoadingDocuments] = useState(true)
   const [pendingDocumentSelection, setPendingDocumentSelection] = useState<string | null>(null)
+  const [sessionRefreshTrigger, setSessionRefreshTrigger] = useState(0)
+  const [deepResearchEnabled, setDeepResearchEnabled] = useState(false)
+  const [deepResearchRunId, setDeepResearchRunId] = useState<string | null>(null)
+  const [isLoadingDocuments, setIsLoadingDocuments] = useState(false)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const messagesContainerRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const previousMessageCount = useRef(0)
-  const shouldAutoScrollOnNewMessage = useRef(true)
 
-  // Helper function to get appropriate icon for file type
   const getFileIcon = (filename: string): string => {
     const extension = filename.toLowerCase().split('.').pop() || ''
     switch (extension) {
@@ -65,12 +68,13 @@ const ChatPage: FC = () => {
   const loadDocuments = async () => {
     setIsLoadingDocuments(true)
     try {
-      const response = await apiService.getAxiosInstance().get('/api/v1/documents')
-      setDocuments(response.data)
-      return response.data
+      const result = await documentService.listDocuments()
+      if (result.success && result.data) {
+        // Use documents directly - they are already DocumentItem type
+        setDocuments(result.data.documents)
+      }
     } catch (err: any) {
       console.error('Error loading documents:', err)
-      return []
     } finally {
       setIsLoadingDocuments(false)
     }
@@ -79,6 +83,13 @@ const ChatPage: FC = () => {
   useEffect(() => {
     loadDocuments()
   }, [])
+
+  // Auto-scroll to bottom when messages change
+  useEffect(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [messages])
 
   useEffect(() => {
     if (
@@ -89,27 +100,6 @@ const ChatPage: FC = () => {
       setPendingDocumentSelection(null)
     }
   }, [documents, pendingDocumentSelection])
-
-  useEffect(() => {
-    if (messages.length > previousMessageCount.current && shouldAutoScrollOnNewMessage.current) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-    }
-    previousMessageCount.current = messages.length
-  }, [messages])
-
-  useEffect(() => {
-    const container = messagesContainerRef.current
-    if (!container) return
-
-    const handleScroll = () => {
-      const { scrollTop, scrollHeight, clientHeight } = container
-      const distanceFromBottom = scrollHeight - (scrollTop + clientHeight)
-      shouldAutoScrollOnNewMessage.current = distanceFromBottom < 100
-    }
-
-    container.addEventListener('scroll', handleScroll)
-    return () => container.removeEventListener('scroll', handleScroll)
-  }, [])
 
   const handleUploadDocument = async (file: File) => {
     setIsUploading(true)
@@ -134,9 +124,10 @@ const ChatPage: FC = () => {
 
       const newDocument: Document = {
         id: response.data.id,
-        filename: response.data.filename || file.name,
-        uploadedAt: response.data.uploadedAt || new Date().toISOString(),
-        totalPages: response.data.totalPages,
+        document_id: response.data.document_id || response.data.id,
+        title: response.data.title || response.data.filename || file.name,
+        created_at: response.data.created_at || new Date().toISOString(),
+        chunk_count: response.data.chunk_count || 0,
       }
 
       setDocuments((prev) => [...prev, newDocument])
@@ -147,8 +138,6 @@ const ChatPage: FC = () => {
         id: Date.now().toString(),
         type: 'assistant',
         content: `Document "${file.name}" uploaded successfully! You can now ask questions about this document.`,
-        timestamp: new Date(),
-        documentId: response.data.id,
       }
       setMessages((prev) => [...prev, successMessage])
 
@@ -175,7 +164,10 @@ const ChatPage: FC = () => {
     setError(null)
 
     try {
-      await apiService.getAxiosInstance().delete(`/api/v1/documents/${documentToDelete.id}`)
+      const result = await documentService.deleteDocument(documentToDelete.id)
+      if (!result.success) {
+        throw new Error(result.error || 'Delete failed')
+      }
 
       setDocuments((prev) => prev.filter((doc) => doc.id !== documentToDelete.id))
 
@@ -186,8 +178,7 @@ const ChatPage: FC = () => {
       const successMessage: ChatMessageType = {
         id: Date.now().toString(),
         type: 'assistant',
-        content: `Document "${documentToDelete.filename}" has been deleted successfully.`,
-        timestamp: new Date(),
+        content: `Document "${documentToDelete.title}" has been deleted successfully.`,
       }
       setMessages((prev) => [...prev, successMessage])
 
@@ -206,39 +197,51 @@ const ChatPage: FC = () => {
     setDocumentToDelete(null)
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!currentQuestion.trim() || isLoading || documents.length === 0) return
+  const handleSubmit = async (overrideQuestion?: string) => {
+    const question = (overrideQuestion ?? currentQuestion).trim()
+    if (!question || isLoading) return
 
     const userMessage: ChatMessageType = {
       id: Date.now().toString(),
       type: 'user',
-      content: currentQuestion,
-      timestamp: new Date(),
-      documentId: selectedDocument || undefined,
+      content: question,
     }
 
-    setMessages((prev) => [...prev, userMessage])
+    const assistantMessageId = (Date.now() + 1).toString()
+    const placeholderMessage: ChatMessageType = {
+      id: assistantMessageId,
+      type: 'assistant',
+      content: '',
+      isStreaming: true,
+      isResearchPhase: deepResearchEnabled,
+      researchPhase: deepResearchEnabled ? 'Starting research...' : undefined,
+    }
+
+    setMessages((prev) => [...prev, userMessage, placeholderMessage])
+    const questionToSend = question
     setCurrentQuestion('')
     setError(null)
+    setLastFailedQuestion(null)
+    setIsLoading(true)
 
-    if (streamingEnabled) {
-      setIsStreaming(true)
-      const assistantMessageId = (Date.now() + 1).toString()
-      const placeholderMessage: ChatMessageType = {
-        id: assistantMessageId,
-        type: 'assistant',
-        content: '',
-        timestamp: new Date(),
-        documentId: selectedDocument || undefined,
-      }
-      setMessages((prev) => [...prev, placeholderMessage])
+    // Build chat history
+    const chatHistory: ChatAgentMessage[] = messages.map((msg) => ({
+      role: msg.type === 'user' ? 'user' : 'assistant',
+      content: msg.content,
+    }))
 
-      try {
+    try {
+      if (deepResearchEnabled) {
+        // Deep Research Mode - pass document_id if selected
+        await handleDeepResearch(questionToSend, assistantMessageId, chatHistory)
+      } else {
+        // Regular chat mode - pass document_id if selected
         const onChunk = (chunk: string) => {
           setMessages((prev) =>
             prev.map((msg) =>
-              msg.id === assistantMessageId ? { ...msg, content: chunk } : msg,
+              msg.id === assistantMessageId 
+                ? { ...msg, content: chunk, isStreaming: true } 
+                : msg,
             ),
           )
         }
@@ -248,164 +251,323 @@ const ChatPage: FC = () => {
           setMessages((prev) => prev.filter((msg) => msg.id !== assistantMessageId))
         }
 
-        await langGraphAgentService.streamDocumentQuery(
-          currentQuestion,
-          selectedDocument ? [selectedDocument] : undefined,
-          `session_${Date.now()}`,
+        const streamResult = await chatAgentService.streamMessage(
+          questionToSend,
+          sessionId,
+          chatHistory,
           onChunk,
           onError,
-        )
-      } catch (err: any) {
-        console.error('LangGraph streaming error:', err)
-        setError(err.message || 'Failed to stream response. Please try again.')
-        setMessages((prev) => prev.filter((msg) => msg.id !== assistantMessageId))
-      } finally {
-        setIsStreaming(false)
-      }
-    } else {
-      setIsLoading(true)
-      try {
-        const result = await langGraphAgentService.queryDocuments(
-          currentQuestion,
-          selectedDocument ? [selectedDocument] : undefined,
-          `session_${Date.now()}`,
-          selectedDocument ? `Document: ${selectedDocumentName}` : undefined,
+          selectedDocument || undefined, // Pass document ID for RAG
         )
 
-        let assistantContent = ''
-        if (result.success && result.data) {
-          assistantContent = result.data.answer
+        // Update message with sources after streaming completes
+        if (streamResult) {
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === assistantMessageId
+                ? {
+                    ...msg,
+                    sources: streamResult.sources,
+                    hasSufficientInfo: streamResult.hasSufficientInfo,
+                    isStreaming: false,
+                  }
+                : msg,
+            ),
+          )
+          if (streamResult.sessionId) {
+            setSessionId(streamResult.sessionId)
+          }
+          // Trigger sidebar refresh after successful message
+          setSessionRefreshTrigger((prev) => prev + 1)
         } else {
-          throw new Error(result.error || 'Failed to get response from LangGraph agent')
+          // Remove streaming flag even if no result
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === assistantMessageId
+                ? { ...msg, isStreaming: false }
+                : msg,
+            ),
+          )
         }
-
-        const assistantMessage: ChatMessageType = {
-          id: (Date.now() + 1).toString(),
-          type: 'assistant',
-          content: assistantContent,
-          timestamp: new Date(),
-          documentId: selectedDocument || undefined,
-        }
-
-        setMessages((prev) => [...prev, assistantMessage])
-      } catch (err: any) {
-        console.error('LangGraph API error:', err)
-        setError(err.message || 'Failed to get response. Please try again.')
-      } finally {
-        setIsLoading(false)
       }
+    } catch (err: any) {
+      console.error('Chat error:', err)
+      setError(err.message || 'Failed to get response. Please try again.')
+      setLastFailedQuestion(questionToSend)
+      setMessages((prev) => prev.filter((msg) => msg.id !== assistantMessageId))
+    } finally {
+      setIsLoading(false)
     }
   }
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSubmit(e as any)
+  const handleRetry = () => {
+    if (lastFailedQuestion) {
+      setCurrentQuestion(lastFailedQuestion)
+      void handleSubmit(lastFailedQuestion)
     }
   }
 
-  const selectedDocumentName = selectedDocument
-    ? documents.find((doc) => doc.id === selectedDocument)?.filename ?? null
-    : null
+  const handleDeepResearch = async (
+    question: string,
+    messageId: string,
+    chatHistory: ChatAgentMessage[],
+  ) => {
+    try {
+      // Start the deep research - pass document_id if selected for thorough scanning
+      const startResult = await chatAgentService.startDeepResearch(
+        question,
+        undefined, // userId handled by backend auth
+        selectedDocument || undefined, // Pass document ID for document-based research
+      )
+      
+      if (!startResult.success || !startResult.data?.run_id) {
+        throw new Error(startResult.error || 'Failed to start deep research')
+      }
+      
+      setDeepResearchRunId(startResult.data.run_id)
+      
+      // Update message with initial status - indicate if document is being scanned
+      const statusMessage = selectedDocument 
+        ? '🔬 **Deep Research Started**\n\n📄 Scanning document thoroughly...'
+        : '🔬 **Deep Research Started**\n\nPlanning research strategy...'
+      
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === messageId
+            ? { 
+                ...msg, 
+                content: statusMessage, 
+                researchPhase: selectedDocument ? 'Scanning Document' : 'Planning',
+              }
+            : msg,
+        ),
+      )
+
+      // Run the research (non-streaming for now)
+      const runResult = await chatAgentService.runDeepResearch(startResult.data.run_id)
+      
+      if (!runResult.success || !runResult.data) {
+        throw new Error(runResult.error || 'Failed to run deep research')
+      }
+
+      // Update with final result
+      let finalContent = ''
+      if (runResult.data.final_report) {
+        finalContent = runResult.data.final_report
+      } else if (runResult.data.message) {
+        finalContent = runResult.data.message
+      } else if (runResult.data.findings && runResult.data.findings.length > 0) {
+        finalContent = '## Research Findings\n\n' + runResult.data.findings
+          .map((f, i) => `### Finding ${i + 1}\n${JSON.stringify(f, null, 2)}`)
+          .join('\n\n---\n\n')
+      } else {
+        finalContent = 'Research completed but no results were returned.'
+      }
+
+      // Append sources if available
+      if (runResult.data.sources && runResult.data.sources.length > 0) {
+        finalContent += '\n\n---\n\n## 📚 Sources\n\n'
+        runResult.data.sources.forEach((source, index) => {
+          const confidence = source.confidence === 'high' ? '🟢' : source.confidence === 'medium' ? '🟡' : '🔴'
+          finalContent += `${index + 1}. **${source.source_type}** ${confidence}\n`
+          finalContent += `   - ${source.description}\n`
+          if (source.url) {
+            finalContent += `   - [Link](${source.url})\n`
+          }
+          finalContent += '\n'
+        })
+      }
+
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === messageId
+            ? {
+                ...msg,
+                content: finalContent,
+                isStreaming: false,
+                isResearchPhase: false,
+                researchPhase: undefined,
+              }
+            : msg,
+        ),
+      )
+
+      setDeepResearchRunId(null)
+      setSessionRefreshTrigger((prev) => prev + 1)
+    } catch (err: any) {
+      console.error('Deep research error:', err)
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === messageId
+            ? {
+                ...msg,
+                content: `❌ **Research Failed**\n\n${err.message || 'An error occurred during research.'}`,
+                isStreaming: false,
+                isResearchPhase: false,
+              }
+            : msg,
+        ),
+      )
+      setDeepResearchRunId(null)
+      throw err
+    }
+  }
+
+  const handleSessionSelect = (
+    newSessionId: string,
+    historyMessages?: Array<{ role: string; content: string }>,
+  ) => {
+    setSessionId(newSessionId)
+    if (historyMessages) {
+      const loadedMessages: ChatMessageType[] = historyMessages.map((msg, index) => ({
+        id: `loaded_${index}`,
+        type: msg.role === 'user' ? 'user' : 'assistant',
+        content: msg.content,
+      }))
+      setMessages(loadedMessages)
+    } else {
+      setMessages([])
+    }
+    setError(null)
+  }
+
+  const handleNewSession = () => {
+    setSessionId(`session_${Date.now()}`)
+    setMessages([])
+    setError(null)
+    setSelectedDocument(null)
+  }
 
   return (
-    <Container fluid className="chat-interface-container p-0">
-      <Row className="flex-grow-1 overflow-hidden g-0 h-100">
-        <Col
-          xs={12}
-          sm={12}
-          md={11}
-          lg={10}
-          xl={8}
-          xxl={7}
-          className="mx-auto d-flex flex-column h-100 position-relative px-2 px-md-3"
-        >
-          {/* Chat Header */}
-          <div className="chat-header py-2 py-md-3 border-bottom flex-shrink-0">
-            <div className="d-flex justify-content-between align-items-center mb-2">
-              <h4 className="mb-0">
-                <i className="bi bi-chat-dots me-2"></i>
-                AI Document Assistant
-              </h4>
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => setShowUploadModal(true)}
+    <div className="chat-layout">
+      <CombinedSidebar
+        currentSessionId={sessionId}
+        onSessionSelect={handleSessionSelect}
+        onNewSession={handleNewSession}
+        refreshTrigger={sessionRefreshTrigger}
+        documents={documents}
+        selectedDocument={selectedDocument}
+        onSelectDocument={setSelectedDocument}
+        onDeleteDocument={handleDeleteDocument}
+        onUploadClick={() => setShowUploadModal(true)}
+        isLoadingDocuments={isLoadingDocuments}
+        getFileIcon={getFileIcon}
+        onDocumentsRefresh={loadDocuments}
+      />
+      <div className="chat-main">
+        <div className="copilot-chat-container">
+          {/* Selected Document Indicator */}
+          {selectedDocument && (
+            <div className="selected-document-banner">
+              <i className="bi bi-file-earmark-text me-2"></i>
+              <span>
+                Asking about: <strong>
+                  {documents.find(d => d.id === selectedDocument)?.title || 'Selected document'}
+                </strong>
+              </span>
+              <button 
+                onClick={() => setSelectedDocument(null)}
+                className="clear-doc-btn"
+                title="Clear document selection"
               >
-                <i className="bi bi-cloud-upload me-1"></i>
-                Upload Document
-              </Button>
+                <i className="bi bi-x-lg"></i>
+              </button>
             </div>
-
-            {/* Document Selection */}
-            <div className="mb-2">
-              <DocumentList
-                documents={documents}
-                selectedDocument={selectedDocument}
-                onSelectDocument={setSelectedDocument}
-                onDeleteDocument={handleDeleteDocument}
-                isLoadingDocuments={isLoadingDocuments}
-                getFileIcon={getFileIcon}
-              />
-            </div>
-          </div>
-
-          {/* Error Alert */}
-          {error && (
-            <Alert variant="danger" onClose={() => setError(null)} dismissible>
-              <i className="bi bi-exclamation-triangle me-2"></i>
-              {error}
-            </Alert>
           )}
 
-          {/* Messages Area */}
-          <div
-            ref={messagesContainerRef}
-            className="chat-messages flex-grow-1 overflow-auto px-1 px-md-2"
-          >
-            {messages.length === 0 ? (
-              <ChatEmptyState
-                documentsCount={documents.length}
-                onUploadClick={() => setShowUploadModal(true)}
-              />
-            ) : (
-              <div className="space-y-3">
-                {messages.map((message) => (
-                  <ChatMessage
-                    key={message.id}
-                    type={message.type}
-                    content={message.content}
-                    timestamp={message.timestamp}
-                    documentId={message.documentId}
-                    documentName={
-                      message.documentId
-                        ? documents.find((doc) => doc.id === message.documentId)?.filename
-                        : undefined
-                    }
-                    getFileIcon={getFileIcon}
-                  />
-                ))}
-                <div ref={messagesEndRef} />
+          {/* Error */}
+          {error && (
+            <div style={{ padding: '0.5rem 2rem' }}>
+              <div 
+                style={{ 
+                  background: '#ffebe9', 
+                  border: '1px solid #ff8182', 
+                  borderRadius: '0.5rem',
+                  padding: '0.75rem 1rem',
+                  color: '#a40e26',
+                  fontSize: '0.875rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between'
+                }}
+              >
+                <span>
+                  <i className="bi bi-exclamation-triangle me-2"></i>
+                  {error}
+                </span>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  {lastFailedQuestion && (
+                    <button
+                      onClick={handleRetry}
+                      style={{
+                        background: '#a40e26',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: '0.375rem',
+                        padding: '0.35rem 0.75rem',
+                        cursor: 'pointer',
+                        fontSize: '0.85rem',
+                      }}
+                      disabled={isLoading}
+                    >
+                      Retry
+                    </button>
+                  )}
+                  <button 
+                    onClick={() => setError(null)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#a40e26' }}
+                  >
+                    <i className="bi bi-x-lg"></i>
+                  </button>
+                </div>
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
-          {/* Chat Input */}
-          <ChatInput
-            currentQuestion={currentQuestion}
-            setCurrentQuestion={setCurrentQuestion}
-            onSubmit={handleSubmit}
-            isLoading={isLoading}
-            isStreaming={isStreaming}
-            streamingEnabled={streamingEnabled}
-            setStreamingEnabled={setStreamingEnabled}
-            documentsCount={documents.length}
-            selectedDocument={selectedDocument}
-            selectedDocumentName={selectedDocumentName}
-            onKeyPress={handleKeyPress}
-          />
-        </Col>
-      </Row>
+          {/* Messages */}
+          <div className="copilot-messages">
+        {messages.length === 0 ? (
+          <div className="copilot-empty">
+            <div className="copilot-empty-icon">
+              <i className="bi bi-robot"></i>
+            </div>
+            <div className="copilot-empty-title">How can I help you today?</div>
+            <div className="copilot-empty-subtitle">
+              {selectedDocument 
+                ? 'Ask questions about the selected document, or use Deep Research for thorough analysis.'
+                : 'Ask me anything. Select a document from the sidebar to ask questions about it.'
+              }
+            </div>
+          </div>
+        ) : (
+          <>
+            {messages.map((message) => (
+              <Message
+                key={message.id}
+                type={message.type}
+                content={message.content}
+                sources={message.sources}
+                hasSufficientInfo={message.hasSufficientInfo}
+                isStreaming={message.isStreaming}
+              />
+            ))}
+            <div ref={messagesEndRef} />
+          </>
+        )}
+      </div>
+
+      {/* Input */}
+      <Input
+        value={currentQuestion}
+        onChange={setCurrentQuestion}
+        onSubmit={handleSubmit}
+        isLoading={isLoading}
+        placeholder={selectedDocument ? "Ask about the selected document..." : "Ask anything"}
+        onUploadClick={() => setShowUploadModal(true)}
+        selectedDocument={selectedDocument}
+        deepResearchEnabled={deepResearchEnabled}
+        onDeepResearchChange={setDeepResearchEnabled}
+      />
 
       {/* Upload Modal */}
       <DocumentUploadModal
@@ -427,7 +589,9 @@ const ChatPage: FC = () => {
         isDeleting={isDeleting}
         getFileIcon={getFileIcon}
       />
-    </Container>
+        </div>
+      </div>
+    </div>
   )
 }
 

@@ -125,7 +125,7 @@ const TenantManagement: FC = () => {
     return (
       <Container fluid style={{ padding: '0 1rem', maxWidth: '87.5rem', margin: '0 auto' }}>
         <div className="empty-state" style={{ minHeight: '25rem' }}>
-          <Spinner animation="border" role="status" style={{ width: '3rem', height: '3rem', color: '#0d6efd' }}>
+          <Spinner animation="border" role="status" style={{ width: '3rem', height: '3rem', color: '#003366' }}>
             <span className="visually-hidden">Loading...</span>
           </Spinner>
           <h5 className="mt-3">Loading tenants...</h5>

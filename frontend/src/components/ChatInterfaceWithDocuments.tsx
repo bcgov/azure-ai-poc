@@ -1,5 +1,6 @@
 import apiService from '@/service/api-service'
-import { langGraphAgentService } from '@/services/langGraphAgentService'
+import { chatAgentService, type ChatMessage as ChatServiceMessage } from '@/services/chatAgentService'
+import { documentService, type DocumentItem } from '@/services/documentService'
 import type { FC } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import {
@@ -8,12 +9,15 @@ import {
   Button,
   Card,
   Col,
+  Collapse,
   Container,
   Form,
   Modal,
+  OverlayTrigger,
   ProgressBar,
   Row,
   Spinner,
+  Tooltip,
 } from 'react-bootstrap'
 
 interface ChatMessage {
@@ -24,19 +28,19 @@ interface ChatMessage {
   documentId?: string
 }
 
-interface Document {
-  id: string
-  filename: string
-  uploadedAt: string
-  totalPages?: number
-}
+// Use DocumentItem from documentService for consistency
+type Document = DocumentItem
 
 const ChatInterface: FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [sessionId, setSessionId] = useState<string>(`session_${Date.now()}`)
   const [currentQuestion, setCurrentQuestion] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [isStreaming, setIsStreaming] = useState(false)
   const [streamingEnabled, setStreamingEnabled] = useState(true)
+  const [deepResearchEnabled, setDeepResearchEnabled] = useState(false)
+  const [deepResearchRunId, setDeepResearchRunId] = useState<string | null>(null)
+  const [showDeepResearchInfo, setShowDeepResearchInfo] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [documents, setDocuments] = useState<Document[]>([])
   const [selectedDocument, setSelectedDocument] = useState<string | null>(null)
@@ -79,11 +83,12 @@ const ChatInterface: FC = () => {
   const loadDocuments = async () => {
     setIsLoadingDocuments(true)
     try {
-      const response = await apiService
-        .getAxiosInstance()
-        .get('/api/v1/documents')
-      setDocuments(response.data)
-      return response.data // Return the fresh data
+      const result = await documentService.listDocuments()
+      if (result.success && result.data) {
+        setDocuments(result.data.documents)
+        return result.data.documents
+      }
+      return []
     } catch (err: any) {
       console.error('Error loading documents:', err)
       return []
@@ -167,8 +172,22 @@ const ChatInterface: FC = () => {
       'text/x-markdown',
       'text/html',
       'text/plain',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'application/vnd.ms-powerpoint',
+      'image/jpeg',
+      'image/png',
+      'image/bmp',
+      'image/tiff',
     ]
-    const allowedExtensions = ['.pdf', '.md', '.markdown', '.html', '.htm']
+    const allowedExtensions = [
+      '.pdf', '.md', '.markdown', '.html', '.htm', '.txt',
+      '.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt',
+      '.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif'
+    ]
     const fileExtension = '.' + file.name.toLowerCase().split('.').pop()
 
     const isValidType =
@@ -177,7 +196,7 @@ const ChatInterface: FC = () => {
 
     if (!isValidType) {
       setError(
-        'Only PDF, Markdown (.md), and HTML (.html, .htm) files are supported',
+        'Unsupported file format. Supported: PDF, Word, Excel, PowerPoint, HTML, Markdown, TXT, and images (JPEG, PNG, BMP, TIFF)',
       )
       return
     }
@@ -212,9 +231,10 @@ const ChatInterface: FC = () => {
         })
       const newDocument: Document = {
         id: response.data.id,
-        filename: response.data.filename || file.name,
-        uploadedAt: response.data.uploadedAt || new Date().toISOString(),
-        totalPages: response.data.totalPages,
+        document_id: response.data.document_id || response.data.id,
+        title: response.data.title || response.data.filename || file.name,
+        created_at: response.data.created_at || new Date().toISOString(),
+        chunk_count: response.data.chunk_count || 0,
       }
       // Add the new document to the state immediately
       setDocuments((prev) => [...prev, newDocument])
@@ -257,9 +277,8 @@ const ChatInterface: FC = () => {
     setError(null)
 
     try {
-      await apiService
-        .getAxiosInstance()
-        .delete(`/api/v1/documents/${documentToDelete.id}`)
+      const result = await documentService.deleteDocument(documentToDelete.id)
+      if (!result.success) throw new Error(result.error || 'Delete failed')
 
       // Remove from documents list
       setDocuments((prev) =>
@@ -275,7 +294,7 @@ const ChatInterface: FC = () => {
       const successMessage: ChatMessage = {
         id: Date.now().toString(),
         type: 'assistant',
-        content: `Document "${documentToDelete.filename}" has been deleted successfully.`,
+        content: `Document "${documentToDelete.title}" has been deleted successfully.`,
         timestamp: new Date(),
       }
       setMessages((prev) => [...prev, successMessage])
@@ -296,7 +315,7 @@ const ChatInterface: FC = () => {
   }
 
   const selectedDocumentName = selectedDocument
-    ? documents.find((doc) => doc.id === selectedDocument)?.filename
+    ? documents.find((doc) => doc.id === selectedDocument)?.title
     : null
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -320,8 +339,77 @@ const ChatInterface: FC = () => {
     setCurrentQuestion('')
     setError(null)
 
+    // Handle Deep Research mode
+    if (deepResearchEnabled) {
+      setIsLoading(true)
+
+      try {
+        // Start deep research workflow
+        const startResult = await chatAgentService.startDeepResearch(questionText)
+
+        if (!startResult.success || !startResult.data) {
+          throw new Error(startResult.error || 'Failed to start deep research')
+        }
+
+        const runId = startResult.data.run_id
+        setDeepResearchRunId(runId)
+
+        // Add initial status message
+        const statusMessage: ChatMessage = {
+          id: (Date.now() + 1).toString(),
+          type: 'assistant',
+          content: `🔬 **Deep Research Started**\n\nResearching: "${questionText}"\n\nPhase: ${startResult.data.current_phase}\n\n_This may take a few moments as the AI creates a research plan, gathers findings, and synthesizes a comprehensive report..._`,
+          timestamp: new Date(),
+        }
+        setMessages((prev) => [...prev, statusMessage])
+
+        // Run the research workflow
+        const runResult = await chatAgentService.runDeepResearch(runId)
+
+        if (!runResult.success || !runResult.data) {
+          throw new Error(runResult.error || 'Failed to run deep research')
+        }
+
+        // Create the final response message
+        let finalContent = ''
+        if (runResult.data.final_report) {
+          finalContent = `## 📊 Deep Research Report\n\n${runResult.data.final_report}`
+        } else if (runResult.data.findings && runResult.data.findings.length > 0) {
+          finalContent = `## 📊 Research Findings\n\n`
+          runResult.data.findings.forEach((finding: any, index: number) => {
+            finalContent += `### ${index + 1}. ${finding.subtopic || 'Finding'}\n`
+            finalContent += `${finding.content || JSON.stringify(finding)}\n\n`
+          })
+        } else {
+          finalContent = `Research completed but no findings were generated. Status: ${runResult.data.status}`
+        }
+
+        // Update the status message with the final report
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === statusMessage.id
+              ? { ...msg, content: finalContent }
+              : msg,
+          ),
+        )
+      } catch (err: any) {
+        console.error('Deep Research error:', err)
+        setError(err.message || 'Failed to complete deep research. Please try again.')
+      } finally {
+        setIsLoading(false)
+        setDeepResearchRunId(null)
+      }
+      return
+    }
+
+    // Build chat history from messages for context
+    const chatHistory: ChatServiceMessage[] = messages.map((msg) => ({
+      role: msg.type === 'user' ? 'user' : 'assistant',
+      content: msg.content,
+    }))
+
     if (streamingEnabled) {
-      // Handle streaming response with LangGraph agent
+      // Handle streaming response with Chat Agent
       setIsStreaming(true)
 
       // Create placeholder assistant message for streaming
@@ -352,16 +440,16 @@ const ChatInterface: FC = () => {
           )
         }
 
-        // Use LangGraph agent with document context for streaming
-        await langGraphAgentService.streamDocumentQuery(
+        // Use Chat Agent for streaming
+        await chatAgentService.streamMessage(
           questionText,
-          selectedDocument ? [selectedDocument] : undefined,
-          `session_${Date.now()}`,
+          sessionId,
+          chatHistory,
           onChunk,
           onError,
         )
       } catch (err: any) {
-        console.error('LangGraph streaming error:', err)
+        console.error('Chat Agent streaming error:', err)
         setError(err.message || 'Failed to stream response. Please try again.')
 
         // Remove the placeholder message on error
@@ -372,24 +460,27 @@ const ChatInterface: FC = () => {
         setIsStreaming(false)
       }
     } else {
-      // Handle non-streaming response with LangGraph agent
+      // Handle non-streaming response with Chat Agent
       setIsLoading(true)
 
       try {
-        // Use LangGraph agent with document context
-        const result = await langGraphAgentService.queryDocuments(
+        // Use Chat Agent
+        const result = await chatAgentService.sendMessage(
           questionText,
-          selectedDocument ? [selectedDocument] : undefined, // Search specific doc or all docs
-          `session_${Date.now()}`,
-          selectedDocument ? `Document: ${selectedDocumentName}` : undefined,
+          sessionId,
+          chatHistory,
         )
 
         let assistantContent = ''
         if (result.success && result.data) {
-          assistantContent = result.data.answer
+          assistantContent = result.data.response
+          // Update session ID if returned
+          if (result.data.session_id) {
+            setSessionId(result.data.session_id)
+          }
         } else {
           throw new Error(
-            result.error || 'Failed to get response from LangGraph agent',
+            result.error || 'Failed to get response from chat agent',
           )
         }
 
@@ -403,7 +494,7 @@ const ChatInterface: FC = () => {
 
         setMessages((prev) => [...prev, assistantMessage])
       } catch (err: any) {
-        console.error('LangGraph API error:', err)
+        console.error('Chat Agent API error:', err)
         setError(
           err.response?.data?.message ||
             'Failed to get response. Please try again.',
@@ -434,7 +525,7 @@ const ChatInterface: FC = () => {
       console.log('Selected document ID:', selectedDocument)
       console.log(
         'Available documents:',
-        documents.map((d) => ({ id: d.id, filename: d.filename })),
+        documents.map((d) => ({ id: d.id, title: d.title })),
       )
       console.log('Selected document name:', selectedDocumentName)
     }
@@ -498,7 +589,7 @@ const ChatInterface: FC = () => {
                       style={{
                         backgroundColor:
                           selectedDocument === doc.id
-                            ? 'rgba(13, 110, 253, 0.1)'
+                            ? 'rgba(0, 51, 102, 0.1)'
                             : '#f8f9fa',
                       }}
                     >
@@ -516,8 +607,8 @@ const ChatInterface: FC = () => {
                           fontWeight: selectedDocument === doc.id ? '600' : '400',
                         }}
                       >
-                        <i className={`${getFileIcon(doc.filename)} me-1`}></i>
-                        {doc.filename}
+                        <i className={`${getFileIcon(doc.title)} me-1`}></i>
+                        {doc.title}
                       </Button>
                       <Button
                         variant="link"
@@ -525,7 +616,7 @@ const ChatInterface: FC = () => {
                         onClick={() => handleDeleteDocument(doc)}
                         className="document-delete-btn border-0 p-1 d-flex align-items-center justify-content-center text-danger"
                         style={{ width: '1.75rem', height: '1.75rem' }}
-                        title={`Remove ${doc.filename}`}
+                        title={`Remove ${doc.title}`}
                       >
                         <i
                           className="bi bi-x-circle-fill"
@@ -592,7 +683,7 @@ const ChatInterface: FC = () => {
                     <div className="d-flex gap-3 justify-content-center flex-wrap small text-muted">
                       <span>
                         <i className="bi bi-check-circle-fill text-success me-1"></i>
-                        PDF, Markdown, HTML
+                        PDF, Word, Excel, PowerPoint
                       </span>
                       <span>
                         <i className="bi bi-lightning-fill text-warning me-1"></i>
@@ -605,7 +696,7 @@ const ChatInterface: FC = () => {
                     <i className="bi bi-chat-quote empty-state-icon d-block"></i>
                     <h5>Welcome to AI Document Assistant</h5>
                     <p>
-                      Upload documents (PDF, Markdown, or HTML) and ask
+                      Upload documents (PDF, Word, Excel, PowerPoint, HTML, Markdown, or images) and ask
                       questions about them, or search across all your uploaded
                       documents.
                     </p>
@@ -643,7 +734,7 @@ const ChatInterface: FC = () => {
                             {message.type === 'assistant' && (
                               <i
                                 className="bi bi-robot me-2 mt-1"
-                                style={{ fontSize: '1.1em' }}
+                                style={{ fontSize: '1.1em', color: '#003366' }}
                               ></i>
                             )}
                             <div className="flex-grow-1">
@@ -672,12 +763,12 @@ const ChatInterface: FC = () => {
                                         documents.find(
                                           (doc) =>
                                             doc.id === message.documentId,
-                                        )?.filename || '',
+                                        )?.title || '',
                                       )} me-1`}
                                     ></i>
                                     {documents.find(
                                       (doc) => doc.id === message.documentId,
-                                    )?.filename || 'Document'}
+                                    )?.title || 'Document'}
                                   </Badge>
                                 </div>
                               )}
@@ -714,7 +805,7 @@ const ChatInterface: FC = () => {
                       <Card className="bg-light">
                         <Card.Body className="py-2 px-3">
                           <div className="d-flex align-items-center">
-                            <i className="bi bi-robot me-2"></i>
+                            <i className="bi bi-robot me-2" style={{ color: '#003366' }}></i>
                             {isStreaming ? (
                               <>
                                 <div
@@ -799,7 +890,7 @@ const ChatInterface: FC = () => {
           {/* Input Form */}
           <div className="border-top pt-2 pt-md-3 chat-input-container flex-shrink-0">
             <Form onSubmit={handleSubmit}>
-              {/* LangGraph Agent and Controls */}
+              {/* Agent Controls */}
               <div className="mb-2 d-flex flex-wrap align-items-center gap-2">
                 <div className="d-flex align-items-center">
                   <Form.Check
@@ -809,13 +900,74 @@ const ChatInterface: FC = () => {
                     checked={streamingEnabled}
                     onChange={(e) => setStreamingEnabled(e.target.checked)}
                     className="small"
+                    disabled={deepResearchEnabled}
                   />
                 </div>
 
-                <Badge bg="info" className="small">
-                  LangGraph Agent - Multi-step reasoning & citations
-                </Badge>
+                <div className="d-flex align-items-center">
+                  <Form.Check
+                    type="switch"
+                    id="deep-research-toggle"
+                    checked={deepResearchEnabled}
+                    onChange={(e) => setDeepResearchEnabled(e.target.checked)}
+                    className="small me-1"
+                  />
+                  <label htmlFor="deep-research-toggle" className="small mb-0 me-1" style={{ cursor: 'pointer' }}>
+                    Deep Research
+                  </label>
+                  <OverlayTrigger
+                    placement="top"
+                    overlay={<Tooltip id="deep-research-tooltip">Click for more info about Deep Research</Tooltip>}
+                  >
+                    <Button
+                      variant="link"
+                      size="sm"
+                      className="p-0 text-info"
+                      onClick={() => setShowDeepResearchInfo(!showDeepResearchInfo)}
+                      style={{ lineHeight: 1 }}
+                    >
+                      <i className="bi bi-info-circle"></i>
+                    </Button>
+                  </OverlayTrigger>
+                </div>
+
+                {deepResearchEnabled ? (
+                  <Badge bg="warning" text="dark" className="small">
+                    <i className="bi bi-search me-1"></i>
+                    Deep Research Mode
+                  </Badge>
+                ) : (
+                  <Badge bg="info" className="small">
+                    AI Assistant - Powered by Microsoft Agent Framework
+                  </Badge>
+                )}
               </div>
+
+              {/* Deep Research Info Panel */}
+              <Collapse in={showDeepResearchInfo}>
+                <div className="mb-2">
+                  <Alert variant="info" className="py-2 mb-2" style={{ fontSize: '0.85rem' }}>
+                    <Alert.Heading as="h6" className="mb-1">
+                      <i className="bi bi-lightbulb me-1"></i>
+                      What is Deep Research?
+                    </Alert.Heading>
+                    <p className="mb-2">
+                      Deep Research is an advanced AI-powered research workflow that performs <strong>multi-step, 
+                      comprehensive analysis</strong> of complex topics. Unlike regular chat, it:
+                    </p>
+                    <ul className="mb-2 ps-3">
+                      <li><strong>Creates a research plan</strong> - Breaks down your topic into subtopics and research questions</li>
+                      <li><strong>Gathers findings</strong> - Systematically researches each aspect with confidence scoring</li>
+                      <li><strong>Synthesizes a report</strong> - Produces a comprehensive final report with citations</li>
+                      <li><strong>Human-in-the-loop</strong> - You can approve or provide feedback at each stage</li>
+                    </ul>
+                    <p className="mb-0 text-muted">
+                      <i className="bi bi-clock me-1"></i>
+                      <em>Deep Research takes longer but provides more thorough, verifiable results for complex questions.</em>
+                    </p>
+                  </Alert>
+                </div>
+              </Collapse>
 
               <div className="position-relative">
                 <Form.Control
@@ -825,15 +977,17 @@ const ChatInterface: FC = () => {
                   onChange={(e) => setCurrentQuestion(e.target.value)}
                   onKeyDown={handleKeyPress}
                   placeholder={
-                    selectedDocument && selectedDocumentName
-                      ? `Ask a question about ${selectedDocumentName}...`
-                      : selectedDocument
-                        ? 'Ask a question about the selected document...'
-                        : documents.length === 0
-                          ? 'Please upload documents first to start asking questions...'
-                          : 'Ask a question across all your documents...'
+                    deepResearchEnabled
+                      ? 'Enter a topic or complex question for deep research...'
+                      : selectedDocument && selectedDocumentName
+                        ? `Ask a question about ${selectedDocumentName}...`
+                        : selectedDocument
+                          ? 'Ask a question about the selected document...'
+                          : documents.length === 0
+                            ? 'Ask a general question or upload documents...'
+                            : 'Ask a question across all your documents...'
                   }
-                  disabled={isLoading || documents.length === 0}
+                  disabled={isLoading}
                   style={{
                     minHeight: 'clamp(2.5rem, 2.75rem, 3rem)',
                     maxHeight: 'clamp(6rem, 8rem, 10rem)',
@@ -845,12 +999,11 @@ const ChatInterface: FC = () => {
                 />
                 <Button
                   type="submit"
-                  variant="primary"
+                  variant={deepResearchEnabled ? 'warning' : 'primary'}
                   disabled={
                     !currentQuestion.trim() ||
                     isLoading ||
-                    isStreaming ||
-                    documents.length === 0
+                    isStreaming
                   }
                   className="position-absolute d-flex align-items-center justify-content-center p-0 border-0"
                   style={{
@@ -861,7 +1014,7 @@ const ChatInterface: FC = () => {
                     borderRadius: '50%',
                     transition: 'all 0.2s ease',
                   }}
-                  title="Send message (Enter)"
+                  title={deepResearchEnabled ? 'Start Deep Research (Enter)' : 'Send message (Enter)'}
                 >
                   {isLoading || isStreaming ? (
                     <Spinner
@@ -869,6 +1022,14 @@ const ChatInterface: FC = () => {
                       size="sm"
                       style={{ width: '1rem', height: '1rem' }}
                     />
+                  ) : deepResearchEnabled ? (
+                    <i
+                      className="bi bi-search"
+                      style={{
+                        fontSize: 'clamp(0.875rem, 1rem, 1.125rem)',
+                        fontWeight: 'bold',
+                      }}
+                    ></i>
                   ) : (
                     <i
                       className="bi bi-send"
@@ -882,11 +1043,13 @@ const ChatInterface: FC = () => {
               </div>
               <small className="text-muted">
                 <i className="bi bi-info-circle me-1"></i>
-                {documents.length === 0
-                  ? 'Please upload documents first to start asking questions'
-                  : selectedDocument
-                    ? `Questions will be answered based on the selected document${streamingEnabled ? ' with streaming' : ''}`
-                    : `Questions will be answered by searching across all your uploaded documents${streamingEnabled ? ' with streaming' : ''}`}
+                {deepResearchEnabled
+                  ? 'Deep Research: AI will create a plan, gather findings, and synthesize a comprehensive report'
+                  : documents.length === 0
+                    ? 'Upload documents to search them, or ask general questions'
+                    : selectedDocument
+                      ? `Questions will be answered based on the selected document${streamingEnabled ? ' with streaming' : ''}`
+                      : `Questions will be answered by searching across all your uploaded documents${streamingEnabled ? ' with streaming' : ''}`}
               </small>
             </Form>
           </div>
@@ -914,7 +1077,7 @@ const ChatInterface: FC = () => {
                 const file = e.target.files?.[0]
                 if (file) handleFileUpload(file)
               }}
-              accept=".pdf,.md,.markdown,.html,.htm"
+              accept=".pdf,.md,.markdown,.html,.htm,.txt,.docx,.doc,.xlsx,.xls,.pptx,.ppt,.jpg,.jpeg,.png,.bmp,.tiff,.tif"
               style={{ display: 'none' }}
             />
 
@@ -923,7 +1086,7 @@ const ChatInterface: FC = () => {
                 <i className="bi bi-files display-4 text-primary mb-3"></i>
                 <h5>Select a document to upload</h5>
                 <p className="text-muted">
-                  Supported formats: PDF, Markdown (.md), HTML (.html, .htm)
+                  Supported formats: PDF, Word, Excel, PowerPoint, HTML, Markdown, TXT, Images
                   <br />
                   Maximum file size: 100MB
                 </p>
@@ -964,13 +1127,13 @@ const ChatInterface: FC = () => {
             <i
               className={`${
                 documentToDelete
-                  ? getFileIcon(documentToDelete.filename)
+                  ? getFileIcon(documentToDelete.title)
                   : 'bi-file-text'
               } display-4 text-danger mb-3`}
             ></i>
             <h5>Delete Document</h5>
             <p className="text-muted">
-              Are you sure you want to delete "{documentToDelete?.filename}"?
+              Are you sure you want to delete "{documentToDelete?.title}"?
             </p>
             <p className="text-warning small">
               <i className="bi bi-exclamation-triangle me-1"></i>
