@@ -1,11 +1,15 @@
 /**
  * LangGraph Agent Service
  *
- * Service for interacting with the LangGraph agent endpoint that provides
- * multi-step reasoning and tool usage capabilities.
+ * @deprecated This service is deprecated. Use chatAgentService or researchAgentService instead.
+ * This service was used for interacting with the old LangGraph agent endpoint.
+ * The new API uses Microsoft Agent Framework endpoints:
+ *   - chatAgentService: /api/v1/chat/
+ *   - researchAgentService: /api/v1/research/
  */
 
 import { useAuthStore } from '../stores'
+import httpClient from './httpClient'
 
 export interface ApiResponse<T> {
   success: boolean
@@ -45,6 +49,12 @@ export interface LangGraphAgentError {
 }
 
 class LangGraphAgentService {
+  private _parseError(error: any, fallback: string): string {
+    if (error?.response?.data?.detail) return error.response.data.detail
+    if (error?.response?.data?.error) return error.response.data.error
+    if (error?.message) return error.message
+    return fallback
+  }
   /**
    * Send a message to the LangGraph agent with document context support
    */
@@ -63,39 +73,24 @@ class LangGraphAgentService {
         }
       }
 
-      const token = authStore.getToken()
-      const response = await fetch(`/api/v1/chat/ask`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(request),
-      })
-
-      if (!response.ok) {
-        const errorData = await response
-          .json()
-          .catch(() => ({ error: 'Unknown error' }))
-        throw new Error(
-          errorData.detail || errorData.error || `HTTP ${response.status}`,
-        )
+      // Ensure token gets refreshed by the client interceptor
+      if (authStore.isLoggedIn()) {
+        try {
+          await authStore.updateToken(30)
+        } catch (err) {
+          console.warn('Token refresh failed:', err)
+        }
       }
 
-      const data = await response.json()
+      const resp = await httpClient.post('/api/v1/chat/ask', request)
+      const data = resp.data as LangGraphAgentResponse
       return {
         success: true,
         data,
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('LangGraph Agent API error:', error)
-      return {
-        success: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : 'Failed to send message to LangGraph agent',
-      }
+      return { success: false, error: this._parseError(error, 'Failed to send message to LangGraph agent') }
     }
   }
 

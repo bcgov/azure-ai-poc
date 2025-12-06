@@ -9,14 +9,17 @@ describe('DocumentList', () => {
   const mockDocuments: Document[] = [
     {
       id: 'doc-1',
-      filename: 'document1.pdf',
-      uploadedAt: '2024-01-20T10:00:00Z',
-      totalPages: 10,
+      document_id: 'doc-1',
+      title: 'document1.pdf',
+      created_at: '2024-01-20T10:00:00Z',
+      chunk_count: 10,
     },
     {
       id: 'doc-2',
-      filename: 'document2.md',
-      uploadedAt: '2024-01-21T10:00:00Z',
+      document_id: 'doc-2',
+      title: 'document2.md',
+      created_at: '2024-01-21T10:00:00Z',
+      chunk_count: 5,
     },
   ]
 
@@ -130,7 +133,7 @@ describe('DocumentList', () => {
     const chips = container.querySelectorAll('.document-chip')
     const selectedChip = Array.from(chips).find(chip => chip.textContent?.includes('document1.pdf'))
     
-    expect(selectedChip).toHaveStyle({ border: '0.125rem solid #0d6efd' })
+    expect(selectedChip).toHaveStyle({ border: '0.125rem solid #003366' })
   })
 
   it('should render delete button for each document', () => {
@@ -157,8 +160,10 @@ describe('DocumentList', () => {
     const docsWithLongName: Document[] = [
       {
         id: 'doc-long',
-        filename: longFilename,
-        uploadedAt: '2024-01-20T10:00:00Z',
+        document_id: 'doc-long',
+        title: longFilename,
+        created_at: '2024-01-20T10:00:00Z',
+        chunk_count: 1,
       },
     ]
     
