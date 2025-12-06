@@ -476,6 +476,7 @@ class OrchestratorAgentService:
             # Create ChatAgent with tools - MAF handles ReAct internally
             self._agent = ChatAgent(
                 chat_client=chat_client,
+                tool_choice="required",
                 instructions=SYSTEM_INSTRUCTIONS,
                 tools=ORCHESTRATOR_TOOLS,
                 temperature=settings.llm_temperature,
