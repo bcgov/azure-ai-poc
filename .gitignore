@@ -381,3 +381,5 @@ pyrightconfig.json
 sensitive
 sensitive/**
 coverage.json
+**.env
+**/.env*

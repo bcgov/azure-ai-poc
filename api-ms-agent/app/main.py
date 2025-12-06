@@ -10,9 +10,9 @@ from contextlib import asynccontextmanager
 
 import psutil
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.devui import DevUIServer, start_devui_async
 from app.logger import get_logger, setup_logging
 from app.middleware.auth_middleware import AuthMiddleware
 from app.middleware.security_middleware import SecurityMiddleware
@@ -73,6 +73,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan handler for startup and shutdown."""
     logger = get_logger(__name__)
     logger.info("Starting up API MS Agent")
+    devui_server: DevUIServer | None = None
 
     async def _safe_init(name: str, func):
         """Run initializer safely and log warnings without failing startup."""
@@ -101,6 +102,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await _safe_init("deep_research_client", research_service._get_client)
     await _safe_init("workflow_research_client", workflow_research_service._get_client)
 
+    if settings.devui_enabled:
+        devui_server = start_devui_async(
+            host=settings.devui_host,
+            port=settings.devui_port,
+            auto_open=settings.devui_auto_open,
+            mode=settings.devui_mode,
+            cors_origins=["*"],
+        )
+
     yield
 
     # Shutdown: cleanup
@@ -116,6 +126,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await embedding_service.close()
     cosmos_service = get_cosmos_db_service()
     cosmos_service.dispose()
+
+    if devui_server:
+        devui_server.stop()
 
 
 def create_app() -> FastAPI:
