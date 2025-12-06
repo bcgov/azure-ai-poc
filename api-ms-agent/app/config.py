@@ -30,6 +30,7 @@ class Settings(BaseSettings):
 
     # LLM Configuration - Low temperature for high confidence responses
     llm_temperature: float = 0.1  # Low temperature for consistent, high-confidence responses
+    llm_max_output_tokens: int = 900  # Cap responses to control cost/token usage
 
     # Cosmos DB settings - for chat history, metadata, and workflow persistence
     cosmos_db_endpoint: str = ""

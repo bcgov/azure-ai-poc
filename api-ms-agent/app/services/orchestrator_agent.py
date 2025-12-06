@@ -478,8 +478,10 @@ class OrchestratorAgentService:
                 chat_client=chat_client,
                 instructions=SYSTEM_INSTRUCTIONS,
                 tools=ORCHESTRATOR_TOOLS,
-                # Use low temperature for consistent responses
-                chat_options={"temperature": settings.llm_temperature},
+                temperature=settings.llm_temperature,
+                max_tokens=settings.llm_max_output_tokens,
+                allow_multiple_tool_calls=True,
+                additional_chat_options={"reasoning": {"effort": "high", "summary": "concise"}},
             )
 
             logger.info(f"ChatAgent created with {len(ORCHESTRATOR_TOOLS)} tools")
@@ -581,12 +583,6 @@ class OrchestratorAgentService:
                 has_sufficient_info=True,
                 session_id=session_id,
             )
-
-            return response
-
-        except Exception as e:
-            logger.error(f"Orchestrator query error: {e}")
-            raise
 
             return response
 

@@ -9,6 +9,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from enum import Enum
+from textwrap import shorten
 from typing import Annotated, Any
 from uuid import uuid4
 
@@ -194,6 +195,9 @@ class ResearchState:
 
 # Global state storage for simulating research process
 _research_state_store: dict[str, ResearchState] = {}
+
+# Prompt/cost guards
+MAX_DOC_CONTEXT_CHARS = 2400
 
 
 @ai_function()
@@ -565,6 +569,9 @@ YOU MUST CALL ALL THREE FUNCTIONS IN ORDER."""
 
         # Add document-specific instructions if we have document context
         if document_context:
+            trimmed_context = shorten(
+                document_context, width=MAX_DOC_CONTEXT_CHARS, placeholder=" …"
+            )
             doc_instructions = f"""
 
 DOCUMENT-BASED RESEARCH MODE:
@@ -576,7 +583,7 @@ You have been provided with a document to thoroughly analyze. You MUST:
 5. REDACT any PII found in the document before including in your research
 
 DOCUMENT CONTENT TO ANALYZE:
-{document_context}
+{trimmed_context}
 
 When citing from this document, use:
 - source_type: "document"
@@ -592,6 +599,9 @@ When citing from this document, use:
             instructions=full_instructions,
             chat_client=chat_client,
             tools=[save_research_plan, save_research_findings, save_final_report],
+            temperature=settings.llm_temperature,
+            max_tokens=settings.llm_max_output_tokens,
+            additional_chat_options={"reasoning": {"effort": "high", "summary": "concise"}},
         )
 
     async def start_research(

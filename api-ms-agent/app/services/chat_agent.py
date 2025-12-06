@@ -12,6 +12,7 @@ All responses MUST include source attribution for traceability.
 
 import json
 from dataclasses import dataclass, field
+from textwrap import shorten
 from typing import Any
 
 from agent_framework import ChatAgent, ai_function
@@ -72,6 +73,10 @@ class ChatResult:
 # Track sources for the current query
 _chat_sources: list[SourceInfo] = []
 
+# Token/cost guards
+MAX_DOC_CONTEXT_CHARS = 1800
+MAX_HISTORY_CHARS = 1200
+
 
 def _reset_chat_sources() -> None:
     """Reset source tracking for a new query."""
@@ -94,6 +99,15 @@ def _add_source(
             url=url,
         )
     )
+
+
+def _trim_text(text: str, max_chars: int) -> str:
+    """Trim text to reduce prompt size while keeping readability."""
+    if not text:
+        return text
+    if len(text) <= max_chars:
+        return text
+    return shorten(text, width=max_chars, placeholder=" …")
 
 
 # ==================== Chat Tools ====================
@@ -284,6 +298,7 @@ class ChatAgentService:
         # Build instructions with optional document context
         instructions = SYSTEM_INSTRUCTIONS
         if document_context:
+            trimmed_context = _trim_text(document_context, MAX_DOC_CONTEXT_CHARS)
             instructions += f"""
 
 ## DOCUMENT CONTEXT PROVIDED
@@ -293,7 +308,7 @@ Use analyze_document_context tool to extract information from it.
 REDACT any PII before including in your response.
 
 DOCUMENT:
-{document_context[:3000]}"""
+{trimmed_context}"""
 
         # Create fresh agent (to include document context in instructions)
         chat_client = OpenAIChatClient(
@@ -305,7 +320,8 @@ DOCUMENT:
             chat_client=chat_client,
             instructions=instructions,
             tools=CHAT_TOOLS,
-            chat_options={"temperature": settings.llm_temperature},
+            temperature=settings.llm_temperature,
+            max_tokens=settings.llm_max_output_tokens
         )
 
         logger.debug(f"ChatAgent created with {len(CHAT_TOOLS)} tools")
@@ -352,6 +368,7 @@ DOCUMENT:
                 history_text = "\n".join(
                     f"{msg['role'].upper()}: {msg['content']}" for msg in history[-5:]
                 )
+                history_text = _trim_text(history_text, MAX_HISTORY_CHARS)
                 query = f"Previous conversation:\n{history_text}\n\nCurrent question: {message}"
 
             # MAF's ChatAgent.run() handles ReAct reasoning internally
