@@ -26,7 +26,6 @@ from app.logger import get_logger
 
 logger = get_logger(__name__)
 
-
 # ==================== JSON Repair Utilities ====================
 
 
@@ -393,6 +392,7 @@ class DeepResearchAgentService:
     def __init__(self) -> None:
         """Initialize the deep research agent service."""
         self._client: AsyncAzureOpenAI | None = None
+        self._deep_research_agent: ChatAgent | None = None
         self._credential: DefaultAzureCredential | None = None
         self._active_runs: dict[str, Any] = {}  # Track active workflow runs
         logger.info("DeepResearchAgentService initialized with Agent Framework SDK")
@@ -494,6 +494,8 @@ class DeepResearchAgentService:
         self,
         document_context: str | None = None,
     ) -> ChatAgent:
+        if self._deep_research_agent is not None:
+            return self._deep_research_agent
         """Create a ChatAgent configured for deep research."""
         from agent_framework.openai import OpenAIChatClient
 
@@ -594,15 +596,15 @@ When citing from this document, use:
         else:
             full_instructions = base_instructions
 
-        return ChatAgent(
+        deep_research_chat_agent = ChatAgent(
             name="DeepResearchAgent",
             instructions=full_instructions,
             chat_client=chat_client,
             tools=[save_research_plan, save_research_findings, save_final_report],
             temperature=settings.llm_temperature,
             max_tokens=settings.llm_max_output_tokens,
-            additional_chat_options={"reasoning": {"effort": "high", "summary": "concise"}},
         )
+        return deep_research_chat_agent
 
     async def start_research(
         self,
