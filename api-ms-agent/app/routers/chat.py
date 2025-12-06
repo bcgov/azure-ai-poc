@@ -1,5 +1,6 @@
 """Chat router - API endpoints for chat functionality."""
 
+from textwrap import shorten
 from typing import Annotated
 from uuid import uuid4
 
@@ -17,6 +18,9 @@ from app.services.cosmos_db_service import CosmosDbService, get_cosmos_db_servic
 from app.services.embedding_service import EmbeddingService, get_embedding_service
 
 router = APIRouter()
+
+# Prompt/cost guards
+MAX_CONTEXT_CHARS_PER_CHUNK = 600
 
 
 class ChatMessage(BaseModel):
@@ -114,8 +118,8 @@ async def chat(
                 search_options = VectorSearchOptions(
                     user_id=user_id,
                     document_id=request.document_id,
-                    top_k=10,  # Get more context for better responses
-                    min_similarity=0.3,  # Lower threshold for inclusive search
+                    top_k=5,  # Fewer chunks to reduce prompt size/cost
+                    min_similarity=0.4,  # Slightly stricter to avoid weak matches
                 )
                 search_results = await search.vector_search(embedding, search_options)
 
@@ -123,9 +127,12 @@ async def chat(
                     # Build document context from search results
                     context_parts = []
                     for result in search_results:
+                        content_snippet = shorten(
+                            result["content"], width=MAX_CONTEXT_CHARS_PER_CHUNK, placeholder=" …"
+                        )
                         context_parts.append(
                             f"[Source: {result['metadata'].get('title', 'Document')}]\n"
-                            f"{result['content']}"
+                            f"{content_snippet}"
                         )
                         # Azure Search returns cosine similarity scores
                         # Scores above 0.5 are typically good matches

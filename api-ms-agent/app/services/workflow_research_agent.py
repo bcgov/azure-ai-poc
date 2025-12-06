@@ -158,6 +158,7 @@ You MUST respond with ONLY valid JSON using this exact format:
                 ],
                 response_format={"type": "json_object"},
                 temperature=settings.llm_temperature,  # Low temperature for high confidence
+                max_tokens=settings.llm_max_output_tokens,
             )
 
             plan_data = json.loads(response.choices[0].message.content or "{}")
@@ -245,6 +246,8 @@ Research questions to address: {", ".join(state.plan.research_questions)}""",
                     ],
                     response_format={"type": "json_object"},
                     temperature=settings.llm_temperature,  # Low temperature for high confidence
+                    max_tokens=settings.llm_max_output_tokens,
+                    additional_chat_options={"reasoning": {"effort": "high", "summary": "concise"}},
                 )
 
                 finding_data = json.loads(response.choices[0].message.content or "{}")
@@ -342,7 +345,9 @@ Write in a clear, professional style using markdown formatting.""",
 {findings_text}""",
                     },
                 ],
-                temperature=settings.llm_temperature,  # Low temperature for high confidence
+                response_format={"type": "json_object"},
+                temperature=settings.llm_temperature,
+                max_tokens=settings.llm_max_output_tokens,
             )
 
             state.final_report = response.choices[0].message.content or ""
