@@ -10,55 +10,50 @@ const Dashboard: FC = () => {
   const [activeView, setActiveView] = useState<'chat' | 'tenants'>('chat')
   const { hasRole } = useAuth()
 
-  const canManageTenants = hasRole(['azure-ai-poc-super-admin', 'TENANT_ADMIN'])
+  const canManageTenants = hasRole(['TENANT_ADMIN'])
 
   return (
-    <Container fluid>
-      <Row>
-        <Col xs={12}>
-          <div className="d-flex justify-content-center mb-4 mt-4">
-            <div className="d-flex gap-2">
-              <Button
-                variant={activeView === 'chat' ? 'primary' : 'outline-primary'}
-                onClick={() => setActiveView('chat')}
-                className="px-4 py-2"
-                style={{
-                  fontWeight: '600',
-                  borderRadius: '0.75rem',
-                  boxShadow:
-                    activeView === 'chat'
-                      ? '0 0.125rem 0.375rem rgba(13, 110, 253, 0.25)'
-                      : '0 0.0625rem 0.1875rem rgba(0, 0, 0, 0.08)',
-                  border: activeView === 'chat' ? 'none' : '0.125rem solid #0d6efd',
-                }}
-              >
-                <i className="bi bi-chat-dots me-2"></i>
-                AI Chat
-              </Button>
-              {canManageTenants && (
+    <Container fluid className="p-0">
+      {/* Only show tenant tab if user has admin role */}
+      {canManageTenants && (
+        <Row className="g-0">
+          <Col xs={12}>
+            <div className="d-flex justify-content-center py-2 border-bottom bg-light">
+              <div className="d-flex gap-2">
                 <Button
-                  variant={activeView === 'tenants' ? 'primary' : 'outline-primary'}
-                  onClick={() => setActiveView('tenants')}
-                  className="px-4 py-2"
+                  variant={activeView === 'chat' ? 'link' : 'link'}
+                  onClick={() => setActiveView('chat')}
+                  className="px-3 py-1 text-decoration-none"
                   style={{
-                    fontWeight: '600',
-                    borderRadius: '0.75rem',
-                    boxShadow:
-                      activeView === 'tenants'
-                        ? '0 0.125rem 0.375rem rgba(13, 110, 253, 0.25)'
-                        : '0 0.0625rem 0.1875rem rgba(0, 0, 0, 0.08)',
-                    border: activeView === 'tenants' ? 'none' : '0.125rem solid #0d6efd',
+                    fontWeight: activeView === 'chat' ? '600' : '400',
+                    color: activeView === 'chat' ? '#0969da' : '#656d76',
+                    borderBottom: activeView === 'chat' ? '2px solid #0969da' : '2px solid transparent',
+                    borderRadius: 0,
                   }}
                 >
-                  <i className="bi bi-building me-2"></i>
-                  Tenant Management
+                  <i className="bi bi-chat-dots me-1"></i>
+                  Chat
                 </Button>
-              )}
+                <Button
+                  variant="link"
+                  onClick={() => setActiveView('tenants')}
+                  className="px-3 py-1 text-decoration-none"
+                  style={{
+                    fontWeight: activeView === 'tenants' ? '600' : '400',
+                    color: activeView === 'tenants' ? '#0969da' : '#656d76',
+                    borderBottom: activeView === 'tenants' ? '2px solid #0969da' : '2px solid transparent',
+                    borderRadius: 0,
+                  }}
+                >
+                  <i className="bi bi-building me-1"></i>
+                  Tenants
+                </Button>
+              </div>
             </div>
-          </div>
-        </Col>
-      </Row>
-      <Row>
+          </Col>
+        </Row>
+      )}
+      <Row className="g-0">
         <Col xs={12}>
           {activeView === 'chat' ? (
             <ChatPage />

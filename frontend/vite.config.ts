@@ -33,7 +33,7 @@ export default ({ mode }) => {
       proxy: {
         // Proxy API requests to the backend
         '/api': {
-          target: process.env.VITE_API_BASE_URL || 'http://localhost:3001',
+          target: process.env.VITE_API_BASE_URL || 'http://localhost:4000',
           changeOrigin: true,
         },
       },

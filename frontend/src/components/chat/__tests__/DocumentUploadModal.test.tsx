@@ -47,13 +47,13 @@ describe('DocumentUploadModal', () => {
     render(<DocumentUploadModal {...defaultProps} />)
     
     const fileInput = document.body.querySelector('input[type="file"]')
-    expect(fileInput).toHaveAttribute('accept', '.pdf,.md,.html,.htm')
+    expect(fileInput).toHaveAttribute('accept', '.pdf,.docx,.doc,.xlsx,.xls,.pptx,.ppt,.md,.html,.htm,.txt,.jpg,.jpeg,.png,.bmp,.tiff,.heif')
   })
 
   it('should display supported formats text', () => {
     render(<DocumentUploadModal {...defaultProps} />)
     
-    expect(screen.getByText(/Supported formats: PDF, Markdown/i)).toBeInTheDocument()
+    expect(screen.getByText(/Supported formats: PDF, Word, Excel, PowerPoint, Markdown, HTML, Text, Images/i)).toBeInTheDocument()
   })
 
   it('should render Cancel button', () => {
