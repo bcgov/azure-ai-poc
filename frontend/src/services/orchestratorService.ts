@@ -55,14 +55,19 @@ export async function queryOrchestrator(
   query: string,
   sessionId?: string
 ): Promise<OrchestratorQueryResponse> {
-  const response = await httpClient.post<OrchestratorQueryResponse>(
-    `/api/v1/orchestrator/query`,
-    {
-      query,
-      session_id: sessionId,
-    }
-  );
-  return response.data;
+  try {
+    const response = await httpClient.post<OrchestratorQueryResponse>(
+      `/api/v1/orchestrator/query`,
+      {
+        query,
+        session_id: sessionId,
+      }
+    );
+    return response.data;
+  } catch (error: any) {
+    const detail = error?.response?.data?.detail || error?.message || 'Failed to process query';
+    throw new Error(detail);
+  }
 }
 
 /**

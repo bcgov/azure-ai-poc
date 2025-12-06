@@ -98,11 +98,9 @@ def test_chat_endpoint_insufficient_info(client, auth_headers):
             headers=auth_headers,
         )
 
-        assert response.status_code == 200
+        assert response.status_code == 500
         data = response.json()
-        assert "has_sufficient_info" in data
-        assert data["has_sufficient_info"] is False
-        assert "sources" in data
+        assert "citations" in data.get("detail", "").lower()
     finally:
         # Clean up override
         app.dependency_overrides.clear()

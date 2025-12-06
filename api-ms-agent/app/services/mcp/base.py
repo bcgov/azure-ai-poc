@@ -5,12 +5,16 @@ This module provides base classes and data structures for implementing
 MCP (Model Context Protocol) tool wrappers for external APIs.
 """
 
+import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
+from urllib.parse import urlencode
 
 import httpx
+from jsonschema import ValidationError as JsonSchemaValidationError
+from jsonschema import validate as jsonschema_validate
 
 from app.logger import get_logger
 
@@ -92,6 +96,10 @@ class MCPWrapper(ABC):
         base_url: str,
         timeout: float = 30.0,
         headers: dict[str, str] | None = None,
+        max_retries: int = 3,
+        backoff_factor: float = 0.5,
+        max_connections: int = 10,
+        max_keepalive_connections: int = 5,
     ):
         """
         Initialize the MCP wrapper.
@@ -105,6 +113,11 @@ class MCPWrapper(ABC):
         self.timeout = timeout
         self.headers = headers or {}
         self._client: httpx.AsyncClient | None = None
+        self._max_retries = max_retries
+        self._backoff_factor = backoff_factor
+        self._client_limits = httpx.Limits(
+            max_connections=max_connections, max_keepalive_connections=max_keepalive_connections
+        )
 
     @property
     def name(self) -> str:
@@ -133,13 +146,37 @@ class MCPWrapper(ABC):
 
     async def _get_client(self) -> httpx.AsyncClient:
         """Get or create the HTTP client."""
-        if self._client is None or self._client.is_closed:
+        if self._client is None or getattr(self._client, "is_closed", False):
             self._client = httpx.AsyncClient(
                 base_url=self.base_url,
-                timeout=self.timeout,
+                timeout=httpx.Timeout(self.timeout),
                 headers=self.headers,
+                limits=self._client_limits,
             )
         return self._client
+
+    def _get_tool_by_name(self, name: str) -> MCPTool | None:
+        """Return the MCPTool for a name if declared by the wrapper."""
+        for t in self.tools:
+            if t.name == name:
+                return t
+        return None
+
+    def validate_arguments(
+        self, tool: MCPTool, arguments: dict[str, Any]
+    ) -> tuple[bool, str | None]:
+        """Validate arguments against a tool's `input_schema` using jsonschema.
+
+        Returns:
+            (True, None) if validation passes, otherwise (False, error_message)
+        """
+        if not tool or not getattr(tool, "input_schema", None):
+            return True, None
+        try:
+            jsonschema_validate(instance=arguments or {}, schema=tool.input_schema)
+            return True, None
+        except JsonSchemaValidationError as e:
+            return False, str(e)
 
     async def _request(
         self,
@@ -164,14 +201,56 @@ class MCPWrapper(ABC):
             httpx.HTTPError: If the request fails
         """
         client = await self._get_client()
-        response = await client.request(
-            method=method,
-            url=path,
-            params=params,
-            json=json_data,
-        )
-        response.raise_for_status()
-        return response.json()
+
+        last_exc: Exception | None = None
+        for attempt in range(1, self._max_retries + 1):
+            try:
+                response = await client.request(
+                    method=method,
+                    url=path,
+                    params=params,
+                    json=json_data,
+                )
+                # Retry on 5xx and 429
+                if response.status_code == 429:
+                    retry_after = response.headers.get("Retry-After")
+                    wait = (
+                        int(retry_after)
+                        if retry_after and retry_after.isdigit()
+                        else self._backoff_factor * (2 ** (attempt - 1))
+                    )
+                    await asyncio.sleep(wait)
+                    last_exc = httpx.HTTPStatusError(
+                        "Too many requests", request=response.request, response=response
+                    )
+                    continue
+                if 500 <= response.status_code < 600:
+                    await asyncio.sleep(self._backoff_factor * (2 ** (attempt - 1)))
+                    last_exc = httpx.HTTPStatusError(
+                        "Server error", request=response.request, response=response
+                    )
+                    continue
+
+                response.raise_for_status()
+
+                # Try to parse JSON defensively
+                content_type = response.headers.get("Content-Type", "")
+                if "application/json" in content_type or "json" in content_type:
+                    try:
+                        return response.json()
+                    except Exception:
+                        # Fallback to text as a dict with message
+                        return {"raw_text": response.text}
+                # If not JSON, return text as dict
+                return {"raw_text": response.text}
+            except httpx.HTTPError as e:
+                last_exc = e
+                # Last attempt -> re-raise
+                if attempt == self._max_retries:
+                    raise
+                await asyncio.sleep(self._backoff_factor * (2 ** (attempt - 1)))
+        if last_exc:
+            raise last_exc
 
     def _build_source_info(
         self,
@@ -194,10 +273,10 @@ class MCPWrapper(ABC):
         Returns:
             Source info dictionary
         """
-        # Build full URL with params
+        # Build full URL with params (safely encoded)
         full_url = f"{self.base_url}{endpoint}"
         if params:
-            param_str = "&".join(f"{k}={v}" for k, v in params.items())
+            param_str = urlencode(params, doseq=True)
             full_url = f"{full_url}?{param_str}"
 
         source = {

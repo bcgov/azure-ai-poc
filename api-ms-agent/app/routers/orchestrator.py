@@ -54,7 +54,7 @@ class OrchestratorQueryResponse(BaseModel):
 
     response: str = Field(..., description="Synthesized response to the user's query")
     sources: list[SourceInfo] = Field(
-        ..., description="List of sources used to generate the response"
+        ..., min_length=1, description="List of sources used to generate the response"
     )
     has_sufficient_info: bool = Field(..., description="Whether sufficient information was found")
     key_findings: list[str] = Field(default_factory=list, description="Key findings from the query")
@@ -104,6 +104,12 @@ async def query_orchestrator(
             )
             for s in result.get("sources", [])
         ]
+
+        if not sources:
+            raise HTTPException(
+                status_code=500,
+                detail="Citations are required but none were returned by the orchestrator",
+            )
 
         response = OrchestratorQueryResponse(
             response=result.get("response", ""),

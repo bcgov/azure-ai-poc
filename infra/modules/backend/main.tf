@@ -60,7 +60,7 @@ resource "azurerm_linux_web_app" "backend" {
   app_settings = {
     ENVIRONMENT                           = var.node_env
     PORT                                  = "80"
-    WEBSITES_PORT                         = "3000"
+    WEBSITES_PORT                         = "80"
     DOCKER_ENABLE_CI                      = "true"
     APPLICATIONINSIGHTS_CONNECTION_STRING = var.appinsights_connection_string
     APPINSIGHTS_INSTRUMENTATIONKEY        = var.appinsights_instrumentation_key

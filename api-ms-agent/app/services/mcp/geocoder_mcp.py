@@ -7,6 +7,7 @@ API Documentation: https://www2.gov.bc.ca/gov/content?id=118DD57CD9674D57BDBD511
 
 from typing import Any
 
+from app.config import settings
 from app.logger import get_logger
 from app.services.mcp.base import ConfidenceLevel, MCPTool, MCPToolResult, MCPWrapper
 
@@ -27,9 +28,12 @@ class GeocoderMCP(MCPWrapper):
     - Reverse geocoding from coordinates
     """
 
-    def __init__(self):
+    def __init__(self, base_url: str | None = None):
         """Initialize the Geocoder MCP wrapper."""
-        super().__init__(base_url=GEOCODER_BASE_URL)
+        configured_base = (
+            base_url or getattr(settings, "geocoder_base_url", None) or GEOCODER_BASE_URL
+        )
+        super().__init__(base_url=configured_base)
         logger.info("GeocoderMCP initialized")
 
     @property
@@ -141,7 +145,12 @@ class GeocoderMCP(MCPWrapper):
     async def execute_tool(self, tool_name: str, arguments: dict[str, Any]) -> MCPToolResult:
         """Execute a Geocoder MCP tool."""
         logger.info(f"[GeocoderMCP] Executing tool: {tool_name}")
-
+        # Validate arguments according to declared tool schema
+        tool = self._get_tool_by_name(tool_name)
+        if tool:
+            ok, err = self.validate_arguments(tool, arguments)
+            if not ok:
+                return MCPToolResult(success=False, error=f"Invalid arguments: {err}")
         try:
             if tool_name == "geocoder_geocode":
                 return await self._geocode_address(arguments)
