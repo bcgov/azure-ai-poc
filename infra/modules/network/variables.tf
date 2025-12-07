@@ -76,3 +76,17 @@ variable "apim_subnet_name" {
   default     = "apim-subnet"
   nullable    = false
 }
+
+variable "jumpbox_subnet_name" {
+  description = "Name of the subnet for Jumpbox VM"
+  type        = string
+  default     = "jumpbox-subnet"
+  nullable    = false
+}
+
+variable "bastion_subnet_name" {
+  description = "Name of the subnet for Azure Bastion (must be AzureBastionSubnet)"
+  type        = string
+  default     = "AzureBastionSubnet"
+  nullable    = false
+}

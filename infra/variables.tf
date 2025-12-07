@@ -219,3 +219,26 @@ variable "keycloak_url" {
   nullable    = false
   default     = "https://dev.loginproxy.gov.bc.ca/auth"
 }
+
+# -----------------------------------------------------------------------------
+# Jumpbox (Spot VM) and Bastion Variables
+# -----------------------------------------------------------------------------
+
+variable "jumpbox_vm_size" {
+  description = "Size of the Jumpbox Spot VM (4 vCPU, 8 GB RAM)"
+  type        = string
+  default     = "Standard_D4as_v5"
+}
+
+variable "jumpbox_admin_username" {
+  description = "Admin username for the Jumpbox VM"
+  type        = string
+  default     = "azureadmin"
+}
+
+variable "bastion_sku" {
+  description = "SKU for Azure Bastion (Basic or Standard)"
+  type        = string
+  default     = "Basic"
+}
+

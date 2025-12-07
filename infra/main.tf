@@ -269,3 +269,61 @@ resource "azurerm_role_assignment" "backend_cognitive_services_user" {
     module.document_intelligence
   ]
 }
+
+# -----------------------------------------------------------------------------
+# Jumpbox VM (Azure Spot) and Bastion for secure access
+# -----------------------------------------------------------------------------
+
+# Azure Bastion for secure VM access
+module "bastion" {
+  source = "./modules/bastion"
+
+  app_name            = var.app_name
+  resource_group_name = azurerm_resource_group.main.name
+  location            = var.location
+  common_tags         = var.common_tags
+  bastion_subnet_id   = module.network.bastion_subnet_id
+  bastion_sku         = var.bastion_sku
+
+  depends_on = [azurerm_resource_group.main, module.network]
+}
+
+# Azure Spot VM (Jumpbox) for development/testing
+module "jumpbox" {
+  source = "./modules/jumpbox"
+
+  app_name            = var.app_name
+  resource_group_name = azurerm_resource_group.main.name
+  location            = var.location
+  common_tags         = var.common_tags
+  subnet_id           = module.network.jumpbox_subnet_id
+  vm_size             = var.jumpbox_vm_size
+  admin_username      = var.jumpbox_admin_username
+
+  depends_on = [azurerm_resource_group.main, module.network]
+}
+
+# Role assignment to allow Jumpbox VM to access Azure OpenAI
+resource "azurerm_role_assignment" "jumpbox_cognitive_services_openai_user" {
+  scope                = module.azure_openai.openai_id
+  role_definition_name = "Cognitive Services OpenAI User"
+  principal_id         = module.jumpbox.principal_id
+
+  depends_on = [
+    module.jumpbox,
+    module.azure_openai
+  ]
+}
+
+# Role assignment to allow Jumpbox VM to access Cosmos DB
+resource "azurerm_role_assignment" "jumpbox_cosmos_db_contributor" {
+  scope                = module.cosmos.account_id
+  role_definition_name = "Cosmos DB Account Reader Role"
+  principal_id         = module.jumpbox.principal_id
+
+  depends_on = [
+    module.jumpbox,
+    module.cosmos
+  ]
+}
+

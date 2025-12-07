@@ -42,3 +42,38 @@ output "azure_document_intelligence_host" {
   description = "The host portion of the Azure Document Intelligence endpoint"
   value       = module.document_intelligence.host
 }
+
+# -----------------------------------------------------------------------------
+# Jumpbox and Bastion Outputs
+# -----------------------------------------------------------------------------
+
+output "jumpbox_vm_name" {
+  description = "Name of the Jumpbox VM"
+  value       = module.jumpbox.vm_name
+}
+
+output "jumpbox_private_ip" {
+  description = "Private IP address of the Jumpbox VM"
+  value       = module.jumpbox.private_ip_address
+}
+
+output "jumpbox_admin_username" {
+  description = "Admin username for SSH access to the Jumpbox"
+  value       = module.jumpbox.admin_username
+}
+
+output "jumpbox_ssh_private_key_path" {
+  description = "Path to the SSH private key file for Jumpbox access"
+  value       = module.jumpbox.ssh_private_key_path
+}
+
+output "bastion_name" {
+  description = "Name of the Azure Bastion host"
+  value       = module.bastion.bastion_name
+}
+
+output "bastion_dns_name" {
+  description = "DNS name of the Azure Bastion host"
+  value       = module.bastion.bastion_dns_name
+}
+
