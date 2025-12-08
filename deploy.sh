@@ -118,6 +118,8 @@ NO_CACHE=false
 VERBOSE=false
 DRY_RUN=false
 USE_STATIC_IMAGES=false
+MAX_RETRIES=3
+RETRY_DELAY=30
 
 # Backend configuration (can be overridden by environment variables)
 BACKEND_RESOURCE_GROUP="${BACKEND_RESOURCE_GROUP:-b9cee3-tools-networking}"
@@ -180,6 +182,8 @@ OPTIONS:
   --build              Also build containers before Terraform operations
   --no-cache           Build containers without using cache
   --static-images      Use static image values from tfvars (don't override with git tags)
+  --retries=N          Number of retry attempts for failed Terraform operations (default: 3)
+  --retry-delay=N      Seconds to wait between retries (default: 30)
   --verbose            Enable verbose output
   --dry-run            Show what would be done without executing
   --help               Show this help message
@@ -861,6 +865,49 @@ terraform_plan() {
 }
 
 #
+# Executes a command with retry logic for transient failures
+# Arguments:
+#   $1: Command description (for logging)
+#   $@: Command and arguments to execute
+# Returns: 0 on success, 1 if all retries exhausted
+#
+retry_command() {
+  local description="$1"
+  shift
+  local cmd="$@"
+  local attempt=1
+  local exit_code=0
+  
+  while [ $attempt -le $MAX_RETRIES ]; do
+    log "INFO" "$description (attempt $attempt/$MAX_RETRIES)"
+    
+    # Execute the command
+    if eval "$cmd"; then
+      return 0
+    fi
+    
+    exit_code=$?
+    
+    if [ $attempt -lt $MAX_RETRIES ]; then
+      log "WARN" "$description failed (exit code: $exit_code). Retrying in ${RETRY_DELAY}s..."
+      log "WARN" "This may be due to Azure API throttling or transient network issues."
+      sleep $RETRY_DELAY
+      
+      # Exponential backoff: double the delay for next attempt (capped at 120s)
+      RETRY_DELAY=$((RETRY_DELAY * 2))
+      if [ $RETRY_DELAY -gt 120 ]; then
+        RETRY_DELAY=120
+      fi
+    fi
+    
+    attempt=$((attempt + 1))
+  done
+  
+  log "ERROR" "$description failed after $MAX_RETRIES attempts"
+  return 1
+}
+
+#
 # Executes terraform apply with specified variables file
 # Arguments: None
 # Returns: 0 on success, 1 on failure
@@ -887,7 +934,10 @@ terraform_apply() {
   if [ "$DRY_RUN" = true ]; then
     log "INFO" "[DRY RUN] Would execute: terraform apply $apply_args"
   else
-    if terraform apply $apply_args; then
+    # Use retry wrapper for terraform apply
+    local original_retry_delay=$RETRY_DELAY
+    if retry_command "Terraform apply" "terraform apply $apply_args"; then
+      RETRY_DELAY=$original_retry_delay  # Reset for future operations
       log "SUCCESS" "Terraform apply completed successfully"
       
       # Show outputs
@@ -905,7 +955,8 @@ terraform_apply() {
         fi
       fi
     else
-      log "ERROR" "Terraform apply failed"
+      RETRY_DELAY=$original_retry_delay  # Reset for future operations
+      log "ERROR" "Terraform apply failed after all retry attempts"
       return 1
     fi
   fi
@@ -945,10 +996,14 @@ terraform_destroy() {
   if [ "$DRY_RUN" = true ]; then
     log "INFO" "[DRY RUN] Would execute: terraform destroy $destroy_args"
   else
-    if terraform destroy $destroy_args; then
+    # Use retry wrapper for terraform destroy
+    local original_retry_delay=$RETRY_DELAY
+    if retry_command "Terraform destroy" "terraform destroy $destroy_args"; then
+      RETRY_DELAY=$original_retry_delay  # Reset for future operations
       log "SUCCESS" "Terraform destroy completed successfully"
     else
-      log "ERROR" "Terraform destroy failed"
+      RETRY_DELAY=$original_retry_delay  # Reset for future operations
+      log "ERROR" "Terraform destroy failed after all retry attempts"
       return 1
     fi
   fi
@@ -986,6 +1041,22 @@ parse_arguments() {
         ;;
       --no-cache)
         NO_CACHE=true
+        shift
+        ;;
+      --retries=*)
+        MAX_RETRIES="${1#*=}"
+        if ! [[ "$MAX_RETRIES" =~ ^[0-9]+$ ]] || [ "$MAX_RETRIES" -lt 1 ]; then
+          log "ERROR" "Invalid retries value: $MAX_RETRIES (must be a positive integer)"
+          return 1
+        fi
+        shift
+        ;;
+      --retry-delay=*)
+        RETRY_DELAY="${1#*=}"
+        if ! [[ "$RETRY_DELAY" =~ ^[0-9]+$ ]] || [ "$RETRY_DELAY" -lt 1 ]; then
+          log "ERROR" "Invalid retry-delay value: $RETRY_DELAY (must be a positive integer)"
+          return 1
+        fi
         shift
         ;;
       --verbose)

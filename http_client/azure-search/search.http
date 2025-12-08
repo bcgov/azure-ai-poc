@@ -1,0 +1,373 @@
+###############################################################################
+# Azure AI Search REST API Client
+# Reference: https://learn.microsoft.com/en-us/rest/api/searchservice/
+###############################################################################
+
+# Load environment variables from .env file
+@baseUrl = {{$dotenv AZURE_SEARCH_ENDPOINT}}
+@apiKey = {{$dotenv AZURE_SEARCH_API_KEY}}
+@indexName = {{$dotenv AZURE_SEARCH_INDEX_NAME}}
+@apiVersion = {{$dotenv AZURE_SEARCH_API_VERSION}}
+
+###############################################################################
+# SERVICE OPERATIONS
+###############################################################################
+
+### Get Service Statistics
+# @name getServiceStats
+GET {{baseUrl}}/servicestats?api-version={{apiVersion}}
+Content-Type: application/json
+api-key: {{apiKey}}
+
+###############################################################################
+# INDEX OPERATIONS
+# Reference: https://learn.microsoft.com/en-us/rest/api/searchservice/indexes
+###############################################################################
+
+### List All Indexes
+# @name listIndexes
+GET {{baseUrl}}/indexes?api-version={{apiVersion}}
+Content-Type: application/json
+api-key: {{apiKey}}
+
+###############################################################################
+
+### Get Index Definition
+# @name getIndex
+GET {{baseUrl}}/indexes/{{indexName}}?api-version={{apiVersion}}
+Content-Type: application/json
+api-key: {{apiKey}}
+
+###############################################################################
+
+### Get Index Statistics
+# @name getIndexStats
+GET {{baseUrl}}/indexes/{{indexName}}/stats?api-version={{apiVersion}}
+Content-Type: application/json
+api-key: {{apiKey}}
+
+###############################################################################
+
+### Create or Update Index (with Vector Search)
+# @name createIndex
+PUT {{baseUrl}}/indexes/{{indexName}}?api-version={{apiVersion}}
+Content-Type: application/json
+api-key: {{apiKey}}
+
+{
+    "name": "{{indexName}}",
+    "fields": [
+        {
+            "name": "id",
+            "type": "Edm.String",
+            "key": true,
+            "filterable": true
+        },
+        {
+            "name": "document_id",
+            "type": "Edm.String",
+            "filterable": true,
+            "facetable": true
+        },
+        {
+            "name": "user_id",
+            "type": "Edm.String",
+            "filterable": true,
+            "facetable": true
+        },
+        {
+            "name": "content",
+            "type": "Edm.String",
+            "searchable": true,
+            "analyzer": "standard.lucene"
+        },
+        {
+            "name": "chunk_index",
+            "type": "Edm.Int32",
+            "filterable": true,
+            "sortable": true
+        },
+        {
+            "name": "embedding",
+            "type": "Collection(Edm.Single)",
+            "searchable": true,
+            "dimensions": 3072,
+            "vectorSearchProfile": "vector-profile"
+        },
+        {
+            "name": "created_at",
+            "type": "Edm.DateTimeOffset",
+            "filterable": true,
+            "sortable": true
+        },
+        {
+            "name": "metadata",
+            "type": "Edm.String",
+            "searchable": false
+        }
+    ],
+    "vectorSearch": {
+        "algorithms": [
+            {
+                "name": "hnsw-algorithm",
+                "kind": "hnsw",
+                "hnswParameters": {
+                    "m": 4,
+                    "efConstruction": 400,
+                    "efSearch": 500,
+                    "metric": "cosine"
+                }
+            }
+        ],
+        "profiles": [
+            {
+                "name": "vector-profile",
+                "algorithm": "hnsw-algorithm"
+            }
+        ]
+    }
+}
+
+###############################################################################
+
+### Delete Index
+# @name deleteIndex
+DELETE {{baseUrl}}/indexes/{{indexName}}?api-version={{apiVersion}}
+Content-Type: application/json
+api-key: {{apiKey}}
+
+###############################################################################
+# DOCUMENT OPERATIONS - SEARCH
+# Reference: https://learn.microsoft.com/en-us/rest/api/searchservice/documents/search-post
+###############################################################################
+
+### Simple Text Search
+# @name simpleSearch
+POST {{baseUrl}}/indexes/{{indexName}}/docs/search?api-version={{apiVersion}}
+Content-Type: application/json
+api-key: {{apiKey}}
+
+{
+    "search": "Azure OpenAI",
+    "top": 10,
+    "count": true
+}
+
+###############################################################################
+
+### Search with Filter
+# @name searchWithFilter
+POST {{baseUrl}}/indexes/{{indexName}}/docs/search?api-version={{apiVersion}}
+Content-Type: application/json
+api-key: {{apiKey}}
+
+{
+    "search": "*",
+    "filter": "user_id eq 'user123'",
+    "select": "id, document_id, content, created_at",
+    "orderby": "created_at desc",
+    "top": 20,
+    "count": true
+}
+
+###############################################################################
+
+### Search with Facets
+# @name searchWithFacets
+POST {{baseUrl}}/indexes/{{indexName}}/docs/search?api-version={{apiVersion}}
+Content-Type: application/json
+api-key: {{apiKey}}
+
+{
+    "search": "*",
+    "facets": ["user_id", "document_id"],
+    "top": 0,
+    "count": true
+}
+
+###############################################################################
+
+### Search with Highlighting
+# @name searchWithHighlight
+POST {{baseUrl}}/indexes/{{indexName}}/docs/search?api-version={{apiVersion}}
+Content-Type: application/json
+api-key: {{apiKey}}
+
+{
+    "search": "machine learning",
+    "searchFields": "content",
+    "highlight": "content",
+    "highlightPreTag": "<mark>",
+    "highlightPostTag": "</mark>",
+    "top": 10,
+    "count": true
+}
+
+###############################################################################
+
+### Vector Similarity Search
+# @name vectorSearch
+POST {{baseUrl}}/indexes/{{indexName}}/docs/search?api-version={{apiVersion}}
+Content-Type: application/json
+api-key: {{apiKey}}
+
+{
+    "vectorQueries": [
+        {
+            "kind": "vector",
+            "vector": [0.1, 0.2, 0.3],
+            "fields": "embedding",
+            "k": 5
+        }
+    ],
+    "select": "id, document_id, content, chunk_index"
+}
+
+###############################################################################
+
+### Hybrid Search (Text + Vector)
+# @name hybridSearch
+POST {{baseUrl}}/indexes/{{indexName}}/docs/search?api-version={{apiVersion}}
+Content-Type: application/json
+api-key: {{apiKey}}
+
+{
+    "search": "natural language processing",
+    "vectorQueries": [
+        {
+            "kind": "vector",
+            "vector": [0.1, 0.2, 0.3],
+            "fields": "embedding",
+            "k": 5
+        }
+    ],
+    "select": "id, document_id, content",
+    "top": 10
+}
+
+###############################################################################
+
+### Vector Search with Filter
+# @name vectorSearchWithFilter
+POST {{baseUrl}}/indexes/{{indexName}}/docs/search?api-version={{apiVersion}}
+Content-Type: application/json
+api-key: {{apiKey}}
+
+{
+    "vectorQueries": [
+        {
+            "kind": "vector",
+            "vector": [0.1, 0.2, 0.3],
+            "fields": "embedding",
+            "k": 10
+        }
+    ],
+    "filter": "user_id eq 'user123' and document_id eq 'doc456'",
+    "select": "id, content, chunk_index"
+}
+
+###############################################################################
+# DOCUMENT OPERATIONS - INDEXING
+# Reference: https://learn.microsoft.com/en-us/rest/api/searchservice/documents
+###############################################################################
+
+### Upload Documents (mergeOrUpload)
+# @name uploadDocuments
+POST {{baseUrl}}/indexes/{{indexName}}/docs/index?api-version={{apiVersion}}
+Content-Type: application/json
+api-key: {{apiKey}}
+
+{
+    "value": [
+        {
+            "@search.action": "mergeOrUpload",
+            "id": "doc1-chunk-0",
+            "document_id": "doc1",
+            "user_id": "user123",
+            "content": "This is the first chunk of the document about Azure services.",
+            "chunk_index": 0,
+            "embedding": [0.1, 0.2, 0.3],
+            "created_at": "2024-12-07T00:00:00Z",
+            "metadata": "{\"filename\": \"azure-guide.pdf\", \"page\": 1}"
+        },
+        {
+            "@search.action": "mergeOrUpload",
+            "id": "doc1-chunk-1",
+            "document_id": "doc1",
+            "user_id": "user123",
+            "content": "This is the second chunk about cloud computing.",
+            "chunk_index": 1,
+            "embedding": [0.4, 0.5, 0.6],
+            "created_at": "2024-12-07T00:00:00Z",
+            "metadata": "{\"filename\": \"azure-guide.pdf\", \"page\": 2}"
+        }
+    ]
+}
+
+###############################################################################
+
+### Delete Documents
+# @name deleteDocuments
+POST {{baseUrl}}/indexes/{{indexName}}/docs/index?api-version={{apiVersion}}
+Content-Type: application/json
+api-key: {{apiKey}}
+
+{
+    "value": [
+        {
+            "@search.action": "delete",
+            "id": "doc1-chunk-0"
+        },
+        {
+            "@search.action": "delete",
+            "id": "doc1-chunk-1"
+        }
+    ]
+}
+
+###############################################################################
+
+### Get Document by Key
+# @name getDocument
+GET {{baseUrl}}/indexes/{{indexName}}/docs/doc1-chunk-0?api-version={{apiVersion}}
+Content-Type: application/json
+api-key: {{apiKey}}
+
+###############################################################################
+
+### Count Documents
+# @name countDocuments
+GET {{baseUrl}}/indexes/{{indexName}}/docs/$count?api-version={{apiVersion}}
+Content-Type: application/json
+api-key: {{apiKey}}
+
+###############################################################################
+# AUTOCOMPLETE & SUGGESTIONS
+###############################################################################
+
+### Autocomplete
+# @name autocomplete
+POST {{baseUrl}}/indexes/{{indexName}}/docs/autocomplete?api-version={{apiVersion}}
+Content-Type: application/json
+api-key: {{apiKey}}
+
+{
+    "search": "Azu",
+    "autocompleteMode": "twoTerms",
+    "suggesterName": "sg"
+}
+
+###############################################################################
+
+### Suggestions
+# @name suggestions
+POST {{baseUrl}}/indexes/{{indexName}}/docs/suggest?api-version={{apiVersion}}
+Content-Type: application/json
+api-key: {{apiKey}}
+
+{
+    "search": "Azure",
+    "suggesterName": "sg",
+    "select": "content",
+    "top": 5
+}
