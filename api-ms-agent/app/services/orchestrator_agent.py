@@ -623,11 +623,30 @@ class OrchestratorAgentService:
                     name = getattr(content, "name", None)
                     arguments = getattr(content, "arguments", None)
 
+                    # Parse arguments - may be dict, JSON string, or None
+                    parsed_args: dict[str, Any] = {}
+                    if isinstance(arguments, dict):
+                        parsed_args = arguments
+                    elif isinstance(arguments, str):
+                        try:
+                            import json
+
+                            parsed_args = json.loads(arguments)
+                        except (json.JSONDecodeError, TypeError):
+                            logger.warning(f"Could not parse arguments for {name}: {arguments}")
+                    elif hasattr(content, "parse_arguments"):
+                        # MAF FunctionCallContent has parse_arguments() method
+                        try:
+                            parsed_args = content.parse_arguments() or {}
+                        except Exception:
+                            pass
+
                     if call_id and name:
                         tool_calls[call_id] = {
                             "name": name,
-                            "arguments": arguments if isinstance(arguments, dict) else {},
+                            "arguments": parsed_args,
                         }
+                        logger.debug(f"Recorded tool call: {name} with args: {parsed_args}")
 
                 # Handle FunctionResultContent - create source from matched call
                 elif isinstance(content, FunctionResultContent):
