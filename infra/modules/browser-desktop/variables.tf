@@ -73,5 +73,5 @@ variable "vnc_resolution" {
 variable "container_registry_url" {
   description = "Container registry URL (Docker Hub for accetto images)"
   type        = string
-  default     = "https://index.docker.io"
+  default     = "https://ghcr.io"
 }
