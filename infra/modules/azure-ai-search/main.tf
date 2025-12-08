@@ -62,7 +62,7 @@ resource "azurerm_private_endpoint" "search" {
 }
 
 # Diagnostic settings for monitoring
-resource "azurerm_monitor_diagnostic_setting" "search" {
+/* resource "azurerm_monitor_diagnostic_setting" "search" {
   name                       = "${var.app_name}-search-monitor-${var.app_env}"
   target_resource_id         = azurerm_search_service.main.id
   log_analytics_workspace_id = var.log_analytics_workspace_id
@@ -75,7 +75,7 @@ resource "azurerm_monitor_diagnostic_setting" "search" {
     category = "AllMetrics"
   }
 }
-
+ */
 # Role assignment for Azure AI Search to access other resources (if needed)
 # This allows the search service to access storage accounts, key vaults, etc.
 resource "azurerm_role_assignment" "search_contributor" {

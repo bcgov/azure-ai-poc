@@ -2,14 +2,26 @@
 # Azure Cosmos DB REST API Client
 # Reference: https://learn.microsoft.com/en-us/rest/api/cosmos-db/
 #
-# NOTE: Cosmos DB requires HMAC-SHA256 signature authentication which is
-# complex to generate in .http files. For production use, prefer:
-# - Azure SDK for Python/JavaScript/C#
-# - Azure Data Explorer in Azure Portal
-# - Cosmos DB Explorer extension in VS Code
+# AUTHENTICATION SETUP:
+# Cosmos DB requires HMAC-SHA256 signature authentication. Use the included
+# PowerShell script to generate the Authorization header:
 #
-# The examples below work with a proxy that handles authentication,
-# or you can use tools that support Cosmos DB auth natively.
+#   .\Generate-CosmosAuth.ps1 -Verb GET -ResourceType dbs -ResourceLink ""
+#
+# The script will output:
+#   - x-ms-date: The timestamp (must match Authorization signature)
+#   - Authorization: The HMAC-SHA256 signed token
+#
+# Copy both values and replace the placeholders below before making requests.
+#
+# EXAMPLES:
+#   List databases:     -Verb GET -ResourceType dbs -ResourceLink ""
+#   Get database:       -Verb GET -ResourceType dbs -ResourceLink "dbs/MyDB"
+#   List containers:    -Verb GET -ResourceType colls -ResourceLink "dbs/MyDB"
+#   Get container:      -Verb GET -ResourceType colls -ResourceLink "dbs/MyDB/colls/MyContainer"
+#   List documents:     -Verb GET -ResourceType docs -ResourceLink "dbs/MyDB/colls/MyContainer"
+#   Create document:    -Verb POST -ResourceType docs -ResourceLink "dbs/MyDB/colls/MyContainer"
+#   Query documents:    -Verb POST -ResourceType docs -ResourceLink "dbs/MyDB/colls/MyContainer"
 ###############################################################################
 
 # Load environment variables from .env file
@@ -21,6 +33,11 @@
 # API Version
 @apiVersion = 2018-12-31
 
+# === GENERATED AUTH VALUES (replace with output from Generate-CosmosAuth.ps1) ===
+# Run: .\Generate-CosmosAuth.ps1 -Verb <verb> -ResourceType <type> -ResourceLink "<link>"
+@authDate = Thu, 07 Dec 2025 00:00:00 GMT
+@authToken = type%3dmaster%26ver%3d1.0%26sig%3dYOUR_SIGNATURE_HERE
+
 ###############################################################################
 # DATABASE OPERATIONS
 # Reference: https://learn.microsoft.com/en-us/rest/api/cosmos-db/databases
@@ -28,20 +45,22 @@
 
 ### List Databases
 # @name listDatabases
-# Note: Requires proper authorization header with HMAC signature
+# Generate auth: .\Generate-CosmosAuth.ps1 -Verb GET -ResourceType dbs -ResourceLink ""
 GET {{baseUrl}}/dbs
 Content-Type: application/json
 x-ms-version: {{apiVersion}}
-x-ms-date: {{$datetime rfc1123}}
-
+x-ms-date: {{authDate}}
+Authorization: {{authToken}}
 ###############################################################################
 
 ### Get Database
 # @name getDatabase
+# Generate auth: .\Generate-CosmosAuth.ps1 -Verb GET -ResourceType dbs -ResourceLink "dbs/{{databaseName}}"
 GET {{baseUrl}}/dbs/{{databaseName}}
 Content-Type: application/json
 x-ms-version: {{apiVersion}}
-x-ms-date: {{$datetime rfc1123}}
+x-ms-date: {{authDate}}
+Authorization: {{authToken}}
 
 ###############################################################################
 # CONTAINER OPERATIONS
@@ -50,19 +69,23 @@ x-ms-date: {{$datetime rfc1123}}
 
 ### List Containers in Database
 # @name listContainers
+# Generate auth: .\Generate-CosmosAuth.ps1 -Verb GET -ResourceType colls -ResourceLink "dbs/{{databaseName}}"
 GET {{baseUrl}}/dbs/{{databaseName}}/colls
 Content-Type: application/json
 x-ms-version: {{apiVersion}}
-x-ms-date: {{$datetime rfc1123}}
+x-ms-date: {{authDate}}
+Authorization: {{authToken}}
 
 ###############################################################################
 
 ### Get Container
 # @name getContainer
+# Generate auth: .\Generate-CosmosAuth.ps1 -Verb GET -ResourceType colls -ResourceLink "dbs/{{databaseName}}/colls/{{containerName}}"
 GET {{baseUrl}}/dbs/{{databaseName}}/colls/{{containerName}}
 Content-Type: application/json
 x-ms-version: {{apiVersion}}
-x-ms-date: {{$datetime rfc1123}}
+x-ms-date: {{authDate}}
+Authorization: {{authToken}}
 
 ###############################################################################
 # DOCUMENT OPERATIONS
@@ -71,10 +94,12 @@ x-ms-date: {{$datetime rfc1123}}
 
 ### Create Document (Upsert)
 # @name createDocument
+# Generate auth: .\Generate-CosmosAuth.ps1 -Verb POST -ResourceType docs -ResourceLink "dbs/{{databaseName}}/colls/{{containerName}}"
 POST {{baseUrl}}/dbs/{{databaseName}}/colls/{{containerName}}/docs
 Content-Type: application/json
 x-ms-version: {{apiVersion}}
-x-ms-date: {{$datetime rfc1123}}
+x-ms-date: {{authDate}}
+Authorization: {{authToken}}
 x-ms-documentdb-partitionkey: ["user123"]
 x-ms-documentdb-is-upsert: true
 
@@ -104,20 +129,24 @@ x-ms-documentdb-is-upsert: true
 
 ### Get Document by ID
 # @name getDocument
+# Generate auth: .\Generate-CosmosAuth.ps1 -Verb GET -ResourceType docs -ResourceLink "dbs/{{databaseName}}/colls/{{containerName}}/docs/chat-session-001"
 GET {{baseUrl}}/dbs/{{databaseName}}/colls/{{containerName}}/docs/chat-session-001
 Content-Type: application/json
 x-ms-version: {{apiVersion}}
-x-ms-date: {{$datetime rfc1123}}
+x-ms-date: {{authDate}}
+Authorization: {{authToken}}
 x-ms-documentdb-partitionkey: ["user123"]
 
 ###############################################################################
 
 ### Replace Document
 # @name replaceDocument
+# Generate auth: .\Generate-CosmosAuth.ps1 -Verb PUT -ResourceType docs -ResourceLink "dbs/{{databaseName}}/colls/{{containerName}}/docs/chat-session-001"
 PUT {{baseUrl}}/dbs/{{databaseName}}/colls/{{containerName}}/docs/chat-session-001
 Content-Type: application/json
 x-ms-version: {{apiVersion}}
-x-ms-date: {{$datetime rfc1123}}
+x-ms-date: {{authDate}}
+Authorization: {{authToken}}
 x-ms-documentdb-partitionkey: ["user123"]
 
 {
@@ -151,20 +180,24 @@ x-ms-documentdb-partitionkey: ["user123"]
 
 ### Delete Document
 # @name deleteDocument
+# Generate auth: .\Generate-CosmosAuth.ps1 -Verb DELETE -ResourceType docs -ResourceLink "dbs/{{databaseName}}/colls/{{containerName}}/docs/chat-session-001"
 DELETE {{baseUrl}}/dbs/{{databaseName}}/colls/{{containerName}}/docs/chat-session-001
 Content-Type: application/json
 x-ms-version: {{apiVersion}}
-x-ms-date: {{$datetime rfc1123}}
+x-ms-date: {{authDate}}
+Authorization: {{authToken}}
 x-ms-documentdb-partitionkey: ["user123"]
 
 ###############################################################################
 
 ### List Documents in Container
 # @name listDocuments
+# Generate auth: .\Generate-CosmosAuth.ps1 -Verb GET -ResourceType docs -ResourceLink "dbs/{{databaseName}}/colls/{{containerName}}"
 GET {{baseUrl}}/dbs/{{databaseName}}/colls/{{containerName}}/docs
 Content-Type: application/json
 x-ms-version: {{apiVersion}}
-x-ms-date: {{$datetime rfc1123}}
+x-ms-date: {{authDate}}
+Authorization: {{authToken}}
 x-ms-max-item-count: 10
 
 ###############################################################################
@@ -174,10 +207,12 @@ x-ms-max-item-count: 10
 
 ### Query Documents - All Sessions for User
 # @name queryByUser
+# Generate auth: .\Generate-CosmosAuth.ps1 -Verb POST -ResourceType docs -ResourceLink "dbs/{{databaseName}}/colls/{{containerName}}"
 POST {{baseUrl}}/dbs/{{databaseName}}/colls/{{containerName}}/docs
 Content-Type: application/query+json
 x-ms-version: {{apiVersion}}
-x-ms-date: {{$datetime rfc1123}}
+x-ms-date: {{authDate}}
+Authorization: {{authToken}}
 x-ms-documentdb-isquery: true
 x-ms-documentdb-query-enablecrosspartition: true
 x-ms-max-item-count: 100
@@ -194,10 +229,12 @@ x-ms-max-item-count: 100
 
 ### Query Documents - Recent Sessions
 # @name queryRecentSessions
+# Generate auth: .\Generate-CosmosAuth.ps1 -Verb POST -ResourceType docs -ResourceLink "dbs/{{databaseName}}/colls/{{containerName}}"
 POST {{baseUrl}}/dbs/{{databaseName}}/colls/{{containerName}}/docs
 Content-Type: application/query+json
 x-ms-version: {{apiVersion}}
-x-ms-date: {{$datetime rfc1123}}
+x-ms-date: {{authDate}}
+Authorization: {{authToken}}
 x-ms-documentdb-isquery: true
 x-ms-documentdb-query-enablecrosspartition: true
 x-ms-max-item-count: 10
@@ -210,10 +247,12 @@ x-ms-max-item-count: 10
 
 ### Query with Aggregation - Count by Type
 # @name queryAggregation
+# Generate auth: .\Generate-CosmosAuth.ps1 -Verb POST -ResourceType docs -ResourceLink "dbs/{{databaseName}}/colls/{{containerName}}"
 POST {{baseUrl}}/dbs/{{databaseName}}/colls/{{containerName}}/docs
 Content-Type: application/query+json
 x-ms-version: {{apiVersion}}
-x-ms-date: {{$datetime rfc1123}}
+x-ms-date: {{authDate}}
+Authorization: {{authToken}}
 x-ms-documentdb-isquery: true
 x-ms-documentdb-query-enablecrosspartition: true
 
@@ -225,10 +264,12 @@ x-ms-documentdb-query-enablecrosspartition: true
 
 ### Query - Search in Content
 # @name querySearch
+# Generate auth: .\Generate-CosmosAuth.ps1 -Verb POST -ResourceType docs -ResourceLink "dbs/{{databaseName}}/colls/{{containerName}}"
 POST {{baseUrl}}/dbs/{{databaseName}}/colls/{{containerName}}/docs
 Content-Type: application/query+json
 x-ms-version: {{apiVersion}}
-x-ms-date: {{$datetime rfc1123}}
+x-ms-date: {{authDate}}
+Authorization: {{authToken}}
 x-ms-documentdb-isquery: true
 x-ms-documentdb-query-enablecrosspartition: true
 
@@ -243,10 +284,12 @@ x-ms-documentdb-query-enablecrosspartition: true
 
 ### Query - Pagination with Continuation
 # @name queryWithPagination
+# Generate auth: .\Generate-CosmosAuth.ps1 -Verb POST -ResourceType docs -ResourceLink "dbs/{{databaseName}}/colls/{{containerName}}"
 POST {{baseUrl}}/dbs/{{databaseName}}/colls/{{containerName}}/docs
 Content-Type: application/query+json
 x-ms-version: {{apiVersion}}
-x-ms-date: {{$datetime rfc1123}}
+x-ms-date: {{authDate}}
+Authorization: {{authToken}}
 x-ms-documentdb-isquery: true
 x-ms-documentdb-query-enablecrosspartition: true
 x-ms-max-item-count: 5
@@ -261,25 +304,31 @@ x-ms-max-item-count: 5
 
 ### List Stored Procedures
 # @name listStoredProcedures
+# Generate auth: .\Generate-CosmosAuth.ps1 -Verb GET -ResourceType sprocs -ResourceLink "dbs/{{databaseName}}/colls/{{containerName}}"
 GET {{baseUrl}}/dbs/{{databaseName}}/colls/{{containerName}}/sprocs
 Content-Type: application/json
 x-ms-version: {{apiVersion}}
-x-ms-date: {{$datetime rfc1123}}
+x-ms-date: {{authDate}}
+Authorization: {{authToken}}
 
 ###############################################################################
 
 ### List Triggers
 # @name listTriggers
+# Generate auth: .\Generate-CosmosAuth.ps1 -Verb GET -ResourceType triggers -ResourceLink "dbs/{{databaseName}}/colls/{{containerName}}"
 GET {{baseUrl}}/dbs/{{databaseName}}/colls/{{containerName}}/triggers
 Content-Type: application/json
 x-ms-version: {{apiVersion}}
-x-ms-date: {{$datetime rfc1123}}
+x-ms-date: {{authDate}}
+Authorization: {{authToken}}
 
 ###############################################################################
 
 ### List User Defined Functions
 # @name listUDFs
+# Generate auth: .\Generate-CosmosAuth.ps1 -Verb GET -ResourceType udfs -ResourceLink "dbs/{{databaseName}}/colls/{{containerName}}"
 GET {{baseUrl}}/dbs/{{databaseName}}/colls/{{containerName}}/udfs
 Content-Type: application/json
 x-ms-version: {{apiVersion}}
-x-ms-date: {{$datetime rfc1123}}
+x-ms-date: {{authDate}}
+Authorization: {{authToken}}
