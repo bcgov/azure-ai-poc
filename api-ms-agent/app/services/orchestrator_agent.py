@@ -671,7 +671,7 @@ class OrchestratorAgentService:
         Returns:
             Source dictionary with detailed citation, or None if tool not recognized
         """
-        from urllib.parse import urlencode
+        from urllib.parse import quote, urlencode
 
         # Map tool names to API info - must match actual @ai_function names
         api_mappings: dict[str, dict[str, Any]] = {
@@ -715,7 +715,9 @@ class OrchestratorAgentService:
             "parks_get_details": {
                 "source_type": "api",
                 "base_url": "https://bcparks.api.gov.bc.ca/api",
-                "endpoint_fn": lambda args: f"/protected-areas/{args.get('park_id', 'unknown')}",
+                "endpoint_fn": lambda args: (
+                    f"/protected-areas/{quote(str(args.get('park_id', 'unknown')), safe='')}"
+                ),
                 "param_mapping": lambda args: {},
                 "description_fn": lambda args: (
                     f"BC Parks API - Details for park '{args.get('park_id', 'unknown')}'"
@@ -750,7 +752,9 @@ class OrchestratorAgentService:
             "orgbook_get_topic": {
                 "source_type": "api",
                 "base_url": "https://orgbook.gov.bc.ca/api/v4",
-                "endpoint_fn": lambda args: f"/topic/{args.get('topic_id', 'unknown')}",
+                "endpoint_fn": lambda args: (
+                    f"/topic/{quote(str(args.get('topic_id', 'unknown')), safe='')}"
+                ),
                 "param_mapping": lambda args: {},
                 "description_fn": lambda args: (
                     f"BC OrgBook API - Topic details for ID {args.get('topic_id', 'unknown')}"
