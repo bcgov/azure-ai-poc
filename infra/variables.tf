@@ -219,3 +219,40 @@ variable "keycloak_url" {
   nullable    = false
   default     = "https://dev.loginproxy.gov.bc.ca/auth"
 }
+
+# Browser Desktop Module Variables
+variable "app_service_sku_name_browser_desktop" {
+  description = "SKU name for the browser desktop App Service Plan (P3v3 recommended for GUI workloads)"
+  type        = string
+  default     = "P3v3" # 8 vCPU, 32GB RAM
+}
+
+variable "browser_desktop_vnc_password" {
+  description = "Password for VNC access to the browser desktop (VNC_PW env var)"
+  type        = string
+  sensitive   = true
+}
+
+variable "browser_desktop_vnc_resolution" {
+  description = "Screen resolution for the VNC desktop"
+  type        = string
+  default     = "1920x1080"
+}
+
+variable "browser_desktop_docker_image" {
+  description = "Docker image for browser desktop (accetto/ubuntu-vnc-xfce-chromium-g3 recommended)"
+  type        = string
+  default     = "accetto/ubuntu-vnc-xfce-chromium-g3"
+}
+
+variable "browser_desktop_image_tag" {
+  description = "Tag for the browser desktop container image"
+  type        = string
+  default     = "latest"
+}
+
+variable "enable_browser_desktop" {
+  description = "Whether to deploy the browser desktop module"
+  type        = bool
+  default     = false
+}

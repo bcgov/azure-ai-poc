@@ -42,3 +42,14 @@ output "azure_document_intelligence_host" {
   description = "The host portion of the Azure Document Intelligence endpoint"
   value       = module.document_intelligence.host
 }
+
+# Browser Desktop outputs
+output "browser_desktop_url" {
+  description = "The URL of the browser desktop (noVNC)"
+  value       = var.enable_browser_desktop ? module.browser_desktop[0].browser_desktop_url : null
+}
+
+output "browser_desktop_hostname" {
+  description = "The hostname of the browser desktop App Service"
+  value       = var.enable_browser_desktop ? module.browser_desktop[0].browser_desktop_hostname : null
+}

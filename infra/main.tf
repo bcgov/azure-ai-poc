@@ -269,3 +269,25 @@ resource "azurerm_role_assignment" "backend_cognitive_services_user" {
     module.document_intelligence
   ]
 }
+
+# Browser Desktop Module - Ubuntu desktop with noVNC for accessing private PaaS services
+module "browser_desktop" {
+  count  = var.enable_browser_desktop ? 1 : 0
+  source = "./modules/browser-desktop"
+
+  app_name                   = var.app_name
+  app_env                    = var.app_env
+  resource_group_name        = azurerm_resource_group.main.name
+  location                   = var.location
+  common_tags                = var.common_tags
+  app_service_sku_name       = var.app_service_sku_name_browser_desktop
+  subnet_id                  = module.network.app_service_subnet_id
+  log_analytics_workspace_id = module.monitoring.log_analytics_workspace_id
+  repo_name                  = var.repo_name
+  docker_image               = var.browser_desktop_docker_image
+  image_tag                  = var.browser_desktop_image_tag
+  vnc_password               = var.browser_desktop_vnc_password
+  vnc_resolution             = var.browser_desktop_vnc_resolution
+
+  depends_on = [module.network, module.monitoring]
+}
