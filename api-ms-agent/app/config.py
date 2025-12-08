@@ -29,8 +29,8 @@ class Settings(BaseSettings):
     azure_openai_embedding_deployment: str = "text-embedding-3-large"
 
     # LLM Configuration - Low temperature for high confidence responses
-    llm_temperature: float = 0.1  # Low temperature for consistent, high-confidence responses
-    llm_max_output_tokens: int = 900  # Cap responses to control cost/token usage
+    llm_temperature: float = 0.0  # Low temperature for consistent, high-confidence responses
+    llm_max_output_tokens: int = 5000  # Cap responses to control cost/token usage
 
     # Dev UI (Agent Framework DevUI) settings
     devui_enabled: bool = True
