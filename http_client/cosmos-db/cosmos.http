@@ -1,0 +1,285 @@
+###############################################################################
+# Azure Cosmos DB REST API Client
+# Reference: https://learn.microsoft.com/en-us/rest/api/cosmos-db/
+#
+# NOTE: Cosmos DB requires HMAC-SHA256 signature authentication which is
+# complex to generate in .http files. For production use, prefer:
+# - Azure SDK for Python/JavaScript/C#
+# - Azure Data Explorer in Azure Portal
+# - Cosmos DB Explorer extension in VS Code
+#
+# The examples below work with a proxy that handles authentication,
+# or you can use tools that support Cosmos DB auth natively.
+###############################################################################
+
+# Load environment variables from .env file
+@baseUrl = {{$dotenv COSMOS_DB_ENDPOINT}}
+@masterKey = {{$dotenv COSMOS_DB_KEY}}
+@databaseName = {{$dotenv COSMOS_DB_DATABASE_NAME}}
+@containerName = {{$dotenv COSMOS_DB_CONTAINER_NAME}}
+
+# API Version
+@apiVersion = 2018-12-31
+
+###############################################################################
+# DATABASE OPERATIONS
+# Reference: https://learn.microsoft.com/en-us/rest/api/cosmos-db/databases
+###############################################################################
+
+### List Databases
+# @name listDatabases
+# Note: Requires proper authorization header with HMAC signature
+GET {{baseUrl}}/dbs
+Content-Type: application/json
+x-ms-version: {{apiVersion}}
+x-ms-date: {{$datetime rfc1123}}
+
+###############################################################################
+
+### Get Database
+# @name getDatabase
+GET {{baseUrl}}/dbs/{{databaseName}}
+Content-Type: application/json
+x-ms-version: {{apiVersion}}
+x-ms-date: {{$datetime rfc1123}}
+
+###############################################################################
+# CONTAINER OPERATIONS
+# Reference: https://learn.microsoft.com/en-us/rest/api/cosmos-db/collections
+###############################################################################
+
+### List Containers in Database
+# @name listContainers
+GET {{baseUrl}}/dbs/{{databaseName}}/colls
+Content-Type: application/json
+x-ms-version: {{apiVersion}}
+x-ms-date: {{$datetime rfc1123}}
+
+###############################################################################
+
+### Get Container
+# @name getContainer
+GET {{baseUrl}}/dbs/{{databaseName}}/colls/{{containerName}}
+Content-Type: application/json
+x-ms-version: {{apiVersion}}
+x-ms-date: {{$datetime rfc1123}}
+
+###############################################################################
+# DOCUMENT OPERATIONS
+# Reference: https://learn.microsoft.com/en-us/rest/api/cosmos-db/documents
+###############################################################################
+
+### Create Document (Upsert)
+# @name createDocument
+POST {{baseUrl}}/dbs/{{databaseName}}/colls/{{containerName}}/docs
+Content-Type: application/json
+x-ms-version: {{apiVersion}}
+x-ms-date: {{$datetime rfc1123}}
+x-ms-documentdb-partitionkey: ["user123"]
+x-ms-documentdb-is-upsert: true
+
+{
+    "id": "chat-session-001",
+    "user_id": "user123",
+    "type": "chat_session",
+    "title": "Conversation about Azure",
+    "created_at": "2024-12-07T10:00:00Z",
+    "last_updated": "2024-12-07T10:30:00Z",
+    "message_count": 5,
+    "messages": [
+        {
+            "role": "user",
+            "content": "What is Azure OpenAI?",
+            "timestamp": "2024-12-07T10:00:00Z"
+        },
+        {
+            "role": "assistant",
+            "content": "Azure OpenAI is a cloud service that provides access to OpenAI's models.",
+            "timestamp": "2024-12-07T10:00:05Z"
+        }
+    ]
+}
+
+###############################################################################
+
+### Get Document by ID
+# @name getDocument
+GET {{baseUrl}}/dbs/{{databaseName}}/colls/{{containerName}}/docs/chat-session-001
+Content-Type: application/json
+x-ms-version: {{apiVersion}}
+x-ms-date: {{$datetime rfc1123}}
+x-ms-documentdb-partitionkey: ["user123"]
+
+###############################################################################
+
+### Replace Document
+# @name replaceDocument
+PUT {{baseUrl}}/dbs/{{databaseName}}/colls/{{containerName}}/docs/chat-session-001
+Content-Type: application/json
+x-ms-version: {{apiVersion}}
+x-ms-date: {{$datetime rfc1123}}
+x-ms-documentdb-partitionkey: ["user123"]
+
+{
+    "id": "chat-session-001",
+    "user_id": "user123",
+    "type": "chat_session",
+    "title": "Conversation about Azure (Updated)",
+    "created_at": "2024-12-07T10:00:00Z",
+    "last_updated": "2024-12-07T11:00:00Z",
+    "message_count": 6,
+    "messages": [
+        {
+            "role": "user",
+            "content": "What is Azure OpenAI?",
+            "timestamp": "2024-12-07T10:00:00Z"
+        },
+        {
+            "role": "assistant",
+            "content": "Azure OpenAI is a cloud service that provides access to OpenAI's models.",
+            "timestamp": "2024-12-07T10:00:05Z"
+        },
+        {
+            "role": "user",
+            "content": "How do I use it?",
+            "timestamp": "2024-12-07T11:00:00Z"
+        }
+    ]
+}
+
+###############################################################################
+
+### Delete Document
+# @name deleteDocument
+DELETE {{baseUrl}}/dbs/{{databaseName}}/colls/{{containerName}}/docs/chat-session-001
+Content-Type: application/json
+x-ms-version: {{apiVersion}}
+x-ms-date: {{$datetime rfc1123}}
+x-ms-documentdb-partitionkey: ["user123"]
+
+###############################################################################
+
+### List Documents in Container
+# @name listDocuments
+GET {{baseUrl}}/dbs/{{databaseName}}/colls/{{containerName}}/docs
+Content-Type: application/json
+x-ms-version: {{apiVersion}}
+x-ms-date: {{$datetime rfc1123}}
+x-ms-max-item-count: 10
+
+###############################################################################
+# QUERY OPERATIONS
+# Reference: https://learn.microsoft.com/en-us/rest/api/cosmos-db/query-documents
+###############################################################################
+
+### Query Documents - All Sessions for User
+# @name queryByUser
+POST {{baseUrl}}/dbs/{{databaseName}}/colls/{{containerName}}/docs
+Content-Type: application/query+json
+x-ms-version: {{apiVersion}}
+x-ms-date: {{$datetime rfc1123}}
+x-ms-documentdb-isquery: true
+x-ms-documentdb-query-enablecrosspartition: true
+x-ms-max-item-count: 100
+
+{
+    "query": "SELECT * FROM c WHERE c.user_id = @userId AND c.type = @type",
+    "parameters": [
+        {"name": "@userId", "value": "user123"},
+        {"name": "@type", "value": "chat_session"}
+    ]
+}
+
+###############################################################################
+
+### Query Documents - Recent Sessions
+# @name queryRecentSessions
+POST {{baseUrl}}/dbs/{{databaseName}}/colls/{{containerName}}/docs
+Content-Type: application/query+json
+x-ms-version: {{apiVersion}}
+x-ms-date: {{$datetime rfc1123}}
+x-ms-documentdb-isquery: true
+x-ms-documentdb-query-enablecrosspartition: true
+x-ms-max-item-count: 10
+
+{
+    "query": "SELECT c.id, c.title, c.last_updated, c.message_count FROM c WHERE c.type = 'chat_session' ORDER BY c.last_updated DESC"
+}
+
+###############################################################################
+
+### Query with Aggregation - Count by Type
+# @name queryAggregation
+POST {{baseUrl}}/dbs/{{databaseName}}/colls/{{containerName}}/docs
+Content-Type: application/query+json
+x-ms-version: {{apiVersion}}
+x-ms-date: {{$datetime rfc1123}}
+x-ms-documentdb-isquery: true
+x-ms-documentdb-query-enablecrosspartition: true
+
+{
+    "query": "SELECT c.type, COUNT(1) as count FROM c GROUP BY c.type"
+}
+
+###############################################################################
+
+### Query - Search in Content
+# @name querySearch
+POST {{baseUrl}}/dbs/{{databaseName}}/colls/{{containerName}}/docs
+Content-Type: application/query+json
+x-ms-version: {{apiVersion}}
+x-ms-date: {{$datetime rfc1123}}
+x-ms-documentdb-isquery: true
+x-ms-documentdb-query-enablecrosspartition: true
+
+{
+    "query": "SELECT * FROM c WHERE CONTAINS(c.title, @searchTerm, true)",
+    "parameters": [
+        {"name": "@searchTerm", "value": "Azure"}
+    ]
+}
+
+###############################################################################
+
+### Query - Pagination with Continuation
+# @name queryWithPagination
+POST {{baseUrl}}/dbs/{{databaseName}}/colls/{{containerName}}/docs
+Content-Type: application/query+json
+x-ms-version: {{apiVersion}}
+x-ms-date: {{$datetime rfc1123}}
+x-ms-documentdb-isquery: true
+x-ms-documentdb-query-enablecrosspartition: true
+x-ms-max-item-count: 5
+
+{
+    "query": "SELECT * FROM c ORDER BY c._ts DESC"
+}
+
+###############################################################################
+# STORED PROCEDURES, TRIGGERS, UDFs
+###############################################################################
+
+### List Stored Procedures
+# @name listStoredProcedures
+GET {{baseUrl}}/dbs/{{databaseName}}/colls/{{containerName}}/sprocs
+Content-Type: application/json
+x-ms-version: {{apiVersion}}
+x-ms-date: {{$datetime rfc1123}}
+
+###############################################################################
+
+### List Triggers
+# @name listTriggers
+GET {{baseUrl}}/dbs/{{databaseName}}/colls/{{containerName}}/triggers
+Content-Type: application/json
+x-ms-version: {{apiVersion}}
+x-ms-date: {{$datetime rfc1123}}
+
+###############################################################################
+
+### List User Defined Functions
+# @name listUDFs
+GET {{baseUrl}}/dbs/{{databaseName}}/colls/{{containerName}}/udfs
+Content-Type: application/json
+x-ms-version: {{apiVersion}}
+x-ms-date: {{$datetime rfc1123}}

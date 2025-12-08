@@ -1,0 +1,230 @@
+###############################################################################
+# Azure OpenAI REST API Client
+# Reference: https://learn.microsoft.com/en-us/azure/ai-services/openai/reference
+###############################################################################
+
+# Load environment variables from .env file
+@baseUrl = {{$dotenv AZURE_OPENAI_ENDPOINT}}
+@apiKey = {{$dotenv AZURE_OPENAI_API_KEY}}
+@apiVersion = {{$dotenv AZURE_OPENAI_API_VERSION}}
+@deployment = {{$dotenv AZURE_OPENAI_DEPLOYMENT}}
+@embeddingDeployment = {{$dotenv AZURE_OPENAI_EMBEDDING_DEPLOYMENT}}
+
+###############################################################################
+# CHAT COMPLETIONS
+# Reference: https://learn.microsoft.com/en-us/azure/ai-services/openai/reference#chat-completions
+###############################################################################
+
+### Simple Chat Completion
+# @name chatCompletion
+POST {{baseUrl}}/deployments/{{deployment}}/chat/completions?api-version={{apiVersion}}
+Content-Type: application/json
+api-key: {{apiKey}}
+
+{
+    "messages": [
+        {
+            "role": "system",
+            "content": "You are a helpful assistant."
+        },
+        {
+            "role": "user",
+            "content": "Hello! What is the capital of Canada?"
+        }
+    ],
+    "temperature": 0.7,
+    "max_tokens": 800
+}
+
+###############################################################################
+
+### Chat Completion with JSON Response Format
+# @name chatCompletionJson
+POST {{baseUrl}}/deployments/{{deployment}}/chat/completions?api-version={{apiVersion}}
+Content-Type: application/json
+api-key: {{apiKey}}
+
+{
+    "messages": [
+        {
+            "role": "system",
+            "content": "You are a helpful assistant that responds in JSON format. Always include a 'response' field and a 'confidence' field (high, medium, low)."
+        },
+        {
+            "role": "user",
+            "content": "What are the top 3 programming languages in 2024?"
+        }
+    ],
+    "response_format": { "type": "json_object" },
+    "temperature": 0.3,
+    "max_tokens": 500
+}
+
+###############################################################################
+
+### Chat Completion with Function Calling (Tools)
+# @name chatCompletionWithTools
+POST {{baseUrl}}/deployments/{{deployment}}/chat/completions?api-version={{apiVersion}}
+Content-Type: application/json
+api-key: {{apiKey}}
+
+{
+    "messages": [
+        {
+            "role": "system",
+            "content": "You are a helpful assistant with access to tools."
+        },
+        {
+            "role": "user",
+            "content": "What's the weather like in Vancouver today?"
+        }
+    ],
+    "tools": [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_weather",
+                "description": "Get the current weather for a location",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "location": {
+                            "type": "string",
+                            "description": "The city name, e.g., Vancouver, BC"
+                        },
+                        "unit": {
+                            "type": "string",
+                            "enum": ["celsius", "fahrenheit"],
+                            "description": "Temperature unit"
+                        }
+                    },
+                    "required": ["location"]
+                }
+            }
+        }
+    ],
+    "tool_choice": "auto",
+    "temperature": 0.7,
+    "max_tokens": 500
+}
+
+###############################################################################
+
+### Multi-turn Conversation
+# @name multiTurnConversation
+POST {{baseUrl}}/deployments/{{deployment}}/chat/completions?api-version={{apiVersion}}
+Content-Type: application/json
+api-key: {{apiKey}}
+
+{
+    "messages": [
+        {
+            "role": "system",
+            "content": "You are a helpful coding assistant."
+        },
+        {
+            "role": "user",
+            "content": "How do I create a Python virtual environment?"
+        },
+        {
+            "role": "assistant",
+            "content": "To create a Python virtual environment, use: `python -m venv myenv`"
+        },
+        {
+            "role": "user",
+            "content": "How do I activate it on Windows?"
+        }
+    ],
+    "temperature": 0.5,
+    "max_tokens": 500
+}
+
+###############################################################################
+
+### Streaming Chat Completion
+# @name streamingChat
+POST {{baseUrl}}/deployments/{{deployment}}/chat/completions?api-version={{apiVersion}}
+Content-Type: application/json
+api-key: {{apiKey}}
+
+{
+    "messages": [
+        {
+            "role": "user",
+            "content": "Write a short poem about coding."
+        }
+    ],
+    "stream": true,
+    "temperature": 0.8,
+    "max_tokens": 300
+}
+
+###############################################################################
+# EMBEDDINGS
+# Reference: https://learn.microsoft.com/en-us/azure/ai-services/openai/reference#embeddings
+###############################################################################
+
+### Create Embedding for Single Text
+# @name createEmbedding
+POST {{baseUrl}}/deployments/{{embeddingDeployment}}/embeddings?api-version={{apiVersion}}
+Content-Type: application/json
+api-key: {{apiKey}}
+
+{
+    "input": "The quick brown fox jumps over the lazy dog."
+}
+
+###############################################################################
+
+### Create Embeddings for Multiple Texts (Batch)
+# @name createEmbeddingsBatch
+POST {{baseUrl}}/deployments/{{embeddingDeployment}}/embeddings?api-version={{apiVersion}}
+Content-Type: application/json
+api-key: {{apiKey}}
+
+{
+    "input": [
+        "Azure OpenAI provides REST API access to OpenAI's models.",
+        "Embeddings are useful for semantic search applications.",
+        "Vector databases store embeddings for similarity search."
+    ]
+}
+
+###############################################################################
+
+### Create Embedding with Custom Dimensions
+# @name createEmbeddingWithDimensions
+POST {{baseUrl}}/deployments/{{embeddingDeployment}}/embeddings?api-version={{apiVersion}}
+Content-Type: application/json
+api-key: {{apiKey}}
+
+{
+    "input": "This is a test sentence for embedding with reduced dimensions.",
+    "dimensions": 1024
+}
+
+###############################################################################
+# MODELS
+# Reference: https://learn.microsoft.com/en-us/azure/ai-services/openai/reference#list-models
+###############################################################################
+
+### List Available Models
+# @name listModels
+GET {{baseUrl}}/models?api-version={{apiVersion}}
+api-key: {{apiKey}}
+
+###############################################################################
+
+### Get Model Details
+# @name getModel
+GET {{baseUrl}}/models/{{deployment}}?api-version={{apiVersion}}
+api-key: {{apiKey}}
+
+###############################################################################
+# DEPLOYMENTS
+###############################################################################
+
+### List Deployments
+# @name listDeployments
+GET {{baseUrl}}/deployments?api-version={{apiVersion}}
+api-key: {{apiKey}}

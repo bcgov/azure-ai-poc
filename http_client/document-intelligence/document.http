@@ -1,0 +1,225 @@
+###############################################################################
+# Azure Document Intelligence REST API Client
+# Reference: https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence/reference/rest-api-guide
+###############################################################################
+
+# Load environment variables from .env file
+@baseUrl = {{$dotenv DOCUMENT_INTELLIGENCE_ENDPOINT}}
+@apiKey = {{$dotenv DOCUMENT_INTELLIGENCE_API_KEY}}
+@apiVersion = {{$dotenv DOCUMENT_INTELLIGENCE_API_VERSION}}
+
+###############################################################################
+# DOCUMENT MODELS
+# Reference: https://learn.microsoft.com/en-us/rest/api/aiservices/document-models
+###############################################################################
+
+### List Available Models
+# @name listModels
+GET {{baseUrl}}/documentintelligence/documentModels?api-version={{apiVersion}}
+Content-Type: application/json
+Ocp-Apim-Subscription-Key: {{apiKey}}
+
+###############################################################################
+
+### Get Model Details - Prebuilt Layout
+# @name getLayoutModel
+GET {{baseUrl}}/documentintelligence/documentModels/prebuilt-layout?api-version={{apiVersion}}
+Content-Type: application/json
+Ocp-Apim-Subscription-Key: {{apiKey}}
+
+###############################################################################
+
+### Get Model Details - Prebuilt Read
+# @name getReadModel
+GET {{baseUrl}}/documentintelligence/documentModels/prebuilt-read?api-version={{apiVersion}}
+Content-Type: application/json
+Ocp-Apim-Subscription-Key: {{apiKey}}
+
+###############################################################################
+
+### Get Model Details - Prebuilt Document
+# @name getDocumentModel
+GET {{baseUrl}}/documentintelligence/documentModels/prebuilt-document?api-version={{apiVersion}}
+Content-Type: application/json
+Ocp-Apim-Subscription-Key: {{apiKey}}
+
+###############################################################################
+
+### Get Model Details - Prebuilt Invoice
+# @name getInvoiceModel
+GET {{baseUrl}}/documentintelligence/documentModels/prebuilt-invoice?api-version={{apiVersion}}
+Content-Type: application/json
+Ocp-Apim-Subscription-Key: {{apiKey}}
+
+###############################################################################
+
+### Get Model Details - Prebuilt Receipt
+# @name getReceiptModel
+GET {{baseUrl}}/documentintelligence/documentModels/prebuilt-receipt?api-version={{apiVersion}}
+Content-Type: application/json
+Ocp-Apim-Subscription-Key: {{apiKey}}
+
+###############################################################################
+# ANALYZE DOCUMENT - URL SOURCE
+# Reference: https://learn.microsoft.com/en-us/rest/api/aiservices/document-models/analyze-document
+###############################################################################
+
+### Analyze Document from URL - Layout Model (Extract text, tables, structure)
+# @name analyzeLayoutFromUrl
+POST {{baseUrl}}/documentintelligence/documentModels/prebuilt-layout:analyze?api-version={{apiVersion}}&outputContentFormat=markdown
+Content-Type: application/json
+Ocp-Apim-Subscription-Key: {{apiKey}}
+
+{
+    "urlSource": "https://raw.githubusercontent.com/Azure-Samples/cognitive-services-REST-api-samples/master/curl/form-recognizer/sample-layout.pdf"
+}
+
+###############################################################################
+
+### Analyze Document from URL - Read Model (OCR only)
+# @name analyzeReadFromUrl
+POST {{baseUrl}}/documentintelligence/documentModels/prebuilt-read:analyze?api-version={{apiVersion}}
+Content-Type: application/json
+Ocp-Apim-Subscription-Key: {{apiKey}}
+
+{
+    "urlSource": "https://raw.githubusercontent.com/Azure-Samples/cognitive-services-REST-api-samples/master/curl/form-recognizer/sample-layout.pdf"
+}
+
+###############################################################################
+
+### Analyze Document from URL - Document Model (Key-value pairs)
+# @name analyzeDocumentFromUrl
+POST {{baseUrl}}/documentintelligence/documentModels/prebuilt-document:analyze?api-version={{apiVersion}}
+Content-Type: application/json
+Ocp-Apim-Subscription-Key: {{apiKey}}
+
+{
+    "urlSource": "https://raw.githubusercontent.com/Azure-Samples/cognitive-services-REST-api-samples/master/curl/form-recognizer/sample-layout.pdf"
+}
+
+###############################################################################
+
+### Analyze Invoice from URL
+# @name analyzeInvoiceFromUrl
+POST {{baseUrl}}/documentintelligence/documentModels/prebuilt-invoice:analyze?api-version={{apiVersion}}
+Content-Type: application/json
+Ocp-Apim-Subscription-Key: {{apiKey}}
+
+{
+    "urlSource": "https://raw.githubusercontent.com/Azure-Samples/cognitive-services-REST-api-samples/master/curl/form-recognizer/sample-invoice.pdf"
+}
+
+###############################################################################
+
+### Analyze Receipt from URL
+# @name analyzeReceiptFromUrl
+POST {{baseUrl}}/documentintelligence/documentModels/prebuilt-receipt:analyze?api-version={{apiVersion}}
+Content-Type: application/json
+Ocp-Apim-Subscription-Key: {{apiKey}}
+
+{
+    "urlSource": "https://raw.githubusercontent.com/Azure-Samples/cognitive-services-REST-api-samples/master/curl/form-recognizer/contoso-allinone.jpg"
+}
+
+###############################################################################
+
+### Analyze with Specific Pages
+# @name analyzeSpecificPages
+POST {{baseUrl}}/documentintelligence/documentModels/prebuilt-layout:analyze?api-version={{apiVersion}}&pages=1-3
+Content-Type: application/json
+Ocp-Apim-Subscription-Key: {{apiKey}}
+
+{
+    "urlSource": "https://raw.githubusercontent.com/Azure-Samples/cognitive-services-REST-api-samples/master/curl/form-recognizer/sample-layout.pdf"
+}
+
+###############################################################################
+
+### Analyze with Locale Hint
+# @name analyzeWithLocale
+POST {{baseUrl}}/documentintelligence/documentModels/prebuilt-read:analyze?api-version={{apiVersion}}&locale=en-US
+Content-Type: application/json
+Ocp-Apim-Subscription-Key: {{apiKey}}
+
+{
+    "urlSource": "https://raw.githubusercontent.com/Azure-Samples/cognitive-services-REST-api-samples/master/curl/form-recognizer/sample-layout.pdf"
+}
+
+###############################################################################
+# GET ANALYZE RESULT
+# After starting an analyze operation, use the Operation-Location header
+# from the response to poll for results
+###############################################################################
+
+### Get Analyze Result
+# Replace {resultId} with the actual result ID from the analyze response
+# @name getAnalyzeResult
+@resultId = YOUR_RESULT_ID_HERE
+GET {{baseUrl}}/documentintelligence/documentModels/prebuilt-layout/analyzeResults/{{resultId}}?api-version={{apiVersion}}
+Content-Type: application/json
+Ocp-Apim-Subscription-Key: {{apiKey}}
+
+###############################################################################
+# ANALYZE DOCUMENT - BASE64 SOURCE
+###############################################################################
+
+### Analyze Document from Base64
+# @name analyzeFromBase64
+POST {{baseUrl}}/documentintelligence/documentModels/prebuilt-layout:analyze?api-version={{apiVersion}}
+Content-Type: application/json
+Ocp-Apim-Subscription-Key: {{apiKey}}
+
+{
+    "base64Source": "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA2MTIgNzkyXSA+PgplbmRvYmoKeHJlZgowIDQKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDA5IDAwMDAwIG4gCjAwMDAwMDAwNTggMDAwMDAgbiAKMDAwMDAwMDExNSAwMDAwMCBuIAp0cmFpbGVyCjw8IC9TaXplIDQgL1Jvb3QgMSAwIFIgPj4Kc3RhcnR4cmVmCjE5NQolJUVPRg=="
+}
+
+###############################################################################
+# OPERATIONS
+###############################################################################
+
+### List Operations (Recent analyze jobs)
+# @name listOperations
+GET {{baseUrl}}/documentintelligence/operations?api-version={{apiVersion}}
+Content-Type: application/json
+Ocp-Apim-Subscription-Key: {{apiKey}}
+
+###############################################################################
+
+### Get Operation Status
+# Replace {operationId} with actual operation ID
+# @name getOperationStatus
+@operationId = YOUR_OPERATION_ID_HERE
+GET {{baseUrl}}/documentintelligence/operations/{{operationId}}?api-version={{apiVersion}}
+Content-Type: application/json
+Ocp-Apim-Subscription-Key: {{apiKey}}
+
+###############################################################################
+# CUSTOM MODELS (if you have trained custom models)
+###############################################################################
+
+### List Custom Models
+# @name listCustomModels
+GET {{baseUrl}}/documentintelligence/documentModels?api-version={{apiVersion}}
+Content-Type: application/json
+Ocp-Apim-Subscription-Key: {{apiKey}}
+
+###############################################################################
+
+### Delete Custom Model
+# Replace {modelId} with actual model ID
+# @name deleteCustomModel
+@modelId = YOUR_MODEL_ID_HERE
+DELETE {{baseUrl}}/documentintelligence/documentModels/{{modelId}}?api-version={{apiVersion}}
+Content-Type: application/json
+Ocp-Apim-Subscription-Key: {{apiKey}}
+
+###############################################################################
+# RESOURCE INFO
+###############################################################################
+
+### Get Resource Info
+# @name getResourceInfo
+GET {{baseUrl}}/documentintelligence/info?api-version={{apiVersion}}
+Content-Type: application/json
+Ocp-Apim-Subscription-Key: {{apiKey}}
