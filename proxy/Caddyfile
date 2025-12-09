@@ -1,0 +1,82 @@
+(strip_caller_info) {
+	header_up -X-Forwarded-For
+	header_up -X-Real-IP
+	header_up -X-Forwarded-Host
+	header_up -Forwarded
+	header_up -Via
+	header_up -X-Client-IP
+	header_up -Client-IP
+	header_up -True-Client-IP
+}
+
+# Common reverse proxy settings for Azure services
+(azure_proxy_common) {
+	# Set Host header to match the upstream (extracted from endpoint URL)
+	header_up Host {upstream_hostport}
+	header_up X-Forwarded-Proto https
+	import strip_caller_info
+
+	# Remove Caddy identification from responses
+	header_down -Via
+	header_down -Server
+
+	# Timeouts for Azure services
+	transport http {
+		read_timeout 120s
+		write_timeout 120s
+		dial_timeout 30s
+		response_header_timeout 120s
+		keepalive 30s
+		keepalive_idle_conns 10
+	}
+}
+
+:80 {
+	# Enable compression for responses
+	encode zstd gzip
+
+	log {
+		output stdout
+		format console
+		level INFO
+	}
+
+	respond /healthz 200 {
+		body `{"status": "healthy"}`
+		close
+	}
+
+	# Azure OpenAI
+	handle_path /openai* {
+		reverse_proxy {$AZURE_OPENAI_ENDPOINT} {
+			import azure_proxy_common
+		}
+	}
+
+	# Azure Document Intelligence
+	handle_path /document-intelligence* {
+		reverse_proxy {$AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT} {
+			import azure_proxy_common
+		}
+	}
+
+	# Azure Cognitive Search
+	handle_path /search* {
+		reverse_proxy {$AZURE_SEARCH_ENDPOINT} {
+			import azure_proxy_common
+		}
+	}
+
+	# Cosmos DB (Gateway mode only; SDK must be set to Gateway)
+	handle_path /cosmos* {
+		reverse_proxy {$AZURE_COSMOS_ENDPOINT} {
+			import azure_proxy_common
+		}
+	}
+	# Azure Speech Services
+	handle_path /speech* {
+		reverse_proxy {$AZURE_SPEECH_ENDPOINT} {
+			import azure_proxy_common
+		}
+	}
+}

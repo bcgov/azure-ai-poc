@@ -1,6 +1,7 @@
 import type { FC } from 'react'
 import { useRef, useEffect, useState } from 'react'
 import { Form, Button, Badge, Spinner, OverlayTrigger, Tooltip, Collapse } from 'react-bootstrap'
+import { speechRecognitionService } from '@/services/speechService'
 
 interface ChatInputProps {
   currentQuestion: string
@@ -35,6 +36,14 @@ const ChatInput: FC<ChatInputProps> = ({
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [showDeepResearchInfo, setShowDeepResearchInfo] = useState(false)
+  const [isListening, setIsListening] = useState(false)
+  const [speechSupported, setSpeechSupported] = useState(false)
+  const [speechError, setSpeechError] = useState<string | null>(null)
+
+  useEffect(() => {
+    // Check if speech recognition is supported
+    setSpeechSupported(speechRecognitionService.isSupported())
+  }, [])
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -67,6 +76,30 @@ const ChatInput: FC<ChatInputProps> = ({
       return `Questions will be answered based on the selected document${streamingEnabled ? ' with streaming' : ''}`
     }
     return `Questions will be answered by searching across all your uploaded documents${streamingEnabled ? ' with streaming' : ''}`
+  }
+
+  const handleVoiceInput = () => {
+    if (isListening) {
+      speechRecognitionService.stopListening()
+      setIsListening(false)
+      return
+    }
+
+    setSpeechError(null)
+    const started = speechRecognitionService.startListening(
+      (result) => {
+        setCurrentQuestion(result.transcript)
+        if (result.isFinal) {
+          setIsListening(false)
+        }
+      },
+      (error) => {
+        setSpeechError(error)
+        setIsListening(false)
+      },
+      'en-CA'
+    )
+    setIsListening(started)
   }
 
   const deepResearchTooltip = (
@@ -161,24 +194,57 @@ const ChatInput: FC<ChatInputProps> = ({
             value={currentQuestion}
             onChange={(e) => setCurrentQuestion(e.target.value)}
             onKeyDown={onKeyPress}
-            placeholder={getPlaceholder()}
-            disabled={isLoading}
+            placeholder={isListening ? 'Listening...' : getPlaceholder()}
+            disabled={isLoading || isListening}
             style={{
               minHeight: 'clamp(2.5rem, 2.75rem, 3rem)',
               maxHeight: 'clamp(6rem, 8rem, 10rem)',
               resize: 'none',
               overflow: 'hidden',
-              paddingRight: 'clamp(3rem, 3.5rem, 4rem)',
+              paddingRight: 'clamp(5.5rem, 6rem, 6.5rem)',
             }}
-            className="form-control"
+            className={`form-control ${isListening ? 'border-danger' : ''}`}
           />
+          
+          {/* Voice Input Button */}
+          {speechSupported && (
+            <Button
+              type="button"
+              variant={isListening ? 'danger' : 'outline-secondary'}
+              onClick={handleVoiceInput}
+              disabled={isLoading || isStreaming}
+              className="position-absolute d-flex align-items-center justify-content-center p-0 border-0"
+              style={{
+                right: '3.25rem',
+                bottom: '0.5rem',
+                width: 'clamp(2rem, 2.25rem, 2.5rem)',
+                height: 'clamp(2rem, 2.25rem, 2.5rem)',
+                borderRadius: '50%',
+                transition: 'all 0.2s ease',
+                backgroundColor: isListening ? '#dc3545' : 'transparent',
+                color: isListening ? '#fff' : '#6c757d',
+              }}
+              title={isListening ? 'Stop listening' : 'Voice input'}
+            >
+              <i
+                className={`bi ${isListening ? 'bi-mic-fill' : 'bi-mic'}`}
+                style={{
+                  fontSize: 'clamp(0.875rem, 1rem, 1.125rem)',
+                  animation: isListening ? 'pulse 1s infinite' : 'none',
+                }}
+              ></i>
+            </Button>
+          )}
+          
+          {/* Send Button */}
           <Button
             type="submit"
             variant="primary"
             disabled={
               !currentQuestion.trim() ||
               isLoading ||
-              isStreaming
+              isStreaming ||
+              isListening
             }
             className="position-absolute d-flex align-items-center justify-content-center p-0 border-0"
             style={{
@@ -208,9 +274,24 @@ const ChatInput: FC<ChatInputProps> = ({
             )}
           </Button>
         </div>
+        
+        {/* Speech Error Message */}
+        {speechError && (
+          <small className="text-danger d-block mt-1">
+            <i className="bi bi-exclamation-triangle me-1"></i>
+            {speechError}
+          </small>
+        )}
+        
         <small className="text-muted">
           <i className="bi bi-info-circle me-1"></i>
           {getHelpText()}
+          {speechSupported && !isListening && (
+            <span className="ms-2">
+              <i className="bi bi-mic me-1"></i>
+              Voice input available
+            </span>
+          )}
         </small>
       </Form>
     </div>
