@@ -1,6 +1,12 @@
 import type { FC } from 'react'
 import { Badge, Card, OverlayTrigger, Tooltip } from 'react-bootstrap'
 import type { SourceInfo } from '@/services/chatAgentService'
+import {
+  sortSourcesByConfidence,
+  getSourceIcon,
+  getConfidenceBadgeVariant,
+  formatSourceType,
+} from '@/utils/sourceUtils'
 
 interface ChatMessageProps {
   type: 'user' | 'assistant'
@@ -23,39 +29,14 @@ const ChatMessage: FC<ChatMessageProps> = ({
   sources,
   hasSufficientInfo,
 }) => {
+  // Sort sources by confidence (highest first)
+  const sortedSources = sources ? sortSourcesByConfidence(sources) : []
+
   const formatTimestamp = (timestamp: Date) => {
     return timestamp.toLocaleTimeString([], {
       hour: '2-digit',
       minute: '2-digit',
     })
-  }
-
-  const getConfidenceBadgeVariant = (confidence: string) => {
-    switch (confidence) {
-      case 'high':
-        return 'success'
-      case 'medium':
-        return 'warning'
-      case 'low':
-        return 'danger'
-      default:
-        return 'secondary'
-    }
-  }
-
-  const getSourceIcon = (sourceType: string) => {
-    switch (sourceType) {
-      case 'llm_knowledge':
-        return 'bi-cpu'
-      case 'document':
-        return 'bi-file-text'
-      case 'web':
-        return 'bi-globe'
-      case 'api':
-        return 'bi-code-square'
-      default:
-        return 'bi-question-circle'
-    }
   }
 
   return (
@@ -104,14 +85,14 @@ const ChatMessage: FC<ChatMessageProps> = ({
                   </div>
                 )}
                 {/* Source Attribution Section */}
-                {type === 'assistant' && sources && sources.length > 0 && (
+                {type === 'assistant' && sortedSources && sortedSources.length > 0 && (
                   <div className="mt-2 pt-2 border-top">
                     <small className="text-muted d-block mb-1">
                       <i className="bi bi-info-circle me-1"></i>
-                      Sources ({sources.length}):
+                      Sources ({sortedSources.length}):
                     </small>
                     <div className="d-flex flex-wrap gap-1">
-                      {sources.slice(0, 3).map((source, index) => (
+                      {sortedSources.slice(0, 3).map((source, index) => (
                         <OverlayTrigger
                           key={index}
                           placement="top"
@@ -137,14 +118,14 @@ const ChatMessage: FC<ChatMessageProps> = ({
                             rel={source.url ? 'noopener noreferrer' : undefined}
                           >
                             <i className={`${getSourceIcon(source.source_type)} me-1`}></i>
-                            {source.source_type.replace('_', ' ')}
+                            {formatSourceType(source.source_type)}
                             {source.url && <i className="bi bi-box-arrow-up-right ms-1" style={{ fontSize: '0.7em' }}></i>}
                           </Badge>
                         </OverlayTrigger>
                       ))}
-                      {sources.length > 3 && (
+                      {sortedSources.length > 3 && (
                         <Badge bg="secondary" className="opacity-75">
-                          +{sources.length - 3} more
+                          +{sortedSources.length - 3} more
                         </Badge>
                       )}
                     </div>

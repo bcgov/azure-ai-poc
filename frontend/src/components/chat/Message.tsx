@@ -3,6 +3,12 @@ import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { SourceInfo } from '@/services/chatAgentService'
+import {
+  sortSourcesByConfidence,
+  getSourceIcon,
+  getConfidenceColor,
+  formatSourceType,
+} from '@/utils/sourceUtils'
 
 interface MessageProps {
   type: 'user' | 'assistant'
@@ -10,6 +16,9 @@ interface MessageProps {
   sources?: SourceInfo[]
   hasSufficientInfo?: boolean
   isStreaming?: boolean
+  onRetry?: () => void
+  onThumbsUp?: () => void
+  onThumbsDown?: () => void
 }
 
 const Message: FC<MessageProps> = ({
@@ -18,9 +27,18 @@ const Message: FC<MessageProps> = ({
   sources,
   hasSufficientInfo,
   isStreaming,
+  onRetry,
+  onThumbsUp,
+  onThumbsDown,
 }) => {
   const [expandedSources, setExpandedSources] = useState<Set<number>>(new Set())
   const [showAllSources, setShowAllSources] = useState(false)
+  const [isHovered, setIsHovered] = useState(false)
+  const [copiedMessage, setCopiedMessage] = useState(false)
+  const [feedbackGiven, setFeedbackGiven] = useState<'up' | 'down' | null>(null)
+
+  // Sort sources by confidence (highest first)
+  const sortedSources = sources ? sortSourcesByConfidence(sources) : []
 
   const toggleSource = (index: number) => {
     setExpandedSources((prev) => {
@@ -34,38 +52,45 @@ const Message: FC<MessageProps> = ({
     })
   }
 
-  const getSourceIcon = (sourceType: string) => {
-    switch (sourceType) {
-      case 'llm_knowledge':
-        return 'bi-cpu'
-      case 'document':
-        return 'bi-file-text'
-      case 'web':
-        return 'bi-globe'
-      case 'api':
-        return 'bi-code-square'
-      default:
-        return 'bi-question-circle'
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(content)
+      setCopiedMessage(true)
+      setTimeout(() => setCopiedMessage(false), 2000)
+    } catch (err) {
+      console.error('Failed to copy message:', err)
     }
   }
 
-  const getConfidenceColor = (confidence: string) => {
-    switch (confidence) {
-      case 'high':
-        return '#16a34a'
-      case 'medium':
-        return '#ca8a04'
-      case 'low':
-        return '#dc2626'
-      default:
-        return '#6b7280'
-    }
+  const handleThumbsUp = () => {
+    setFeedbackGiven('up')
+    onThumbsUp?.()
+  }
+
+  const handleThumbsDown = () => {
+    setFeedbackGiven('down')
+    onThumbsDown?.()
   }
 
   if (type === 'user') {
     return (
-      <div className="copilot-message user">
-        <div className="message-content">{content}</div>
+      <div
+        className="copilot-message user"
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+      >
+        <div className="message-content">
+          <div className={`message-actions user-actions ${isHovered ? 'visible' : ''}`}>
+            <button
+              className="action-btn"
+              onClick={handleCopy}
+              title={copiedMessage ? 'Copied!' : 'Copy message'}
+            >
+              <i className={`bi ${copiedMessage ? 'bi-check' : 'bi-clipboard'}`}></i>
+            </button>
+          </div>
+          {content}
+        </div>
       </div>
     )
   }
@@ -89,14 +114,14 @@ const Message: FC<MessageProps> = ({
         ) : null}
 
         {/* Sources */}
-        {sources && sources.length > 0 && (
+        {sortedSources && sortedSources.length > 0 && (
           <div className="copilot-sources">
             <div className="copilot-sources-label">
               <i className="bi bi-info-circle me-1"></i>
-              Sources ({sources.length}):
+              Sources ({sortedSources.length}):
             </div>
             <div className="sources-list">
-              {(showAllSources ? sources : sources.slice(0, 3)).map((source, index) => (
+              {(showAllSources ? sortedSources : sortedSources.slice(0, 3)).map((source, index) => (
                 <div key={index} className="source-item">
                   <div
                     className={`copilot-source-badge ${source.confidence}`}
@@ -105,7 +130,7 @@ const Message: FC<MessageProps> = ({
                     title="Click to expand details"
                   >
                     <i className={`${getSourceIcon(source.source_type)} me-1`}></i>
-                    <span>{source.source_type.replace('_', ' ')}</span>
+                    <span>{formatSourceType(source.source_type)}</span>
                     <span
                       className="confidence-dot"
                       style={{
@@ -221,7 +246,7 @@ const Message: FC<MessageProps> = ({
                 </div>
               ))}
               {/* Show toggle when more than 3 sources */}
-              {sources.length > 3 && (
+              {sortedSources.length > 3 && (
                 <button
                   onClick={() => setShowAllSources(!showAllSources)}
                   style={{
@@ -237,7 +262,7 @@ const Message: FC<MessageProps> = ({
                 >
                   {showAllSources
                     ? 'Show less'
-                    : `+${sources.length - 3} more sources`}
+                    : `+${sortedSources.length - 3} more sources`}
                 </button>
               )}
             </div>
@@ -249,6 +274,44 @@ const Message: FC<MessageProps> = ({
           <div className="copilot-warning">
             <i className="bi bi-exclamation-triangle me-1"></i>
             Limited information available
+          </div>
+        )}
+
+        {/* Action Bar - GitHub Copilot Chat style */}
+        {!isStreaming && content && (
+          <div className="message-actions assistant-actions">
+            {onRetry && (
+              <button
+                className="action-btn"
+                onClick={onRetry}
+                title="Retry"
+              >
+                <i className="bi bi-arrow-clockwise"></i>
+              </button>
+            )}
+            <button
+              className={`action-btn ${feedbackGiven === 'up' ? 'active' : ''}`}
+              onClick={handleThumbsUp}
+              title="Good response"
+              disabled={feedbackGiven !== null}
+            >
+              <i className={`bi ${feedbackGiven === 'up' ? 'bi-hand-thumbs-up-fill' : 'bi-hand-thumbs-up'}`}></i>
+            </button>
+            <button
+              className={`action-btn ${feedbackGiven === 'down' ? 'active' : ''}`}
+              onClick={handleThumbsDown}
+              title="Bad response"
+              disabled={feedbackGiven !== null}
+            >
+              <i className={`bi ${feedbackGiven === 'down' ? 'bi-hand-thumbs-down-fill' : 'bi-hand-thumbs-down'}`}></i>
+            </button>
+            <button
+              className="action-btn"
+              onClick={handleCopy}
+              title={copiedMessage ? 'Copied!' : 'Copy response'}
+            >
+              <i className={`bi ${copiedMessage ? 'bi-check' : 'bi-clipboard'}`}></i>
+            </button>
           </div>
         )}
       </div>

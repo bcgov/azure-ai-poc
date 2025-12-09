@@ -22,6 +22,7 @@ from openai import AsyncAzureOpenAI
 
 from app.config import settings
 from app.logger import get_logger
+from app.utils import sort_sources_by_confidence
 
 logger = get_logger(__name__)
 
@@ -380,8 +381,8 @@ DOCUMENT:
 
             response_text = result.text if hasattr(result, "text") else str(result)
 
-            # Get tracked sources or add default
-            sources = (
+            # Get tracked sources or add default, sorted by confidence (highest first)
+            sources = sort_sources_by_confidence(
                 _chat_sources.copy()
                 if _chat_sources
                 else [

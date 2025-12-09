@@ -25,6 +25,7 @@ from openai import AsyncAzureOpenAI
 
 from app.config import settings
 from app.logger import get_logger
+from app.utils import sort_sources_by_confidence
 
 logger = get_logger(__name__)
 
@@ -416,12 +417,15 @@ def save_final_report(
     run_id = _get_run_id()
     user_id = _get_user_id()
 
+    # Normalize escaped newlines - LLM sometimes generates literal \n instead of actual newlines
+    normalized_report = report.replace("\\n", "\n").replace("\\t", "\t")
+
     logger.info(
         "save_final_report_called",
         topic=topic,
         run_id=run_id,
         user_id=user_id,
-        report_length=len(report),
+        report_length=len(normalized_report),
     )
 
     # Parse sources using safe JSON parsing
@@ -462,7 +466,7 @@ def save_final_report(
     state = _get_or_create_state(run_id, topic)
     state.topic = topic
     state.user_id = user_id
-    state.final_report = report
+    state.final_report = normalized_report
     state.sources = sources
     state.current_phase = ResearchPhase.COMPLETED
 
@@ -1019,7 +1023,7 @@ Provide comprehensive, detailed responses at each phase."""
                         "confidence": s.confidence,
                         "url": s.url,
                     }
-                    for s in state.sources
+                    for s in sort_sources_by_confidence(state.sources)
                 ],
                 "has_sufficient_info": len(state.sources) > 0,
             }
@@ -1078,7 +1082,7 @@ Provide comprehensive, detailed responses at each phase."""
                             "confidence": s.confidence,
                             "url": s.url,
                         }
-                        for s in state.sources
+                        for s in sort_sources_by_confidence(state.sources)
                     ],
                 },
             )

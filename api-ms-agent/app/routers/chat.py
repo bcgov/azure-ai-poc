@@ -17,6 +17,7 @@ from app.services.azure_search_service import (
 from app.services.chat_agent import ChatAgentService, get_chat_agent_service
 from app.services.cosmos_db_service import CosmosDbService, get_cosmos_db_service
 from app.services.embedding_service import EmbeddingService, get_embedding_service
+from app.utils import sort_source_dicts_by_confidence
 
 logger = get_logger(__name__)
 
@@ -198,7 +199,9 @@ async def chat(
 
         if document_sources:
             # Use document sources from RAG search (more accurate citations)
-            for doc_src in document_sources:
+            # Sort by confidence (highest first)
+            sorted_doc_sources = sort_source_dicts_by_confidence(document_sources)
+            for doc_src in sorted_doc_sources:
                 sources.append(
                     SourceInfoResponse(
                         source_type=doc_src["source_type"],
@@ -209,6 +212,7 @@ async def chat(
                 )
         else:
             # No document context - use agent's LLM knowledge sources
+            # Sources are already sorted in the chat_agent service
             for src in result.sources:
                 sources.append(
                     SourceInfoResponse(

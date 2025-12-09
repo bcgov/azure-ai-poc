@@ -1,29 +1,19 @@
 """
 Web Search Service for Deep Research Agent.
 
-Provides web search capabilities using DuckDuckGo (free, no API key required)
+Provides web search capabilities using DuckDuckGo Search library
 to get current information from the web for research reports.
 """
 
 import asyncio
 from dataclasses import dataclass
-from typing import Any
-from urllib.parse import quote_plus
 
-import httpx
+from ddgs import DDGS
+from ddgs.exceptions import DDGSException, RatelimitException
 
 from app.logger import get_logger
 
 logger = get_logger(__name__)
-
-# DuckDuckGo HTML search endpoint (no API key needed)
-DUCKDUCKGO_HTML_URL = "https://html.duckduckgo.com/html/"
-
-# User agent to avoid blocks
-USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-)
 
 
 @dataclass
@@ -38,25 +28,15 @@ class WebSearchResult:
 
 class WebSearchService:
     """
-    Web search service using DuckDuckGo.
+    Web search service using DuckDuckGo Search library.
 
     Provides free web search without API keys for research augmentation.
+    Uses the official duckduckgo-search library for reliable results.
     """
 
     def __init__(self) -> None:
         """Initialize the web search service."""
-        self._client: httpx.AsyncClient | None = None
         logger.info("WebSearchService initialized")
-
-    def _get_client(self) -> httpx.AsyncClient:
-        """Get or create the HTTP client."""
-        if self._client is None:
-            self._client = httpx.AsyncClient(
-                timeout=30.0,
-                headers={"User-Agent": USER_AGENT},
-                follow_redirects=True,
-            )
-        return self._client
 
     async def search(
         self,
@@ -76,20 +56,11 @@ class WebSearchService:
         logger.info("web_search_started", query=query, max_results=max_results)
 
         try:
-            client = self._get_client()
-
-            # Use DuckDuckGo HTML endpoint
-            response = await client.post(
-                DUCKDUCKGO_HTML_URL,
-                data={"q": query, "b": ""},
-                headers={
-                    "Content-Type": "application/x-www-form-urlencoded",
-                },
+            # Run synchronous DuckDuckGo search in thread pool
+            results = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: self._search_sync(query, max_results),
             )
-            response.raise_for_status()
-
-            # Parse HTML response to extract results
-            results = self._parse_duckduckgo_html(response.text, max_results)
 
             logger.info(
                 "web_search_completed",
@@ -99,104 +70,152 @@ class WebSearchService:
 
             return results
 
-        except httpx.TimeoutException:
-            logger.warning("web_search_timeout", query=query)
+        except (DDGSException, RatelimitException) as e:
+            logger.warning("ddgs_search_error", query=query, error=str(e))
+            # Return empty on rate limit - agent will use LLM knowledge
             return []
         except Exception as e:
-            logger.error("web_search_failed", query=query, error=str(e))
+            logger.error(
+                "web_search_failed", query=query, error=str(e), error_type=type(e).__name__
+            )
             return []
 
-    def _parse_duckduckgo_html(
-        self,
-        html: str,
-        max_results: int,
-    ) -> list[WebSearchResult]:
+    def _search_sync(self, query: str, max_results: int) -> list[WebSearchResult]:
         """
-        Parse DuckDuckGo HTML response to extract search results.
+        Synchronous search implementation using DDGS.
 
         Args:
-            html: The HTML response from DuckDuckGo.
-            max_results: Maximum number of results to extract.
+            query: The search query.
+            max_results: Maximum number of results.
 
         Returns:
-            List of parsed search results.
+            List of WebSearchResult objects.
         """
-        import re
-
         results = []
 
-        # Find all result blocks - DuckDuckGo uses class="result"
-        # Each result has: result__a (link), result__snippet (description)
-        result_pattern = re.compile(
-            r'<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>([^<]*)</a>'
-            r'.*?<a[^>]*class="result__snippet"[^>]*>([^<]*(?:<[^>]*>[^<]*)*)</a>',
-            re.DOTALL | re.IGNORECASE,
-        )
-
-        # Alternative pattern for result blocks
-        alt_pattern = re.compile(
-            r'<h2[^>]*class="result__title"[^>]*>.*?'
-            r'<a[^>]*href="([^"]*)"[^>]*>([^<]*)</a>.*?'
-            r'<a[^>]*class="result__snippet"[^>]*>(.*?)</a>',
-            re.DOTALL | re.IGNORECASE,
-        )
-
-        # Try primary pattern
-        matches = result_pattern.findall(html)
-        if not matches:
-            matches = alt_pattern.findall(html)
-
-        # Fallback: simpler extraction
-        if not matches:
-            # Extract links with result__url class
-            url_pattern = re.compile(
-                r'<a[^>]*class="[^"]*result__url[^"]*"[^>]*href="([^"]*)"[^>]*>',
-                re.IGNORECASE,
-            )
-            title_pattern = re.compile(
-                r'<a[^>]*class="[^"]*result__a[^"]*"[^>]*>([^<]+)</a>',
-                re.IGNORECASE,
-            )
-            snippet_pattern = re.compile(
-                r'<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</a>',
-                re.DOTALL | re.IGNORECASE,
-            )
-
-            urls = url_pattern.findall(html)
-            titles = title_pattern.findall(html)
-            snippets = snippet_pattern.findall(html)
-
-            # Combine into matches
-            for i in range(min(len(urls), len(titles), len(snippets), max_results)):
-                matches.append((urls[i], titles[i], snippets[i]))
-
-        for match in matches[:max_results]:
-            url, title, snippet = match
-
-            # Clean up snippet (remove HTML tags)
-            snippet = re.sub(r"<[^>]+>", "", snippet)
-            snippet = snippet.strip()
-
-            # Skip if essential data is missing
-            if not url or not title:
-                continue
-
-            # Decode URL if needed
-            if url.startswith("//duckduckgo.com/l/?"):
-                # Extract actual URL from DuckDuckGo redirect
-                url_match = re.search(r"uddg=([^&]+)", url)
-                if url_match:
-                    from urllib.parse import unquote
-
-                    url = unquote(url_match.group(1))
-
-            results.append(
-                WebSearchResult(
-                    title=title.strip(),
-                    url=url,
-                    snippet=snippet[:500],  # Limit snippet length
-                    source="duckduckgo",
+        try:
+            with DDGS() as ddgs:
+                # Use text search for general web results
+                # Region ca-en for Canadian English results
+                search_results = ddgs.text(
+                    query,
+                    max_results=max_results,
+                    region="ca-en",  # Canadian English
+                    safesearch="moderate",
                 )
+
+                for result in search_results:
+                    if not result:
+                        continue
+
+                    title = result.get("title", "")
+                    url = result.get("href", result.get("link", ""))
+                    snippet = result.get("body", result.get("snippet", ""))
+
+                    if title and url:
+                        results.append(
+                            WebSearchResult(
+                                title=title.strip(),
+                                url=url.strip(),
+                                snippet=snippet[:500] if snippet else "",
+                                source="duckduckgo",
+                            )
+                        )
+
+        except (DDGSException, RatelimitException):
+            # Re-raise to handle at async level
+            raise
+        except Exception as e:
+            logger.warning(
+                "ddgs_search_error",
+                query=query,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+
+        return results
+
+    async def search_news(
+        self,
+        query: str,
+        max_results: int = 5,
+    ) -> list[WebSearchResult]:
+        """
+        Search news articles using DuckDuckGo News.
+
+        Args:
+            query: The search query.
+            max_results: Maximum number of results to return.
+
+        Returns:
+            List of news search results.
+        """
+        logger.info("news_search_started", query=query, max_results=max_results)
+
+        try:
+            results = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: self._search_news_sync(query, max_results),
+            )
+
+            logger.info(
+                "news_search_completed",
+                query=query,
+                results_count=len(results),
+            )
+
+            return results
+
+        except Exception as e:
+            logger.error("news_search_failed", query=query, error=str(e))
+            return []
+
+    def _search_news_sync(self, query: str, max_results: int) -> list[WebSearchResult]:
+        """
+        Synchronous news search implementation.
+
+        Args:
+            query: The search query.
+            max_results: Maximum number of results.
+
+        Returns:
+            List of WebSearchResult objects from news.
+        """
+        results = []
+
+        try:
+            with DDGS() as ddgs:
+                news_results = ddgs.news(
+                    query,
+                    max_results=max_results,
+                    region="ca-en",  # Canadian English
+                    safesearch="moderate",
+                )
+
+                for result in news_results:
+                    if not result:
+                        continue
+
+                    title = result.get("title", "")
+                    url = result.get("url", result.get("link", ""))
+                    snippet = result.get("body", result.get("excerpt", ""))
+                    source = result.get("source", "news")
+
+                    if title and url:
+                        results.append(
+                            WebSearchResult(
+                                title=title.strip(),
+                                url=url.strip(),
+                                snippet=snippet[:500] if snippet else "",
+                                source=f"news:{source}" if source else "news",
+                            )
+                        )
+
+        except Exception as e:
+            logger.warning(
+                "ddgs_news_error",
+                query=query,
+                error=str(e),
             )
 
         return results
@@ -221,14 +240,11 @@ class WebSearchService:
 
         return {
             query: result if isinstance(result, list) else []
-            for query, result in zip(queries, results)
+            for query, result in zip(queries, results, strict=True)
         }
 
     async def close(self) -> None:
-        """Close the HTTP client."""
-        if self._client:
-            await self._client.aclose()
-            self._client = None
+        """Close the service (no persistent resources to clean up)."""
         logger.info("WebSearchService closed")
 
 
