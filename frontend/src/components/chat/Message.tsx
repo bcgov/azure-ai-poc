@@ -3,6 +3,7 @@ import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { SourceInfo } from '@/services/chatAgentService'
+import { speechService } from '@/services/speechService'
 import {
   sortSourcesByConfidence,
   getSourceIcon,
@@ -36,6 +37,8 @@ const Message: FC<MessageProps> = ({
   const [isHovered, setIsHovered] = useState(false)
   const [copiedMessage, setCopiedMessage] = useState(false)
   const [feedbackGiven, setFeedbackGiven] = useState<'up' | 'down' | null>(null)
+  const [isSpeaking, setIsSpeaking] = useState(false)
+  const [speakError, setSpeakError] = useState<string | null>(null)
 
   // Sort sources by confidence (highest first)
   const sortedSources = sources ? sortSourcesByConfidence(sources) : []
@@ -70,6 +73,27 @@ const Message: FC<MessageProps> = ({
   const handleThumbsDown = () => {
     setFeedbackGiven('down')
     onThumbsDown?.()
+  }
+
+  const handleSpeak = async () => {
+    if (isSpeaking) {
+      speechService.stop()
+      setIsSpeaking(false)
+      return
+    }
+
+    setSpeakError(null)
+    setIsSpeaking(true)
+    
+    try {
+      await speechService.speak(content)
+    } catch (err) {
+      console.error('Speech error:', err)
+      setSpeakError('Failed to play audio')
+      setTimeout(() => setSpeakError(null), 3000)
+    } finally {
+      setIsSpeaking(false)
+    }
   }
 
   if (type === 'user') {
@@ -312,6 +336,18 @@ const Message: FC<MessageProps> = ({
             >
               <i className={`bi ${copiedMessage ? 'bi-check' : 'bi-clipboard'}`}></i>
             </button>
+            <button
+              className={`action-btn ${isSpeaking ? 'active' : ''}`}
+              onClick={handleSpeak}
+              title={isSpeaking ? 'Stop speaking' : 'Read aloud'}
+            >
+              <i className={`bi ${isSpeaking ? 'bi-stop-fill' : 'bi-volume-up'}`}></i>
+            </button>
+            {speakError && (
+              <span className="text-danger small ms-2" style={{ fontSize: '0.7rem' }}>
+                {speakError}
+              </span>
+            )}
           </div>
         )}
       </div>

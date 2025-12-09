@@ -59,3 +59,10 @@ output "openai_host" {
   description = "The host for the Azure OpenAI service"
   value       = trimsuffix(replace(azurerm_cognitive_account.openai.endpoint, "https://", ""), "/")
 }
+
+# Speech Services outputs
+output "speech_endpoint" {
+  description = "The endpoint URL for the Azure Speech service"
+  value       = azurerm_cognitive_account.speech.endpoint
+  sensitive   = false
+}
