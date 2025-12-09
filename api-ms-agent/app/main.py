@@ -149,7 +149,7 @@ def create_app() -> FastAPI:
     app.add_middleware(AuthMiddleware)
 
     # Root endpoints (excluded from auth)
-    @app.get("/")
+    @app.get("/api")
     async def root():
         """Root endpoint - service status."""
         return {
