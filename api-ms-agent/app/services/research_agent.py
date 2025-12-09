@@ -7,7 +7,9 @@ approval_mode="always_require" for native human-in-the-loop support.
 
 import json
 import re
+from contextvars import ContextVar
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import Enum
 from textwrap import shorten
 from typing import Annotated, Any
@@ -25,6 +27,10 @@ from app.config import settings
 from app.logger import get_logger
 
 logger = get_logger(__name__)
+
+# Context variables to pass run_id and user_id to ai_functions
+_current_run_id: ContextVar[str] = ContextVar("current_run_id", default="")
+_current_user_id: ContextVar[str] = ContextVar("current_user_id", default="")
 
 # ==================== JSON Repair Utilities ====================
 
@@ -193,11 +199,88 @@ class ResearchState:
 # ==================== AI Functions for Research Workflow ====================
 
 
-# Global state storage for simulating research process
-_research_state_store: dict[str, ResearchState] = {}
+# In-memory cache for current run (keyed by run_id for fast access during workflow)
+# Cosmos DB is the source of truth, this is just for performance during a single run
+_run_state_cache: dict[str, ResearchState] = {}
 
 # Prompt/cost guards
 MAX_DOC_CONTEXT_CHARS = 2400
+
+# Global web search results cache for current research session (keyed by run_id)
+_web_search_cache: dict[str, dict[str, list[dict]]] = {}
+
+
+def _get_run_id() -> str:
+    """Get the current run_id from context."""
+    return _current_run_id.get()
+
+
+def _get_user_id() -> str:
+    """Get the current user_id from context."""
+    return _current_user_id.get()
+
+
+def _get_or_create_state(run_id: str, topic: str = "") -> ResearchState:
+    """Get or create state for a run from cache."""
+    if run_id not in _run_state_cache:
+        _run_state_cache[run_id] = ResearchState(
+            topic=topic,
+            user_id=_get_user_id(),
+            current_phase=ResearchPhase.PLANNING,
+        )
+    return _run_state_cache[run_id]
+
+
+def _get_web_cache(run_id: str) -> dict[str, list[dict]]:
+    """Get web search cache for a run."""
+    if run_id not in _web_search_cache:
+        _web_search_cache[run_id] = {}
+    return _web_search_cache[run_id]
+
+
+@ai_function()
+async def web_search(
+    query: Annotated[str, "The search query to find current information on the web"],
+) -> str:
+    """
+    Search the web for current information on a topic.
+    Use this to get up-to-date information, recent news, current statistics,
+    or verify facts with current sources. Returns titles, URLs, and snippets.
+    """
+    from app.services.web_search_service import get_web_search_service
+
+    run_id = _get_run_id()
+    logger.info("web_search_ai_function_called", query=query, run_id=run_id)
+
+    try:
+        service = get_web_search_service()
+        results = await service.search(query, max_results=5)
+
+        if not results:
+            return f"No web results found for: {query}. Try a different search query."
+
+        # Cache results for source citation (keyed by run_id)
+        web_cache = _get_web_cache(run_id)
+        web_cache[query] = [
+            {
+                "title": r.title,
+                "url": r.url,
+                "snippet": r.snippet,
+            }
+            for r in results
+        ]
+
+        # Format results for the LLM
+        formatted = [f"## Web Search Results for: {query}\n"]
+        for i, r in enumerate(results, 1):
+            formatted.append(f"{i}. **{r.title}**\n   URL: {r.url}\n   {r.snippet}\n")
+
+        logger.info("web_search_completed", query=query, results_count=len(results), run_id=run_id)
+        return "\n".join(formatted)
+
+    except Exception as e:
+        logger.error("web_search_failed", query=query, error=str(e), run_id=run_id)
+        return f"Web search failed: {str(e)}. Continue with available knowledge."
 
 
 @ai_function()
@@ -208,6 +291,9 @@ def save_research_plan(
     """
     Save the research plan and proceed with research.
     """
+    run_id = _get_run_id()
+    user_id = _get_user_id()
+
     # Use safe JSON parsing with repair attempts
     plan_data = safe_json_loads(plan_json, fallback=None)
 
@@ -215,6 +301,7 @@ def save_research_plan(
         logger.error(
             "plan_json_decode_error",
             topic=topic,
+            run_id=run_id,
             error="Could not parse plan JSON after repair attempts",
             json_preview=plan_json[:200] if plan_json else "empty",
         )
@@ -225,28 +312,30 @@ def save_research_plan(
         )
 
     try:
-        # Store the plan
-        state = ResearchState(
-            topic=topic,
-            plan=ResearchPlan(
-                main_topic=topic,
-                research_questions=plan_data.get("research_questions", []),
-                subtopics=plan_data.get("subtopics", []),
-                methodology=plan_data.get("methodology", ""),
-                estimated_depth=plan_data.get("estimated_depth", "medium"),
-                sources_to_explore=plan_data.get("sources_to_explore", []),
-            ),
-            current_phase=ResearchPhase.RESEARCHING,
+        # Get or create state for this run
+        state = _get_or_create_state(run_id, topic)
+        state.topic = topic
+        state.user_id = user_id
+        state.plan = ResearchPlan(
+            main_topic=topic,
+            research_questions=plan_data.get("research_questions", []),
+            subtopics=plan_data.get("subtopics", []),
+            methodology=plan_data.get("methodology", ""),
+            estimated_depth=plan_data.get("estimated_depth", "medium"),
+            sources_to_explore=plan_data.get("sources_to_explore", []),
         )
-        _research_state_store[topic] = state
+        state.current_phase = ResearchPhase.RESEARCHING
+
         logger.info(
             "research_plan_saved",
             topic=topic,
+            run_id=run_id,
+            user_id=user_id,
             questions_count=len(state.plan.research_questions),
         )
         return f"Research plan saved for topic: {topic}. Proceeding to research."
     except Exception as e:
-        logger.error("plan_save_error", topic=topic, error=str(e))
+        logger.error("plan_save_error", topic=topic, run_id=run_id, error=str(e))
         return f"Error saving plan: {str(e)}"
 
 
@@ -258,6 +347,9 @@ def save_research_findings(
     """
     Save the research findings and proceed with synthesis.
     """
+    run_id = _get_run_id()
+    user_id = _get_user_id()
+
     # Use safe JSON parsing with repair attempts
     findings_data = safe_json_loads(findings_json, fallback=None)
 
@@ -265,6 +357,7 @@ def save_research_findings(
         logger.error(
             "findings_json_decode_error",
             topic=topic,
+            run_id=run_id,
             error="Could not parse findings JSON after repair attempts",
             json_preview=findings_json[:200] if findings_json else "empty",
         )
@@ -279,18 +372,10 @@ def save_research_findings(
         findings_data = [findings_data]
 
     try:
-        if topic in _research_state_store:
-            state = _research_state_store[topic]
-        else:
-            # Try partial match
-            state = None
-            for key in _research_state_store:
-                if topic.lower() in key.lower() or key.lower() in topic.lower():
-                    state = _research_state_store[key]
-                    break
-            if not state:
-                state = ResearchState(topic=topic)
-                _research_state_store[topic] = state
+        # Get state for this run
+        state = _get_or_create_state(run_id, topic)
+        state.topic = topic
+        state.user_id = user_id
 
         state.findings = [
             ResearchFinding(
@@ -302,10 +387,16 @@ def save_research_findings(
             for f in findings_data
         ]
         state.current_phase = ResearchPhase.SYNTHESIZING
-        logger.info("research_findings_saved", topic=topic, findings_count=len(state.findings))
+        logger.info(
+            "research_findings_saved",
+            topic=topic,
+            run_id=run_id,
+            user_id=user_id,
+            findings_count=len(state.findings),
+        )
         return f"Research findings saved for topic: {topic}. Proceeding with synthesis phase."
     except Exception as e:
-        logger.error("findings_save_error", topic=topic, error=str(e))
+        logger.error("findings_save_error", topic=topic, run_id=run_id, error=str(e))
         return f"Error saving findings: {str(e)}"
 
 
@@ -322,7 +413,16 @@ def save_final_report(
     Save the final research report with sources. This completes the research.
     Sources must include: source_type, description, confidence, url (optional).
     """
-    logger.info("save_final_report_called", topic=topic, report_length=len(report))
+    run_id = _get_run_id()
+    user_id = _get_user_id()
+
+    logger.info(
+        "save_final_report_called",
+        topic=topic,
+        run_id=run_id,
+        user_id=user_id,
+        report_length=len(report),
+    )
 
     # Parse sources using safe JSON parsing
     sources_data = safe_json_loads(sources_json, fallback=[])
@@ -341,40 +441,38 @@ def save_final_report(
         for s in sources_data
     ]
 
-    if topic in _research_state_store:
-        state = _research_state_store[topic]
-        state.final_report = report
-        state.sources = sources
-        state.current_phase = ResearchPhase.COMPLETED
-        logger.info("final_report_saved", topic=topic, sources_count=len(sources))
-    else:
-        # Try to find by partial match
-        for key in _research_state_store:
-            if topic.lower() in key.lower() or key.lower() in topic.lower():
-                state = _research_state_store[key]
-                state.final_report = report
-                state.sources = sources
-                state.current_phase = ResearchPhase.COMPLETED
-                logger.info(
-                    "final_report_saved_partial_match",
-                    topic=topic,
-                    matched_key=key,
-                    sources_count=len(sources),
+    # Automatically add web search sources from cache for this run
+    web_cache = _get_web_cache(run_id)
+    existing_urls = {s.url for s in sources if s.url}
+    for query, results in web_cache.items():
+        for result in results:
+            url = result.get("url")
+            if url and url not in existing_urls:
+                sources.append(
+                    ResearchSource(
+                        source_type="web",
+                        description=f"Web search: {result.get('title', 'Unknown')}",
+                        confidence="high",
+                        url=url,
+                    )
                 )
-                break
-        else:
-            # Store with new key
-            _research_state_store[topic] = ResearchState(
-                topic=topic,
-                final_report=report,
-                sources=sources,
-                current_phase=ResearchPhase.COMPLETED,
-            )
-            logger.info(
-                "final_report_saved_new_key",
-                topic=topic,
-                sources_count=len(sources),
-            )
+                existing_urls.add(url)
+
+    # Get state for this run and save final report
+    state = _get_or_create_state(run_id, topic)
+    state.topic = topic
+    state.user_id = user_id
+    state.final_report = report
+    state.sources = sources
+    state.current_phase = ResearchPhase.COMPLETED
+
+    logger.info(
+        "final_report_saved",
+        topic=topic,
+        run_id=run_id,
+        user_id=user_id,
+        sources_count=len(sources),
+    )
     return f"Final report saved for topic: {topic}. {len(sources)} sources."
 
 
@@ -396,7 +494,16 @@ class DeepResearchAgentService:
         self._deep_research_agent: ChatAgent | None = None
         self._credential: DefaultAzureCredential | None = None
         self._active_runs: dict[str, Any] = {}  # Track active workflow runs
+        self._cosmos_db: Any | None = None  # Lazy-loaded Cosmos DB service
         logger.info("DeepResearchAgentService initialized with Agent Framework SDK")
+
+    def _get_cosmos_db(self):
+        """Get or create the Cosmos DB service."""
+        if self._cosmos_db is None:
+            from app.services.cosmos_db_service import CosmosDbService
+
+            self._cosmos_db = CosmosDbService()
+        return self._cosmos_db
 
     def _get_client(self) -> AsyncAzureOpenAI:
         """Get or create the Azure OpenAI client with managed identity or API key."""
@@ -506,8 +613,37 @@ class DeepResearchAgentService:
             model_id=settings.azure_openai_deployment,
         )
 
+        # Get current date for the LLM to understand "current" means today
+        current_date = datetime.now(UTC).strftime("%B %d, %Y")
+        current_year = datetime.now(UTC).strftime("%Y")
+
         # Build instructions based on whether we have document context
-        base_instructions = """You are a thorough research assistant. You MUST complete all three phases using the provided tools.
+        # Note: Using string concatenation instead of f-string to avoid escaping JSON braces
+        base_instructions = (
+            """You are a thorough research assistant. You MUST complete all three phases using the provided tools.
+
+## CURRENT DATE AWARENESS (CRITICAL)
+TODAY'S DATE IS: **"""
+            + current_date
+            + """**
+
+When the user asks about "current", "latest", "today's", or "now":
+- This means data as of """
+            + current_date
+            + """ or the most recent available
+- ALWAYS use web_search() to get up-to-date information
+- Do NOT use outdated information from your training data
+- When searching, include the current year ("""
+            + current_year
+            + """) in your queries
+
+For example, if user asks "what's the current interest rate", search for "interest rate """
+            + current_date.split()[0]
+            + " "
+            + current_year
+            + """" or "interest rate """
+            + current_year
+            + """", NOT historical data unless the user explicitly asks for past information.
 
 ## SECURITY GUARDRAILS (MANDATORY - NO EXCEPTIONS)
 
@@ -539,36 +675,65 @@ NEVER include the following in your responses - redact with [REDACTED]:
 
 IMPORTANT: You MUST call the tool functions to save your work at each phase. Do not just describe what you would do - actually call the functions.
 
-CITATION REQUIREMENT: Every piece of information MUST include a source citation. For each fact or claim, you must track:
-- source_type: "llm_knowledge", "document", "web", or "api"
-- description: What the source is (e.g., "General AI knowledge about machine learning concepts")
+## MANDATORY SOURCE CITATIONS (NO EXCEPTIONS)
+
+Every piece of information you provide MUST include source attribution. This is a LEGAL REQUIREMENT for traceability.
+
+For EVERY fact, claim, or piece of information, you MUST track:
+- source_type: "llm_knowledge" (for AI training data), "document" (for provided docs), "web" (for websites), or "api" (for API data)
+- description: Detailed description (e.g., "QS World University Rankings 2023 data", "General knowledge about British Columbia geography")
 - confidence: "high", "medium", or "low"
-- url: If available, provide a URL (use null if not available)
+- url: Provide URL if known, otherwise use null
+
+EXAMPLE sources_json for save_final_report():
+```json
+[
+  {"source_type": "llm_knowledge", "description": "QS World University Rankings 2023 - university ranking data", "confidence": "high", "url": "https://www.topuniversities.com/university-rankings"},
+  {"source_type": "llm_knowledge", "description": "Times Higher Education World University Rankings 2023", "confidence": "high", "url": "https://www.timeshighereducation.com/world-university-rankings"},
+  {"source_type": "llm_knowledge", "description": "General knowledge about British Columbia educational institutions", "confidence": "medium", "url": null}
+]
+```
 
 ## PHASE 1: PLANNING
 Create a research plan, then call save_research_plan() with:
 - plan_json: A JSON string like {"research_questions": ["q1", "q2"], "subtopics": ["s1", "s2"], "methodology": "description"}
 - topic: The exact research topic
 
-## PHASE 2: RESEARCH  
-Research each subtopic WITH CITATIONS, then call save_research_findings() with:
+## PHASE 2: RESEARCH (WEB SEARCH IS MANDATORY)
+**YOU MUST call web_search() to get CURRENT information from the internet!**
+
+For EACH subtopic, you MUST:
+1. Call web_search() with relevant queries to get up-to-date information
+2. Use multiple targeted searches (e.g., "Bank of Canada interest rate December 2024", "current mortgage rates Canada 2024")
+3. Combine web results with your knowledge for comprehensive findings
+
+Then call save_research_findings() with:
 - findings_json: A JSON string like:
-  [{"subtopic": "name", "content": "detailed findings...", "confidence": "high", "sources": [{"source_type": "document", "description": "From document section X", "confidence": "high", "url": null}]}]
+  [{"subtopic": "name", "content": "detailed findings...", "confidence": "high", "sources": [{"source_type": "web", "description": "From search: [title]", "confidence": "high", "url": "https://..."}]}]
 - topic: The exact research topic
 
-CRITICAL: Each finding MUST include a "sources" array with at least one source citation.
+CRITICAL: Each finding MUST include a "sources" array. Use source_type="web" for web search results with the actual URL!
 
-## PHASE 3: SYNTHESIS
+## PHASE 3: SYNTHESIS (CRITICAL: SOURCES ARE MANDATORY)
 Write a comprehensive final report (2000+ words with sections), then call save_final_report() with:
 - report: The complete markdown report including Executive Summary, Key Findings, Analysis, Conclusions, and Recommendations
-- sources_json: A JSON string with ALL sources used
+  DO NOT include a "Sources" or "References" section in the report markdown - sources are passed separately via sources_json and displayed in a dedicated UI component
+- sources_json: A JSON array with ALL sources used (NEVER empty, NEVER "[]")
 - topic: The exact research topic
 
-CRITICAL: Every claim in the final report must be traceable to a source.
+CRITICAL: The sources_json parameter MUST contain at least 3-5 sources. Include web sources with URLs! Example:
+'[{"source_type": "web", "description": "QS World University Rankings 2024", "confidence": "high", "url": "https://www.topuniversities.com/..."}, {"source_type": "llm_knowledge", "description": "General knowledge about BC education", "confidence": "medium", "url": null}]'
 
-After calling save_final_report(), provide a brief summary to the user.
+After calling save_final_report(), provide a brief summary to the user (DO NOT list sources in the summary - they are shown separately in the UI).
 
-YOU MUST CALL ALL THREE FUNCTIONS IN ORDER."""
+MANDATORY WORKFLOW:
+1. Call web_search() AT LEAST 2-3 times during research phase for current data
+2. Call save_research_plan() with your plan
+3. Call save_research_findings() with findings that include web sources
+4. Call save_final_report() with the report and ALL sources (including web URLs)
+
+FAILURE TO USE web_search() WILL RESULT IN OUTDATED INFORMATION!"""
+        )
 
         # Add document-specific instructions if we have document context
         if document_context:
@@ -601,7 +766,7 @@ When citing from this document, use:
             name="DeepResearchAgent",
             instructions=full_instructions,
             chat_client=chat_client,
-            tools=[save_research_plan, save_research_findings, save_final_report],
+            tools=[web_search, save_research_plan, save_research_findings, save_final_report],
             temperature=settings.llm_temperature,
             max_tokens=settings.llm_max_output_tokens,
         )
@@ -625,6 +790,9 @@ When citing from this document, use:
             Dictionary with run_id and initial status.
         """
         run_id = str(uuid4())
+
+        # Clear web search cache for new research session
+        _web_search_cache.clear()
 
         # If document_id is provided, fetch document content for thorough scanning
         document_context = None
@@ -693,18 +861,31 @@ When citing from this document, use:
             phase=state.current_phase.value,
         )
 
+        # Set context variables for ai_functions to access run_id and user_id
+        run_id_token = _current_run_id.set(run_id)
+        user_id_token = _current_user_id.set(state.user_id or "")
+
         try:
+            # Initialize state cache for this run
+            _run_state_cache[run_id] = state
+
             # Build user context for personalization
             user_context = ""
             if state.user_id:
                 user_context = f"\n\nUser ID for tracking: {state.user_id}"
 
+            # Get current date for the query
+            current_date = datetime.now(UTC).strftime("%B %d, %Y")
+
             # Run the agent with the research topic - it will complete all phases
             query = f"""Please research this topic thoroughly: {state.topic}{user_context}
 
+TODAY'S DATE: {current_date}
+When searching for "current" information, use {current_date.split()[2]} (the current year) in your search queries.
+
 Complete all three phases of the research workflow:
 1. First, create a research plan and call save_research_plan()
-2. Then, conduct research and call save_research_findings()
+2. Then, conduct research using web_search() for current data and call save_research_findings()
 3. Finally, synthesize a report and call save_final_report()
 
 Provide comprehensive, detailed responses at each phase."""
@@ -719,40 +900,94 @@ Provide comprehensive, detailed responses at each phase."""
                 result_str=str(result)[:500],
             )
 
-            # Get stored state from global store if available
-            # Try exact match first, then partial match
-            stored_state = _research_state_store.get(state.topic)
-            if not stored_state:
-                # Try partial match
-                for key in _research_state_store:
-                    if state.topic.lower() in key.lower() or key.lower() in state.topic.lower():
-                        stored_state = _research_state_store[key]
-                        logger.info("found_state_partial_match", topic=state.topic, matched_key=key)
-                        break
-
-            if stored_state:
-                state.plan = stored_state.plan
-                state.findings = stored_state.findings
-                state.final_report = stored_state.final_report
-                state.sources = stored_state.sources
+            # Get state from run cache (populated by ai_functions during execution)
+            cached_state = _run_state_cache.get(run_id)
+            if cached_state:
+                state.plan = cached_state.plan
+                state.findings = cached_state.findings
+                state.final_report = cached_state.final_report
+                state.sources = cached_state.sources
                 logger.info(
-                    "retrieved_stored_state",
+                    "retrieved_cached_state",
+                    run_id=run_id,
                     has_plan=state.plan is not None,
                     findings_count=len(state.findings),
                     has_final_report=bool(state.final_report),
                     final_report_length=len(state.final_report) if state.final_report else 0,
                     sources_count=len(state.sources),
                 )
-            else:
-                logger.warning(
-                    "no_stored_state_found",
-                    topic=state.topic,
-                    store_keys=list(_research_state_store.keys()),
-                )
 
             # Workflow complete
             state.current_phase = ResearchPhase.COMPLETED
             final_message = str(result)
+
+            # Ensure sources are present - extract from findings if not saved directly
+            all_sources = list(state.sources)  # Start with saved sources
+
+            # Extract sources from findings if available
+            for finding in state.findings:
+                for source in finding.sources:
+                    # Avoid duplicates
+                    if not any(
+                        s.description == source for s in all_sources if isinstance(source, str)
+                    ):
+                        if isinstance(source, dict):
+                            all_sources.append(
+                                ResearchSource(
+                                    source_type=source.get("source_type", "llm_knowledge"),
+                                    description=source.get("description", "Research finding"),
+                                    confidence=source.get("confidence", "medium"),
+                                    url=source.get("url"),
+                                )
+                            )
+                        elif isinstance(source, str):
+                            all_sources.append(
+                                ResearchSource(
+                                    source_type="llm_knowledge",
+                                    description=source,
+                                    confidence="medium",
+                                    url=None,
+                                )
+                            )
+
+            # Add web search sources from cache for this run
+            web_cache = _get_web_cache(run_id)
+            existing_urls = {s.url for s in all_sources if s.url}
+            for query, results in web_cache.items():
+                for result in results:
+                    url = result.get("url")
+                    if url and url not in existing_urls:
+                        all_sources.append(
+                            ResearchSource(
+                                source_type="web",
+                                description=f"Web search: {result.get('title', 'Unknown')}",
+                                confidence="high",
+                                url=url,
+                            )
+                        )
+                        existing_urls.add(url)
+
+            # MANDATORY: Ensure at least one source exists (LLM knowledge fallback)
+            if not all_sources:
+                logger.warning(
+                    "no_sources_found_adding_fallback",
+                    run_id=run_id,
+                    topic=state.topic,
+                )
+                all_sources.append(
+                    ResearchSource(
+                        source_type="llm_knowledge",
+                        description=f"AI knowledge base research on: {state.topic}",
+                        confidence="medium",
+                        url=None,
+                    )
+                )
+
+            # Update state with all collected sources
+            state.sources = all_sources
+
+            # Save final state to Cosmos DB for persistence
+            await self._save_research_state_to_cosmos(run_id, state)
 
             return {
                 "run_id": run_id,
@@ -772,6 +1007,7 @@ Provide comprehensive, detailed responses at each phase."""
                         "subtopic": f.subtopic,
                         "content": f.content,
                         "confidence": f.confidence,
+                        "sources": f.sources,  # Include finding-level sources
                     }
                     for f in state.findings
                 ],
@@ -785,6 +1021,7 @@ Provide comprehensive, detailed responses at each phase."""
                     }
                     for s in state.sources
                 ],
+                "has_sufficient_info": len(state.sources) > 0,
             }
 
         except Exception as e:
@@ -799,6 +1036,64 @@ Provide comprehensive, detailed responses at each phase."""
                 "status": "failed",
                 "error": str(e),
             }
+        finally:
+            # Reset context variables
+            _current_run_id.reset(run_id_token)
+            _current_user_id.reset(user_id_token)
+
+            # Clean up run-specific caches
+            if run_id in _run_state_cache:
+                del _run_state_cache[run_id]
+            if run_id in _web_search_cache:
+                del _web_search_cache[run_id]
+
+    async def _save_research_state_to_cosmos(self, run_id: str, state: ResearchState) -> None:
+        """Save research state to Cosmos DB for persistence."""
+        try:
+            cosmos_db = self._get_cosmos_db()
+            await cosmos_db.save_workflow_state(
+                workflow_id=run_id,
+                user_id=state.user_id or "anonymous",
+                workflow_type="deep_research",
+                status="completed",
+                current_step="completed",
+                context={
+                    "topic": state.topic,
+                    "plan": {
+                        "main_topic": state.plan.main_topic,
+                        "research_questions": state.plan.research_questions,
+                        "subtopics": state.plan.subtopics,
+                        "methodology": state.plan.methodology,
+                    }
+                    if state.plan
+                    else None,
+                    "findings_count": len(state.findings),
+                },
+                result={
+                    "final_report": state.final_report,
+                    "sources": [
+                        {
+                            "source_type": s.source_type,
+                            "description": s.description,
+                            "confidence": s.confidence,
+                            "url": s.url,
+                        }
+                        for s in state.sources
+                    ],
+                },
+            )
+            logger.info(
+                "research_state_saved_to_cosmos",
+                run_id=run_id,
+                user_id=state.user_id,
+                sources_count=len(state.sources),
+            )
+        except Exception as e:
+            logger.error(
+                "research_state_cosmos_save_failed",
+                run_id=run_id,
+                error=str(e),
+            )
 
     async def run_workflow_streaming(self, run_id: str):
         """

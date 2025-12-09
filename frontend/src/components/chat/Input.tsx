@@ -75,13 +75,14 @@ const Input: FC<InputProps> = ({
                 Deep Research uses an AI-powered multi-phase workflow for comprehensive analysis:
               </p>
               <ul style={{ margin: 0, paddingLeft: '1.25rem', opacity: 0.9, lineHeight: 1.6 }}>
+                <li><strong>Web Search:</strong> Fetches <em>current data</em> from the internet for up-to-date information</li>
                 <li><strong>Planning:</strong> Creates a research plan with questions and methodology</li>
                 <li><strong>Research:</strong> Gathers findings on each subtopic with confidence levels</li>
-                <li><strong>Synthesis:</strong> Produces a comprehensive report with conclusions</li>
+                <li><strong>Synthesis:</strong> Produces a comprehensive report with citations & source URLs</li>
               </ul>
               <p style={{ margin: '0.75rem 0 0 0', opacity: 0.85, fontSize: '0.8rem' }}>
-                <i className="bi bi-clock me-1"></i>
-                Takes 30-60 seconds for thorough, well-structured answers.
+                <i className="bi bi-globe me-1"></i>
+                Goes outbound to the web for current data, ensuring results are up-to-date.
               </p>
             </div>
             <button

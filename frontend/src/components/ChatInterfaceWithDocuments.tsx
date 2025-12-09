@@ -384,11 +384,14 @@ const ChatInterface: FC = () => {
           finalContent = `Research completed but no findings were generated. Status: ${runResult.data.status}`
         }
 
+        // Sources are displayed in the structured Message component
+        const sourcesForMessage = runResult.data.sources || []
+
         // Update the status message with the final report
         setMessages((prev) =>
           prev.map((msg) =>
             msg.id === statusMessage.id
-              ? { ...msg, content: finalContent }
+              ? { ...msg, content: finalContent, sources: sourcesForMessage }
               : msg,
           ),
         )
@@ -956,14 +959,14 @@ const ChatInterface: FC = () => {
                       comprehensive analysis</strong> of complex topics. Unlike regular chat, it:
                     </p>
                     <ul className="mb-2 ps-3">
+                      <li><strong>Searches the web</strong> - Fetches <em>current data</em> from the internet for up-to-date information</li>
                       <li><strong>Creates a research plan</strong> - Breaks down your topic into subtopics and research questions</li>
                       <li><strong>Gathers findings</strong> - Systematically researches each aspect with confidence scoring</li>
-                      <li><strong>Synthesizes a report</strong> - Produces a comprehensive final report with citations</li>
-                      <li><strong>Human-in-the-loop</strong> - You can approve or provide feedback at each stage</li>
+                      <li><strong>Synthesizes a report</strong> - Produces a comprehensive final report with citations & source URLs</li>
                     </ul>
                     <p className="mb-0 text-muted">
-                      <i className="bi bi-clock me-1"></i>
-                      <em>Deep Research takes longer but provides more thorough, verifiable results for complex questions.</em>
+                      <i className="bi bi-globe me-1"></i>
+                      <em>Deep Research goes outbound to the web to fetch current data, ensuring your results are up-to-date.</em>
                     </p>
                   </Alert>
                 </div>

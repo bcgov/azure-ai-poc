@@ -20,6 +20,7 @@ const Message: FC<MessageProps> = ({
   isStreaming,
 }) => {
   const [expandedSources, setExpandedSources] = useState<Set<number>>(new Set())
+  const [showAllSources, setShowAllSources] = useState(false)
 
   const toggleSource = (index: number) => {
     setExpandedSources((prev) => {
@@ -95,7 +96,7 @@ const Message: FC<MessageProps> = ({
               Sources ({sources.length}):
             </div>
             <div className="sources-list">
-              {sources.map((source, index) => (
+              {(showAllSources ? sources : sources.slice(0, 3)).map((source, index) => (
                 <div key={index} className="source-item">
                   <div
                     className={`copilot-source-badge ${source.confidence}`}
@@ -219,6 +220,26 @@ const Message: FC<MessageProps> = ({
                   )}
                 </div>
               ))}
+              {/* Show toggle when more than 3 sources */}
+              {sources.length > 3 && (
+                <button
+                  onClick={() => setShowAllSources(!showAllSources)}
+                  style={{
+                    marginTop: '0.5rem',
+                    padding: '0.25rem 0.5rem',
+                    background: 'transparent',
+                    border: '1px solid #6c757d',
+                    borderRadius: '4px',
+                    color: '#6c757d',
+                    cursor: 'pointer',
+                    fontSize: '0.85rem',
+                  }}
+                >
+                  {showAllSources
+                    ? 'Show less'
+                    : `+${sources.length - 3} more sources`}
+                </button>
+              )}
             </div>
           </div>
         )}
