@@ -31,6 +31,28 @@
 	}
 }
 
+# WebSocket-enabled proxy settings for Azure Speech Services
+(azure_websocket_proxy) {
+	# Set Host header to match the upstream
+	header_up Host {upstream_hostport}
+	header_up X-Forwarded-Proto https
+	import strip_caller_info
+
+	# Remove Caddy identification from responses
+	header_down -Via
+	header_down -Server
+
+	# WebSocket and HTTP transport with longer timeouts for streaming
+	transport http {
+		read_timeout 3000s
+		write_timeout 3000s
+		dial_timeout 30s
+		response_header_timeout 3000s
+		keepalive 300s
+		keepalive_idle_conns 100
+	}
+}
+
 :80 {
 	# Enable compression for responses
 	encode zstd gzip
@@ -73,10 +95,15 @@
 			import azure_proxy_common
 		}
 	}
-	# Azure Speech Services
+
+	# Azure Speech Services - WebSocket support for SDK
+	# The Speech SDK uses WebSocket connections (wss://) for real-time streaming
+	# Caddy automatically handles WebSocket upgrade when Connection: Upgrade header is present
 	handle_path /speech* {
 		reverse_proxy {$AZURE_SPEECH_ENDPOINT} {
-			import azure_proxy_common
+			import azure_websocket_proxy
+			# Flush immediately for streaming responses
+			flush_interval -1
 		}
 	}
 }
