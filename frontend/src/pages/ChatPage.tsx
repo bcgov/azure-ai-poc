@@ -364,19 +364,9 @@ const ChatPage: FC = () => {
         finalContent = 'Research completed but no results were returned.'
       }
 
-      // Append sources if available
-      if (runResult.data.sources && runResult.data.sources.length > 0) {
-        finalContent += '\n\n---\n\n## 📚 Sources\n\n'
-        runResult.data.sources.forEach((source, index) => {
-          const confidence = source.confidence === 'high' ? '🟢' : source.confidence === 'medium' ? '🟡' : '🔴'
-          finalContent += `${index + 1}. **${source.source_type}** ${confidence}\n`
-          finalContent += `   - ${source.description}\n`
-          if (source.url) {
-            finalContent += `   - [Link](${source.url})\n`
-          }
-          finalContent += '\n'
-        })
-      }
+      // Append sources if available (show top 3 + count)
+      // Sources are now displayed in the structured Message component, not in markdown
+      const sourcesForMessage = runResult.data.sources || []
 
       setMessages((prev) =>
         prev.map((msg) =>
@@ -384,6 +374,7 @@ const ChatPage: FC = () => {
             ? {
                 ...msg,
                 content: finalContent,
+                sources: sourcesForMessage,
                 isStreaming: false,
                 isResearchPhase: false,
                 researchPhase: undefined,

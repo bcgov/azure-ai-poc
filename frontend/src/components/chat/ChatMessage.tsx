@@ -111,7 +111,7 @@ const ChatMessage: FC<ChatMessageProps> = ({
                       Sources ({sources.length}):
                     </small>
                     <div className="d-flex flex-wrap gap-1">
-                      {sources.map((source, index) => (
+                      {sources.slice(0, 3).map((source, index) => (
                         <OverlayTrigger
                           key={index}
                           placement="top"
@@ -131,13 +131,22 @@ const ChatMessage: FC<ChatMessageProps> = ({
                             bg={getConfidenceBadgeVariant(source.confidence)}
                             className="cursor-pointer"
                             style={{ cursor: 'pointer' }}
+                            as={source.url ? 'a' : 'span'}
+                            href={source.url || undefined}
+                            target={source.url ? '_blank' : undefined}
+                            rel={source.url ? 'noopener noreferrer' : undefined}
                           >
                             <i className={`${getSourceIcon(source.source_type)} me-1`}></i>
                             {source.source_type.replace('_', ' ')}
-                            <span className="ms-1 opacity-75">({source.confidence})</span>
+                            {source.url && <i className="bi bi-box-arrow-up-right ms-1" style={{ fontSize: '0.7em' }}></i>}
                           </Badge>
                         </OverlayTrigger>
                       ))}
+                      {sources.length > 3 && (
+                        <Badge bg="secondary" className="opacity-75">
+                          +{sources.length - 3} more
+                        </Badge>
+                      )}
                     </div>
                   </div>
                 )}
