@@ -178,6 +178,7 @@ class ResearchState:
     """State passed through the workflow."""
 
     topic: str
+    user_id: str | None = None  # User ID from Keycloak for tracking
     plan: ResearchPlan | None = None
     findings: list[ResearchFinding] = field(default_factory=list)
     synthesis: str = ""
@@ -632,6 +633,7 @@ When citing from this document, use:
 
         initial_state = ResearchState(
             topic=topic,
+            user_id=user_id,
             document_id=document_id,
             document_context=document_context,
         )
@@ -684,11 +686,21 @@ When citing from this document, use:
         thread = run_data["thread"]
         state: ResearchState = run_data["state"]
 
-        logger.info("executing_workflow", run_id=run_id, phase=state.current_phase.value)
+        logger.info(
+            "executing_workflow",
+            run_id=run_id,
+            user_id=state.user_id,
+            phase=state.current_phase.value,
+        )
 
         try:
+            # Build user context for personalization
+            user_context = ""
+            if state.user_id:
+                user_context = f"\n\nUser ID for tracking: {state.user_id}"
+
             # Run the agent with the research topic - it will complete all phases
-            query = f"""Please research this topic thoroughly: {state.topic}
+            query = f"""Please research this topic thoroughly: {state.topic}{user_context}
 
 Complete all three phases of the research workflow:
 1. First, create a research plan and call save_research_plan()
@@ -809,10 +821,20 @@ Provide comprehensive, detailed responses at each phase."""
         thread = run_data["thread"]
         state: ResearchState = run_data["state"]
 
-        logger.info("executing_workflow_streaming", run_id=run_id, phase=state.current_phase.value)
+        logger.info(
+            "executing_workflow_streaming",
+            run_id=run_id,
+            user_id=state.user_id,
+            phase=state.current_phase.value,
+        )
 
         try:
-            query = f"Please research this topic thoroughly: {state.topic}"
+            # Build user context for personalization
+            user_context = ""
+            if state.user_id:
+                user_context = f" (User: {state.user_id})"
+
+            query = f"Please research this topic thoroughly: {state.topic}{user_context}"
 
             async for chunk in agent.run_stream(query, thread=thread):
                 event_dict = {
@@ -886,6 +908,7 @@ Provide comprehensive, detailed responses at each phase."""
         logger.info(
             "sending_approval",
             run_id=run_id,
+            user_id=state.user_id,
             request_id=request_id,
             approved=approved,
         )
@@ -965,6 +988,7 @@ Provide comprehensive, detailed responses at each phase."""
 
         return {
             "run_id": run_id,
+            "user_id": state.user_id,
             "current_phase": state.current_phase.value,
             "topic": state.topic,
             "has_plan": state.plan is not None,

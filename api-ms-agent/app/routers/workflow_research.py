@@ -18,10 +18,15 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from app.auth.dependencies import get_current_user_from_request
+from app.auth.models import KeycloakUser
+from app.logger import get_logger
 from app.services.workflow_research_agent import (
     WorkflowResearchAgentService,
     get_workflow_research_service,
 )
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 
@@ -125,6 +130,7 @@ def get_research_service() -> WorkflowResearchAgentService:
 async def start_research(
     request: StartResearchRequest,
     service: Annotated[WorkflowResearchAgentService, Depends(get_research_service)],
+    current_user: Annotated[KeycloakUser, Depends(get_current_user_from_request)],
 ) -> StartResearchResponse:
     """
     Start a new research workflow.
@@ -140,14 +146,34 @@ async def start_research(
     - "Impact of AI on healthcare" (no approval)
     - "Research climate change with approval before finalizing" (requires approval)
     """
+    user_id = current_user.sub if current_user else request.user_id
+    logger.info(
+        "workflow_research_start_requested",
+        topic=request.topic,
+        user_id=user_id,
+        require_approval=request.require_approval,
+    )
+
     try:
         result = await service.start_research(
             topic=request.topic,
             require_approval=request.require_approval,
-            user_id=request.user_id,
+            user_id=user_id,
+        )
+        logger.info(
+            "workflow_research_started",
+            run_id=result.get("run_id"),
+            user_id=user_id,
+            topic=request.topic,
         )
         return StartResearchResponse(**result)
     except Exception as e:
+        logger.error(
+            "workflow_research_start_failed",
+            error=str(e),
+            user_id=user_id,
+            topic=request.topic,
+        )
         raise HTTPException(status_code=500, detail=f"Failed to start research: {e}")
 
 
@@ -155,6 +181,7 @@ async def start_research(
 async def run_workflow(
     run_id: str,
     service: Annotated[WorkflowResearchAgentService, Depends(get_research_service)],
+    current_user: Annotated[KeycloakUser, Depends(get_current_user_from_request)],
 ) -> WorkflowResultResponse:
     """
     Execute the research workflow.
@@ -163,12 +190,28 @@ async def run_workflow(
     If approval was requested, pauses at AWAITING_APPROVAL phase.
     Otherwise, completes fully and returns the final report.
     """
+    user_id = current_user.sub if current_user else None
+    logger.info(
+        "workflow_run_requested",
+        run_id=run_id,
+        user_id=user_id,
+    )
+
     try:
         result = await service.run_workflow(run_id)
+        logger.info(
+            "workflow_run_completed",
+            run_id=run_id,
+            user_id=user_id,
+            status=result.get("status"),
+            phase=result.get("current_phase"),
+        )
         return WorkflowResultResponse(**result)
     except ValueError as e:
+        logger.warning("workflow_run_not_found", run_id=run_id, user_id=user_id, error=str(e))
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
+        logger.error("workflow_run_failed", run_id=run_id, user_id=user_id, error=str(e))
         raise HTTPException(status_code=500, detail=f"Failed to run workflow: {e}")
 
 
@@ -176,8 +219,12 @@ async def run_workflow(
 async def get_run_status(
     run_id: str,
     service: Annotated[WorkflowResearchAgentService, Depends(get_research_service)],
+    current_user: Annotated[KeycloakUser, Depends(get_current_user_from_request)],
 ) -> RunStatusResponse:
     """Get the current status of a workflow run."""
+    user_id = current_user.sub if current_user else None
+    logger.debug("workflow_status_requested", run_id=run_id, user_id=user_id)
+
     try:
         result = service.get_run_status(run_id)
         return RunStatusResponse(**result)
@@ -190,6 +237,7 @@ async def send_approval(
     run_id: str,
     request: ApprovalRequest,
     service: Annotated[WorkflowResearchAgentService, Depends(get_research_service)],
+    current_user: Annotated[KeycloakUser, Depends(get_current_user_from_request)],
 ) -> ApprovalResponse:
     """
     Send approval for a research report awaiting approval.
@@ -198,16 +246,43 @@ async def send_approval(
     - approved=True: Marks workflow as complete
     - approved=False: Marks workflow as failed/rejected
     """
+    user_id = current_user.sub if current_user else None
+    logger.info(
+        "workflow_approval_requested",
+        run_id=run_id,
+        user_id=user_id,
+        approved=request.approved,
+    )
+
     try:
         result = await service.send_approval(
             run_id=run_id,
             approved=request.approved,
             feedback=request.feedback,
         )
+        logger.info(
+            "workflow_approval_processed",
+            run_id=run_id,
+            user_id=user_id,
+            approved=request.approved,
+            status=result.get("status"),
+        )
         return ApprovalResponse(**result)
     except ValueError as e:
+        logger.warning(
+            "workflow_approval_invalid",
+            run_id=run_id,
+            user_id=user_id,
+            error=str(e),
+        )
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        logger.error(
+            "workflow_approval_failed",
+            run_id=run_id,
+            user_id=user_id,
+            error=str(e),
+        )
         raise HTTPException(status_code=500, detail=f"Failed to send approval: {e}")
 
 

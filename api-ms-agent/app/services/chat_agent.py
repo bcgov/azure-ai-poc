@@ -333,6 +333,7 @@ DOCUMENT:
         message: str,
         history: list[dict[str, str]] | None = None,
         session_id: str | None = None,
+        user_id: str | None = None,
         document_context: str | None = None,
     ) -> ChatResult:
         """
@@ -342,6 +343,7 @@ DOCUMENT:
             message: The user's message
             history: Optional conversation history
             session_id: Optional session identifier for logging
+            user_id: User's Keycloak sub for tracking and context
             document_context: Optional document context from RAG search
 
         Returns:
@@ -353,6 +355,7 @@ DOCUMENT:
         logger.info(
             "chat_request",
             session_id=session_id,
+            user_id=user_id,
             message_length=len(message),
             history_length=len(history) if history else 0,
             has_document_context=document_context is not None,
@@ -413,6 +416,7 @@ DOCUMENT:
             logger.info(
                 "chat_response",
                 session_id=session_id,
+                user_id=user_id,
                 response_length=len(chat_result.response),
                 source_count=len(chat_result.sources),
                 has_sufficient_info=chat_result.has_sufficient_info,
@@ -421,7 +425,12 @@ DOCUMENT:
             return chat_result
 
         except Exception as e:
-            logger.error("chat_error", error=str(e), session_id=session_id)
+            logger.error(
+                "chat_error",
+                error=str(e),
+                session_id=session_id,
+                user_id=user_id,
+            )
             raise
 
     async def close(self) -> None:

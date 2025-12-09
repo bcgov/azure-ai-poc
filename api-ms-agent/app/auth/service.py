@@ -64,7 +64,6 @@ class AuthService:
                     audience=self.keycloak_client_id,
                     options={"verify_exp": True},
                 )
-                logger.info("Token decoded successfully", sub=payload.get("sub"))
             except JWTError as e:
                 logger.error("JWT verification failed", error=str(e))
                 raise HTTPException(

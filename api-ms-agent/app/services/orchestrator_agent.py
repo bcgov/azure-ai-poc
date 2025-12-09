@@ -521,7 +521,12 @@ class OrchestratorAgentService:
 
         return self._agent
 
-    async def process_query(self, query: str, session_id: str | None = None) -> dict[str, Any]:
+    async def process_query(
+        self,
+        query: str,
+        session_id: str | None = None,
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
         """
         Process a user query through the ChatAgent.
 
@@ -533,6 +538,7 @@ class OrchestratorAgentService:
         Args:
             query: User's natural language query
             session_id: Optional session ID for tracking
+            user_id: User's Keycloak sub for tracking and context
 
         Returns:
             Dictionary with response, sources, and metadata
@@ -541,6 +547,7 @@ class OrchestratorAgentService:
             "orchestrator_query_start",
             query=query[:100],
             session_id=session_id,
+            user_id=user_id,
         )
 
         try:
@@ -581,6 +588,7 @@ class OrchestratorAgentService:
             logger.info(
                 "orchestrator_query_complete",
                 session_id=session_id,
+                user_id=user_id,
                 response_length=len(response_text),
                 source_count=len(sources),
             )
@@ -588,7 +596,12 @@ class OrchestratorAgentService:
             return response
 
         except Exception as e:
-            logger.error(f"Orchestrator query error: {e}")
+            logger.error(
+                "orchestrator_query_error",
+                error=str(e),
+                session_id=session_id,
+                user_id=user_id,
+            )
             raise
 
     def _extract_sources_from_result(self, result: Any) -> list[dict[str, Any]]:

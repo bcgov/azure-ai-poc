@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     devui_enabled: bool = True
     devui_host: str = "localhost"
     devui_port: int = 8000
-    devui_auto_open: bool = True
+    devui_auto_open: bool = False
     devui_mode: str = "developer"  # developer | user
 
     # Cosmos DB settings - for chat history, metadata, and workflow persistence
