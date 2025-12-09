@@ -345,12 +345,13 @@ Write in a clear, professional style using markdown formatting.""",
 {findings_text}""",
                     },
                 ],
-                response_format={"type": "json_object"},
                 temperature=settings.llm_temperature,
                 max_tokens=settings.llm_max_output_tokens,
             )
 
-            state.final_report = response.choices[0].message.content or ""
+            # Get the report content and normalize any escaped newlines
+            report_content = response.choices[0].message.content or ""
+            state.final_report = report_content.replace("\\n", "\n").replace("\\t", "\t")
             logger.info(f"[SynthesisExecutor] Report created ({len(state.final_report)} chars)")
 
         except Exception as e:

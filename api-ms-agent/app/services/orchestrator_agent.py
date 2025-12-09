@@ -40,6 +40,7 @@ from app.logger import get_logger
 from app.services.mcp.geocoder_mcp import GeocoderMCP, get_geocoder_mcp
 from app.services.mcp.orgbook_mcp import OrgBookMCP, get_orgbook_mcp
 from app.services.mcp.parks_mcp import ParksMCP, get_parks_mcp
+from app.utils import sort_source_dicts_by_confidence
 
 logger = get_logger(__name__)
 
@@ -574,6 +575,9 @@ class OrchestratorAgentService:
                         "confidence": "high",
                     }
                 ]
+
+            # Sort sources by confidence (highest first)
+            sources = sort_source_dicts_by_confidence(sources)
 
             # Simple response structure - let the agent's response speak for itself
             # The framework handles all the complexity internally

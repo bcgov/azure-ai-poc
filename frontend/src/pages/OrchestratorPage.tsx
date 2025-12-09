@@ -16,9 +16,10 @@ interface ChatMessageType {
   sources?: SourceInfo[]
   hasSufficientInfo?: boolean
   isStreaming?: boolean
+  originalQuery?: string // For assistant messages, stores the user's query for retry
 }
 
-const EXAMPLE_QUERIES = [
+const EXAMPLE_QUERIES: string[] = [
 ]
 
 const OrchestratorPage: FC = () => {
@@ -68,6 +69,7 @@ const OrchestratorPage: FC = () => {
       type: 'assistant',
       content: '',
       isStreaming: true,
+      originalQuery: question,
     }
 
     setMessages((prev) => [...prev, userMessage, placeholderMessage])
@@ -114,6 +116,28 @@ const OrchestratorPage: FC = () => {
       setCurrentQuestion(lastFailedQuestion)
       void handleSubmit(lastFailedQuestion)
     }
+  }
+
+  // Retry a specific assistant message by re-sending its original query
+  const handleRetryMessage = (messageId: string, originalQuery: string) => {
+    if (isLoading || !originalQuery) return
+    
+    // Remove the assistant message being retried (keep the user message)
+    setMessages((prev) => prev.filter((msg) => msg.id !== messageId))
+    
+    // Re-submit the original query
+    void handleSubmit(originalQuery)
+  }
+
+  // Placeholder for thumbs up/down feedback - can be connected to analytics later
+  const handleThumbsUp = (messageId: string) => {
+    console.log('Thumbs up feedback for message:', messageId)
+    // TODO: Send feedback to analytics/backend
+  }
+
+  const handleThumbsDown = (messageId: string) => {
+    console.log('Thumbs down feedback for message:', messageId)
+    // TODO: Send feedback to analytics/backend
   }
 
   const handleExampleClick = (example: string) => {
@@ -277,6 +301,15 @@ const OrchestratorPage: FC = () => {
                     sources={message.sources}
                     hasSufficientInfo={message.hasSufficientInfo}
                     isStreaming={message.isStreaming}
+                    onRetry={message.type === 'assistant' && message.originalQuery 
+                      ? () => handleRetryMessage(message.id, message.originalQuery!) 
+                      : undefined}
+                    onThumbsUp={message.type === 'assistant' 
+                      ? () => handleThumbsUp(message.id) 
+                      : undefined}
+                    onThumbsDown={message.type === 'assistant' 
+                      ? () => handleThumbsDown(message.id) 
+                      : undefined}
                   />
                 ))}
                 <div ref={messagesEndRef} />
