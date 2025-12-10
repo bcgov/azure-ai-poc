@@ -18,7 +18,7 @@ router = APIRouter()
 class TextToSpeechRequest(BaseModel):
     """Request model for text-to-speech conversion."""
 
-    text: str = Field(..., description="Text to convert to speech", min_length=1, max_length=5000)
+    text: str = Field(..., description="Text to convert to speech", min_length=1, max_length=100000)
     voice: str = Field(
         default="en-CA-female",
         description="Voice to use (e.g., 'en-CA-female', 'en-US-male')",
