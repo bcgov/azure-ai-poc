@@ -378,7 +378,7 @@ requires-dist = [
     { name = "agent-framework", specifier = ">=1.0.0b251120" },
     { name = "agent-framework-devui", specifier = ">=1.0.0b251120" },
     { name = "azure-ai-documentintelligence", specifier = ">=1.0.0" },
-    { name = "azure-cognitiveservices-speech", specifier = ">=1.42.0" },
+    { name = "azure-cognitiveservices-speech", specifier = ">=1.47.0" },
     { name = "azure-cosmos", specifier = ">=4.9.0" },
     { name = "azure-identity", specifier = ">=1.25.1" },
     { name = "azure-search-documents", specifier = ">=11.6.0" },

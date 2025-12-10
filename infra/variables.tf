@@ -219,3 +219,7 @@ variable "keycloak_url" {
   nullable    = false
   default     = "https://dev.loginproxy.gov.bc.ca/auth"
 }
+variable "proxy_image" {
+  description = "The image for the Frontend proxy container"
+  type        = string
+}

@@ -1,9 +1,10 @@
-"""Azure Speech Services for text-to-speech functionality."""
+"""Azure Speech Services for text-to-speech and speech-to-text using SDK."""
 
-import io
+import re
 from typing import Literal
 
 import azure.cognitiveservices.speech as speechsdk
+from azure.identity import DefaultAzureCredential
 
 from app.config import settings
 from app.logger import get_logger
@@ -12,12 +13,16 @@ logger = get_logger(__name__)
 
 
 class SpeechService:
-    """Service for text-to-speech using Azure Speech Services."""
+    """Service for text-to-speech and speech-to-text using Azure Speech SDK.
+
+    Uses SDK with endpoint parameter as per MS documentation:
+    https://learn.microsoft.com/en-us/azure/ai-services/speech-service/
+    """
 
     # Available voices for different languages/styles
     VOICES = {
-        "en-US-female": "en-US-JennyNeural",
-        "en-US-male": "en-US-GuyNeural",
+        "en-US-female": "en-US-AvaMultilingualNeural",
+        "en-US-male": "en-US-AndrewMultilingualNeural",
         "en-CA-female": "en-CA-ClaraNeural",
         "en-CA-male": "en-CA-LiamNeural",
         "en-GB-female": "en-GB-SoniaNeural",
@@ -26,18 +31,84 @@ class SpeechService:
 
     def __init__(self):
         """Initialize the speech service."""
-        self.speech_key = settings.azure_speech_key
         self.speech_region = settings.azure_speech_region
+        self.endpoint = settings.azure_speech_endpoint
+        self.use_managed_identity = settings.use_managed_identity
+        self._credential: DefaultAzureCredential | None = None
 
-        if not self.speech_key or not self.speech_region:
-            logger.warning(
-                "speech_service_not_configured",
-                message="Azure Speech credentials not configured",
-            )
+        if self.use_managed_identity:
+            self._credential = DefaultAzureCredential()
+            logger.info("Using managed identity for Azure Speech Services")
+        else:
+            self.speech_key = settings.azure_speech_key
+            if not self.speech_key:
+                logger.warning(
+                    "speech_service_not_configured",
+                    message="Azure Speech key not configured",
+                )
+            elif not self.endpoint:
+                logger.warning(
+                    "speech_service_not_configured",
+                    message="Azure Speech endpoint not configured",
+                )
+            else:
+                logger.info(
+                    "speech_service_configured",
+                    endpoint=self.endpoint,
+                    message="Using API key for Azure Speech Services",
+                )
 
     def is_configured(self) -> bool:
         """Check if the speech service is properly configured."""
-        return bool(self.speech_key and self.speech_region)
+        if self.use_managed_identity:
+            return bool(self.endpoint and self._credential)
+        return bool(getattr(self, "speech_key", None) and self.endpoint)
+
+    def _get_auth_token(self) -> str | None:
+        """Get an authentication token for managed identity."""
+        if not self._credential:
+            return None
+        try:
+            token = self._credential.get_token("https://cognitiveservices.azure.com/.default")
+            return token.token
+        except Exception as e:
+            logger.error("speech_token_error", error=str(e))
+            return None
+
+    def _create_speech_config(self) -> speechsdk.SpeechConfig | None:
+        """Create speech config with endpoint parameter as per MS docs."""
+        try:
+            if self.use_managed_identity:
+                auth_token = self._get_auth_token()
+                if not auth_token:
+                    logger.error(
+                        "speech_auth_failed",
+                        message="Failed to get auth token for managed identity",
+                    )
+                    return None
+                # Use endpoint parameter with auth token
+                speech_config = speechsdk.SpeechConfig(
+                    auth_token=auth_token,
+                    endpoint=self.endpoint,
+                )
+            else:
+                # Use endpoint parameter with subscription key (as per MS docs)
+                speech_config = speechsdk.SpeechConfig(
+                    
+                    subscription=self.speech_key,
+                    endpoint=self.endpoint,
+                )
+
+            logger.info(
+                "speech_config_created",
+                endpoint=self.endpoint,
+                auth_type="managed_identity" if self.use_managed_identity else "api_key",
+            )
+            return speech_config
+
+        except Exception as e:
+            logger.error("speech_config_error", error=str(e))
+            return None
 
     async def text_to_speech(
         self,
@@ -48,7 +119,7 @@ class SpeechService:
         ] = "audio-24khz-160kbitrate-mono-mp3",
     ) -> bytes | None:
         """
-        Convert text to speech audio.
+        Convert text to speech audio using Azure Speech SDK.
 
         Args:
             text: The text to convert to speech
@@ -66,11 +137,12 @@ class SpeechService:
             # Get the voice name
             voice_name = self.VOICES.get(voice, self.VOICES["en-CA-female"])
 
-            # Configure speech synthesis
-            speech_config = speechsdk.SpeechConfig(
-                subscription=self.speech_key,
-                region=self.speech_region,
-            )
+            # Create speech config
+            speech_config = self._create_speech_config()
+            if not speech_config:
+                return None
+
+            # Set voice
             speech_config.speech_synthesis_voice_name = voice_name
 
             # Set output format
@@ -83,17 +155,24 @@ class SpeechService:
                     speechsdk.SpeechSynthesisOutputFormat.Audio24Khz160KBitRateMonoMp3
                 )
 
-            # Use in-memory audio output
-            synthesizer = speechsdk.SpeechSynthesizer(
+            # Use None for audio_config to get audio data in memory (no speaker output)
+            speech_synthesizer = speechsdk.SpeechSynthesizer(
                 speech_config=speech_config,
-                audio_config=None,  # No audio output, we want bytes
+                audio_config=None,
             )
 
             # Clean text for speech (remove markdown, etc.)
             clean_text = self._clean_text_for_speech(text)
 
-            # Synthesize speech
-            result = synthesizer.speak_text_async(clean_text).get()
+            logger.debug(
+                "tts_synthesizing",
+                text_length=len(clean_text),
+                voice=voice_name,
+                endpoint=self.endpoint,
+            )
+
+            # Synthesize speech (SDK is synchronous)
+            result = speech_synthesizer.speak_text_async(clean_text).get()
 
             if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
                 logger.info(
@@ -105,16 +184,116 @@ class SpeechService:
                 return result.audio_data
 
             elif result.reason == speechsdk.ResultReason.Canceled:
-                cancellation = result.cancellation_details
+                cancellation_details = result.cancellation_details
                 logger.error(
                     "tts_canceled",
-                    reason=str(cancellation.reason),
-                    error_details=cancellation.error_details,
+                    reason=str(cancellation_details.reason),
+                    error_details=cancellation_details.error_details,
                 )
+                if cancellation_details.reason == speechsdk.CancellationReason.Error:
+                    logger.error(
+                        "tts_error_details",
+                        error_details=cancellation_details.error_details,
+                    )
+                return None
+
+            else:
+                logger.error("tts_unexpected_result", reason=str(result.reason))
                 return None
 
         except Exception as e:
             logger.error("tts_error", error=str(e))
+            return None
+
+    async def speech_to_text(
+        self,
+        audio_data: bytes,
+        language: str = "en-US",
+    ) -> str | None:
+        """
+        Convert speech audio to text using Azure Speech SDK.
+
+        Args:
+            audio_data: Audio bytes (WAV format expected)
+            language: Recognition language (e.g., "en-US", "en-CA")
+
+        Returns:
+            Recognized text, or None if failed
+        """
+        if not self.is_configured():
+            logger.error("speech_not_configured", message="Speech service not configured")
+            return None
+
+        try:
+            # Create speech config
+            speech_config = self._create_speech_config()
+            if not speech_config:
+                return None
+
+            # Set recognition language
+            speech_config.speech_recognition_language = language
+
+            # Create audio config from audio data
+            # The SDK expects a stream or file, so we use PushAudioInputStream
+            audio_format = speechsdk.audio.AudioStreamFormat()
+            push_stream = speechsdk.audio.PushAudioInputStream(audio_format)
+            push_stream.write(audio_data)
+            push_stream.close()
+
+            audio_config = speechsdk.audio.AudioConfig(stream=push_stream)
+
+            # Create speech recognizer
+            speech_recognizer = speechsdk.SpeechRecognizer(
+                speech_config=speech_config,
+                audio_config=audio_config,
+            )
+
+            logger.debug(
+                "stt_recognizing",
+                audio_bytes=len(audio_data),
+                language=language,
+                endpoint=self.endpoint,
+            )
+
+            # Recognize speech (SDK is synchronous)
+            result = speech_recognizer.recognize_once_async().get()
+
+            if result.reason == speechsdk.ResultReason.RecognizedSpeech:
+                logger.info(
+                    "stt_success",
+                    audio_bytes=len(audio_data),
+                    text_length=len(result.text),
+                )
+                return result.text
+
+            elif result.reason == speechsdk.ResultReason.NoMatch:
+                no_match_details = result.no_match_details
+                logger.warning(
+                    "stt_no_match",
+                    reason=str(no_match_details.reason) if no_match_details else "unknown",
+                )
+                return None
+
+            elif result.reason == speechsdk.ResultReason.Canceled:
+                cancellation_details = result.cancellation_details
+                logger.error(
+                    "stt_canceled",
+                    reason=str(cancellation_details.reason),
+                    error_details=cancellation_details.error_details,
+                )
+                if cancellation_details.reason == speechsdk.CancellationReason.Error:
+                    logger.error(
+                        "stt_error_details",
+                        error_details=cancellation_details.error_details,
+                    )
+                return None
+
+            else:
+                logger.error("stt_unexpected_result", reason=str(result.reason))
+                return None
+
+        except Exception as e:
+            logger.error("stt_error", error=str(e))
             return None
 
     def _clean_text_for_speech(self, text: str) -> str:
@@ -127,8 +306,6 @@ class SpeechService:
         Returns:
             Cleaned text suitable for TTS
         """
-        import re
-
         # Remove code blocks
         text = re.sub(r"```[\s\S]*?```", "", text)
         text = re.sub(r"`[^`]+`", "", text)
