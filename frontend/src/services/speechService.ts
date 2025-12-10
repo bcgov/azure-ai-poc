@@ -55,6 +55,30 @@ class SpeechService {
   }
 
   /**
+   * Convert text to speech and stream audio in real-time
+   */
+  async textToSpeechStream(text: string, voice: VoiceId = 'en-CA-female'): Promise<Blob | null> {
+    try {
+      const response = await httpClient.post(
+        '/api/v1/speech/tts/stream',
+        { text, voice },
+        { responseType: 'blob' }
+      )
+
+      console.log('TTS stream started:', {
+        status: response.status,
+        blobSize: response.data.size,
+        contentType: response.headers['content-type']
+      })
+
+      return response.data as Blob
+    } catch (error) {
+      console.error('TTS stream error:', error)
+      return null
+    }
+  }
+
+  /**
    * Convert text to speech and return audio blob
    */
   async textToSpeech(text: string, voice: VoiceId = 'en-CA-female'): Promise<Blob | null> {
@@ -64,7 +88,20 @@ class SpeechService {
         { text, voice },
         { responseType: 'blob' }
       )
-      return response.data as Blob
+      
+      const blob = response.data as Blob
+      console.log('TTS response:', {
+        blobSize: blob.size,
+        blobType: blob.type,
+        status: response.status
+      })
+      
+      if (blob.size === 0) {
+        console.error('TTS returned empty blob')
+        return null
+      }
+      
+      return blob
     } catch (error) {
       console.error('TTS error:', error)
       return null
@@ -72,18 +109,17 @@ class SpeechService {
   }
 
   /**
-   * Play text as speech
+   * Play text as speech (using streaming endpoint)
    */
   async speak(text: string, voice: VoiceId = 'en-CA-female'): Promise<void> {
     // Stop any current playback
     this.stop()
 
-    const audioBlob = await this.textToSpeech(text, voice)
+    const audioBlob = await this.textToSpeechStream(text, voice)
     if (!audioBlob) {
       throw new Error('Failed to generate speech')
     }
 
-    // Create audio URL and play
     this.currentAudioUrl = URL.createObjectURL(audioBlob)
     this.audioElement = new Audio(this.currentAudioUrl)
     this.isPlaying = true
@@ -99,16 +135,49 @@ class SpeechService {
         resolve()
       }
 
-      this.audioElement.onerror = () => {
+      this.audioElement.onerror = (e) => {
+        console.error('Audio playback error:', e)
         this.cleanup()
         reject(new Error('Audio playback error'))
       }
 
       this.audioElement.play().catch((e) => {
+        console.error('Audio play() failed:', e)
         this.cleanup()
         reject(e)
       })
     })
+  }
+
+  /**
+   * Convert speech to text using Azure Speech Services
+   */
+  async speechToText(audioBlob: Blob, language: string = 'en-US'): Promise<string | null> {
+    try {
+      // Convert blob to base64
+      const arrayBuffer = await audioBlob.arrayBuffer()
+      const base64Audio = btoa(
+        new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
+      )
+
+      const response = await httpClient.post<{ text: string; language: string }>(
+        '/api/v1/speech/stt',
+        {
+          audio_data: base64Audio,
+          language,
+        }
+      )
+
+      console.log('STT response:', {
+        textLength: response.data.text.length,
+        language: response.data.language,
+      })
+
+      return response.data.text
+    } catch (error) {
+      console.error('STT error:', error)
+      return null
+    }
   }
 
   /**
@@ -199,9 +268,86 @@ export interface SpeechRecognitionResultOutput {
 export type SpeechRecognitionCallback = (result: SpeechRecognitionResultOutput) => void
 export type SpeechRecognitionErrorCallback = (error: string) => void
 
+/**
+ * Audio recording service for capturing microphone input
+ */
+class AudioRecorder {
+  private mediaRecorder: MediaRecorder | null = null
+  private audioChunks: Blob[] = []
+  private stream: MediaStream | null = null
+
+  /**
+   * Start recording audio from microphone
+   */
+  async startRecording(): Promise<boolean> {
+    try {
+      this.stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      this.mediaRecorder = new MediaRecorder(this.stream, {
+        mimeType: 'audio/webm',
+      })
+
+      this.audioChunks = []
+
+      this.mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          this.audioChunks.push(event.data)
+        }
+      }
+
+      this.mediaRecorder.start()
+      console.log('Audio recording started')
+      return true
+    } catch (error) {
+      console.error('Failed to start audio recording:', error)
+      return false
+    }
+  }
+
+  /**
+   * Stop recording and return audio blob
+   */
+  async stopRecording(): Promise<Blob | null> {
+    return new Promise((resolve) => {
+      if (!this.mediaRecorder) {
+        resolve(null)
+        return
+      }
+
+      this.mediaRecorder.onstop = () => {
+        const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' })
+        this.cleanup()
+        resolve(audioBlob)
+      }
+
+      this.mediaRecorder.stop()
+    })
+  }
+
+  /**
+   * Check if currently recording
+   */
+  isRecording(): boolean {
+    return this.mediaRecorder?.state === 'recording'
+  }
+
+  /**
+   * Cleanup resources
+   */
+  private cleanup(): void {
+    if (this.stream) {
+      this.stream.getTracks().forEach((track) => track.stop())
+      this.stream = null
+    }
+    this.mediaRecorder = null
+    this.audioChunks = []
+  }
+}
+
 class SpeechRecognitionService {
   private recognition: WebSpeechRecognition | null = null
   private isListening = false
+  private audioRecorder: AudioRecorder = new AudioRecorder()
+  private useAzureBackend = false
 
   /**
    * Check if speech recognition is supported
@@ -211,7 +357,14 @@ class SpeechRecognitionService {
   }
 
   /**
-   * Start listening for speech input
+   * Set whether to use Azure backend for STT
+   */
+  setUseAzureBackend(useAzure: boolean): void {
+    this.useAzureBackend = useAzure
+  }
+
+  /**
+   * Start listening for speech input (Web Speech API)
    */
   startListening(
     onResult: SpeechRecognitionCallback,
@@ -280,6 +433,75 @@ class SpeechRecognitionService {
       console.error('Failed to start speech recognition:', error)
       onError?.('Failed to start speech recognition')
       return false
+    }
+  }
+
+  /**
+   * Start listening for speech input using Azure backend
+   */
+  async startListeningAzure(
+    onResult: SpeechRecognitionCallback,
+    onError?: SpeechRecognitionErrorCallback,
+    language: string = 'en-US'
+  ): Promise<boolean> {
+    if (this.isListening) {
+      this.stopListeningAzure()
+    }
+
+    const started = await this.audioRecorder.startRecording()
+    if (!started) {
+      onError?.('Failed to access microphone')
+      return false
+    }
+
+    this.isListening = true
+
+    // Auto-stop after 10 seconds and send to Azure
+    setTimeout(async () => {
+      if (this.isListening) {
+        const audioBlob = await this.audioRecorder.stopRecording()
+        this.isListening = false
+
+        if (audioBlob) {
+          const text = await speechService.speechToText(audioBlob, language)
+          if (text) {
+            onResult({
+              transcript: text,
+              isFinal: true,
+            })
+          } else {
+            onError?.('Failed to recognize speech')
+          }
+        }
+      }
+    }, 10000)
+
+    return true
+  }
+
+  /**
+   * Stop listening for speech input (Azure backend)
+   */
+  async stopListeningAzure(
+    onResult?: SpeechRecognitionCallback,
+    onError?: SpeechRecognitionErrorCallback,
+    language: string = 'en-US'
+  ): Promise<void> {
+    if (!this.isListening) return
+
+    const audioBlob = await this.audioRecorder.stopRecording()
+    this.isListening = false
+
+    if (audioBlob && onResult) {
+      const text = await speechService.speechToText(audioBlob, language)
+      if (text) {
+        onResult({
+          transcript: text,
+          isFinal: true,
+        })
+      } else if (onError) {
+        onError('Failed to recognize speech')
+      }
     }
   }
 

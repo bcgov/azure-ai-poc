@@ -112,6 +112,99 @@ class SpeechService:
             logger.error("speech_config_error", error=str(e))
             return None
 
+    async def text_to_speech_stream(
+        self,
+        text: str,
+        voice: str = "en-CA-female",
+        output_format: Literal[
+            "audio-16khz-128kbitrate-mono-mp3", "audio-24khz-160kbitrate-mono-mp3"
+        ] = "audio-24khz-160kbitrate-mono-mp3",
+        chunk_size: int = 4096,
+    ):
+        """
+        Stream text to speech audio using Azure Speech SDK.
+
+        Args:
+            text: The text to convert to speech
+            voice: Voice identifier (e.g., "en-US-female", "en-CA-male")
+            output_format: Audio output format
+            chunk_size: Size of chunks to yield
+
+        Yields:
+            Audio chunks in MP3 format
+        """
+        if not self.is_configured():
+            logger.error("speech_not_configured", message="Speech service not configured")
+            return
+
+        try:
+            # Get the voice name
+            voice_name = self.VOICES.get(voice, self.VOICES["en-CA-female"])
+
+            # Create speech config
+            speech_config = self._create_speech_config()
+            if not speech_config:
+                return
+
+            # Set voice
+            speech_config.speech_synthesis_voice_name = voice_name
+
+            # Set output format
+            if output_format == "audio-16khz-128kbitrate-mono-mp3":
+                speech_config.set_speech_synthesis_output_format(
+                    speechsdk.SpeechSynthesisOutputFormat.Audio16Khz128KBitRateMonoMp3
+                )
+            else:
+                speech_config.set_speech_synthesis_output_format(
+                    speechsdk.SpeechSynthesisOutputFormat.Audio24Khz160KBitRateMonoMp3
+                )
+
+            # Use None for audio_config to get audio data in memory
+            speech_synthesizer = speechsdk.SpeechSynthesizer(
+                speech_config=speech_config,
+                audio_config=None,
+            )
+
+            # Clean text for speech
+            clean_text = self._clean_text_for_speech(text)
+
+            logger.debug(
+                "tts_streaming",
+                text_length=len(clean_text),
+                voice=voice_name,
+                endpoint=self.endpoint,
+            )
+
+            # Synthesize speech
+            result = speech_synthesizer.speak_text_async(clean_text).get()
+
+            if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+                audio_data = result.audio_data
+                logger.info(
+                    "tts_stream_success",
+                    text_length=len(text),
+                    audio_bytes=len(audio_data),
+                    voice=voice_name,
+                )
+
+                # Stream the audio in chunks
+                for i in range(0, len(audio_data), chunk_size):
+                    chunk = audio_data[i : i + chunk_size]
+                    yield chunk
+
+            elif result.reason == speechsdk.ResultReason.Canceled:
+                cancellation_details = result.cancellation_details
+                logger.error(
+                    "tts_stream_canceled",
+                    reason=str(cancellation_details.reason),
+                    error_details=cancellation_details.error_details,
+                )
+            else:
+                logger.error("tts_stream_unexpected_result", reason=str(result.reason))
+
+        except Exception as e:
+            logger.error("tts_stream_error", error=str(e))
+
     async def text_to_speech(
         self,
         text: str,

@@ -1,6 +1,9 @@
 """Speech API endpoints for text-to-speech functionality."""
 
+import base64
+
 from fastapi import APIRouter, HTTPException, Response
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.logger import get_logger
@@ -22,10 +25,69 @@ class TextToSpeechRequest(BaseModel):
     )
 
 
+class SpeechToTextRequest(BaseModel):
+    """Request model for speech-to-text conversion."""
+
+    audio_data: str = Field(..., description="Base64-encoded audio data (WAV format)")
+    language: str = Field(
+        default="en-US",
+        description="Recognition language (e.g., 'en-US', 'en-CA')",
+    )
+
+
+class SpeechToTextResponse(BaseModel):
+    """Response model for speech-to-text conversion."""
+
+    text: str = Field(..., description="Recognized text from speech")
+    language: str = Field(..., description="Language used for recognition")
+
+
 class VoicesResponse(BaseModel):
     """Response model for available voices."""
 
     voices: dict[str, str]
+
+
+@router.post(
+    "/tts/stream",
+    summary="Stream text to speech",
+    description="Stream text to speech audio using Azure Speech Services (real-time)",
+)
+async def text_to_speech_stream(request: TextToSpeechRequest):
+    """
+    Convert text to speech and stream MP3 audio in real-time.
+
+    Args:
+        request: Text and voice configuration
+
+    Returns:
+        Streaming MP3 audio response
+    """
+    speech_service = get_speech_service()
+
+    if not speech_service.is_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Speech service is not configured. Please set AZURE_SPEECH_KEY and AZURE_SPEECH_REGION.",
+        )
+
+    logger.info(
+        "tts_stream_request",
+        text_length=len(request.text),
+        voice=request.voice,
+    )
+
+    return StreamingResponse(
+        speech_service.text_to_speech_stream(
+            text=request.text,
+            voice=request.voice,
+        ),
+        media_type="audio/mpeg",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post(
@@ -95,6 +157,71 @@ async def get_voices() -> VoicesResponse:
     """Get available TTS voices."""
     speech_service = get_speech_service()
     return VoicesResponse(voices=speech_service.get_available_voices())
+
+
+@router.post(
+    "/stt",
+    summary="Convert speech to text",
+    description="Convert speech audio to text using Azure Speech Services",
+    response_model=SpeechToTextResponse,
+    responses={
+        200: {"description": "Successfully recognized speech"},
+        400: {"description": "Invalid audio data"},
+        503: {"description": "Speech service not configured"},
+    },
+)
+async def speech_to_text(request: SpeechToTextRequest) -> SpeechToTextResponse:
+    """
+    Convert speech to text.
+
+    Args:
+        request: Audio data and language configuration
+
+    Returns:
+        Recognized text
+    """
+    speech_service = get_speech_service()
+
+    if not speech_service.is_configured():
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Speech service is not configured. "
+                "Please set AZURE_SPEECH_KEY and AZURE_SPEECH_REGION."
+            ),
+        )
+
+    try:
+        # Decode base64 audio data
+        audio_bytes = base64.b64decode(request.audio_data)
+    except Exception as e:
+        logger.error("stt_decode_error", error=str(e))
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid audio data. Must be base64-encoded.",
+        ) from e
+
+    logger.info(
+        "stt_request",
+        audio_bytes=len(audio_bytes),
+        language=request.language,
+    )
+
+    recognized_text = await speech_service.speech_to_text(
+        audio_data=audio_bytes,
+        language=request.language,
+    )
+
+    if recognized_text is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to recognize speech. Please try again with clearer audio.",
+        )
+
+    return SpeechToTextResponse(
+        text=recognized_text,
+        language=request.language,
+    )
 
 
 @router.get(
