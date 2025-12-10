@@ -1,5 +1,6 @@
 """Azure Speech Services for text-to-speech and speech-to-text using SDK."""
 
+from operator import sub
 import re
 from typing import Literal
 
@@ -79,17 +80,19 @@ class SpeechService:
         """Create speech config with endpoint parameter as per MS docs."""
         try:
             if self.use_managed_identity:
-                auth_token = self._get_auth_token()
+                """ auth_token = self._get_auth_token()
                 if not auth_token:
                     logger.error(
                         "speech_auth_failed",
                         message="Failed to get auth token for managed identity",
                     )
-                    return None
+                    return None """
                 # Create config with endpoint only, then set auth token separately
                 # (SDK doesn't allow both auth_token and endpoint in constructor)
-                speech_config = speechsdk.SpeechConfig(endpoint=self.endpoint)
-                speech_config.authorization_token = auth_token
+                # speech_key is needed
+                speech_config = speechsdk.SpeechConfig(
+                    subscription=self.speech_key, endpoint=self.endpoint
+                )
             else:
                 # Use endpoint parameter with subscription key (as per MS docs)
                 speech_config = speechsdk.SpeechConfig(

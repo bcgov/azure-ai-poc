@@ -92,6 +92,7 @@ resource "azurerm_linux_web_app" "backend" {
     KEYCLOAK_REALM        = "standard"
     KEYCLOAK_CLIENT_ID    = "azure-poc-6086"
     AZURE_SPEECH_ENDPOINT = var.azure_speech_endpoint
+    SPEECH_KEY            = var.speech_key
   }
   logs {
     detailed_error_messages = true
