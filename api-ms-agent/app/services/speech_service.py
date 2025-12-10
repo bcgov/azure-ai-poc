@@ -1,6 +1,5 @@
 """Azure Speech Services for text-to-speech and speech-to-text using SDK."""
 
-from operator import sub
 import re
 from typing import Literal
 
@@ -122,17 +121,20 @@ class SpeechService:
         chunk_size: int = 4096,
     ):
         """
-        Stream text to speech audio using Azure Speech SDK.
+        Stream text to speech audio using Azure Speech SDK with real-time streaming.
 
         Args:
             text: The text to convert to speech
             voice: Voice identifier (e.g., "en-US-female", "en-CA-male")
             output_format: Audio output format
-            chunk_size: Size of chunks to yield
+            chunk_size: Size of chunks to yield (used for buffering)
 
         Yields:
-            Audio chunks in MP3 format
+            Audio chunks in MP3 format as they are synthesized
         """
+        import asyncio
+        import queue
+
         if not self.is_configured():
             logger.error("speech_not_configured", message="Speech service not configured")
             return
@@ -169,38 +171,74 @@ class SpeechService:
             clean_text = self._clean_text_for_speech(text)
 
             logger.debug(
-                "tts_streaming",
+                "tts_streaming_start",
                 text_length=len(clean_text),
                 voice=voice_name,
                 endpoint=self.endpoint,
             )
 
-            # Synthesize speech
-            result = speech_synthesizer.speak_text_async(clean_text).get()
+            # Use a queue to collect audio chunks from the synthesizing event
+            audio_queue: queue.Queue[bytes | None] = queue.Queue()
+            total_bytes = 0
+            synthesis_error: str | None = None
 
-            if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-                audio_data = result.audio_data
+            def on_synthesizing(evt: speechsdk.SpeechSynthesisEventArgs) -> None:
+                """Callback for when audio data is available."""
+                nonlocal total_bytes
+                if evt.result.audio_data:
+                    audio_queue.put(evt.result.audio_data)
+                    total_bytes += len(evt.result.audio_data)
+
+            def on_completed(evt: speechsdk.SpeechSynthesisEventArgs) -> None:
+                """Callback for when synthesis is complete."""
+                audio_queue.put(None)  # Signal completion
                 logger.info(
-                    "tts_stream_success",
+                    "tts_stream_completed",
                     text_length=len(text),
-                    audio_bytes=len(audio_data),
+                    total_bytes=total_bytes,
                     voice=voice_name,
                 )
 
-                # Stream the audio in chunks
-                for i in range(0, len(audio_data), chunk_size):
-                    chunk = audio_data[i : i + chunk_size]
-                    yield chunk
-
-            elif result.reason == speechsdk.ResultReason.Canceled:
-                cancellation_details = result.cancellation_details
+            def on_canceled(evt: speechsdk.SpeechSynthesisEventArgs) -> None:
+                """Callback for when synthesis is canceled."""
+                nonlocal synthesis_error
+                cancellation_details = evt.result.cancellation_details
+                synthesis_error = cancellation_details.error_details
                 logger.error(
                     "tts_stream_canceled",
                     reason=str(cancellation_details.reason),
-                    error_details=cancellation_details.error_details,
+                    error_details=synthesis_error,
                 )
-            else:
-                logger.error("tts_stream_unexpected_result", reason=str(result.reason))
+                audio_queue.put(None)  # Signal completion
+
+            # Connect event handlers
+            speech_synthesizer.synthesizing.connect(on_synthesizing)
+            speech_synthesizer.synthesis_completed.connect(on_completed)
+            speech_synthesizer.synthesis_canceled.connect(on_canceled)
+
+            # Start synthesis (non-blocking)
+            speech_synthesizer.speak_text_async(clean_text)
+
+            # Yield audio chunks as they arrive
+            while True:
+                try:
+                    # Wait for audio data with a timeout
+                    chunk = await asyncio.get_event_loop().run_in_executor(
+                        None, lambda: audio_queue.get(timeout=30)
+                    )
+
+                    if chunk is None:
+                        # Synthesis complete
+                        break
+
+                    yield chunk
+
+                except queue.Empty:
+                    logger.warning("tts_stream_timeout", message="Timeout waiting for audio data")
+                    break
+
+            if synthesis_error:
+                logger.error("tts_stream_error", error=synthesis_error)
 
         except Exception as e:
             logger.error("tts_stream_error", error=str(e))
