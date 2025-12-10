@@ -3,6 +3,7 @@
  */
 
 import httpClient from '@/services/httpClient'
+import { useAuthStore } from '@/stores'
 
 // Available TTS voices
 export const TTS_VOICES = {
@@ -25,10 +26,39 @@ interface VoicesResponse {
   voices: Record<string, string>
 }
 
+/**
+ * Get authorization headers for fetch requests
+ * Mirrors the logic from httpClient interceptor
+ */
+async function getAuthHeaders(): Promise<HeadersInit> {
+  const headers: HeadersInit = {
+    'Content-Type': 'application/json',
+  }
+
+  const authStore = useAuthStore.getState()
+  if (authStore.isLoggedIn()) {
+    // Try to refresh token if it's close to expiring (within 30 seconds)
+    try {
+      await authStore.updateToken(30)
+    } catch (error) {
+      console.warn('Token refresh failed in fetch request:', error)
+    }
+
+    const token = authStore.getToken()
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`
+    }
+  }
+
+  return headers
+}
+
 class SpeechService {
   private audioElement: HTMLAudioElement | null = null
   private currentAudioUrl: string | null = null
+  private currentAudioContext: AudioContext | null = null
   private isPlaying = false
+  private abortController: AbortController | null = null
 
   /**
    * Check if the speech service is available
@@ -55,26 +85,223 @@ class SpeechService {
   }
 
   /**
-   * Convert text to speech and stream audio in real-time
+   * Convert text to speech and stream audio in real-time with progressive playback
    */
   async textToSpeechStream(text: string, voice: VoiceId = 'en-CA-female'): Promise<Blob | null> {
     try {
-      const response = await httpClient.post(
-        '/api/v1/speech/tts/stream',
-        { text, voice },
-        { responseType: 'blob' }
-      )
+      // Get auth headers (mirrors httpClient interceptor logic)
+      const headers = await getAuthHeaders()
+
+      // Use fetch directly to get streaming response
+      const response = await fetch('/api/v1/speech/tts/stream', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ text, voice }),
+      })
+
+      if (!response.ok) {
+        throw new Error(`TTS request failed: ${response.status}`)
+      }
 
       console.log('TTS stream started:', {
         status: response.status,
-        blobSize: response.data.size,
-        contentType: response.headers['content-type']
+        contentType: response.headers.get('content-type')
       })
 
-      return response.data as Blob
+      // Collect all chunks into a blob
+      const reader = response.body?.getReader()
+      if (!reader) {
+        throw new Error('No response body reader')
+      }
+
+      const chunks: ArrayBuffer[] = []
+      let totalBytes = 0
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        
+        if (value) {
+          // Copy to ArrayBuffer for TypeScript compatibility
+          const buffer = value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength)
+          chunks.push(buffer)
+          totalBytes += value.length
+          console.log(`Received chunk: ${value.length} bytes, total: ${totalBytes}`)
+        }
+      }
+
+      const blob = new Blob(chunks, { type: 'audio/mpeg' })
+      console.log('TTS stream complete:', { totalBytes, blobSize: blob.size })
+      
+      return blob
     } catch (error) {
       console.error('TTS stream error:', error)
       return null
+    }
+  }
+
+  /**
+   * Play text as speech with true streaming (starts playback as chunks arrive)
+   * Uses Web Audio API with raw PCM for progressive playback
+   */
+  async speakStreaming(text: string, voice: VoiceId = 'en-CA-female'): Promise<void> {
+    // Stop any current playback
+    this.stop()
+
+    // Create abort controller for this request
+    this.abortController = new AbortController()
+
+    try {
+      // Get auth headers (mirrors httpClient interceptor logic)
+      const headers = await getAuthHeaders()
+
+      // Use PCM endpoint for true streaming with Web Audio API
+      const response = await fetch('/api/v1/speech/tts/stream/pcm', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ text, voice }),
+        signal: this.abortController.signal,
+      })
+
+      if (!response.ok) {
+        throw new Error(`TTS request failed: ${response.status}`)
+      }
+
+      const reader = response.body?.getReader()
+      if (!reader) {
+        throw new Error('No response body reader')
+      }
+
+      // PCM format: 24kHz, 16-bit signed, mono
+      const sampleRate = 24000
+      this.currentAudioContext = new AudioContext({ sampleRate })
+      const audioContext = this.currentAudioContext
+      
+      // Buffer to accumulate PCM data for scheduling
+      const pcmChunks: Int16Array[] = []
+      let totalSamples = 0
+      let playbackStarted = false
+      let nextPlayTime = 0
+      const minBufferSamples = sampleRate * 0.5 // 500ms buffer before starting
+
+      // Buffer for handling unaligned bytes (Int16 requires 2-byte alignment)
+      let pendingByte: number | null = null
+
+      this.isPlaying = true
+
+      // Function to schedule audio playback
+      const schedulePlayback = () => {
+        if (pcmChunks.length === 0) return
+
+        // Combine all pending chunks
+        const totalLength = pcmChunks.reduce((sum, chunk) => sum + chunk.length, 0)
+        const combinedPcm = new Int16Array(totalLength)
+        let offset = 0
+        for (const chunk of pcmChunks) {
+          combinedPcm.set(chunk, offset)
+          offset += chunk.length
+        }
+        pcmChunks.length = 0 // Clear the queue
+
+        // Convert Int16 PCM to Float32 for Web Audio API
+        const floatData = new Float32Array(combinedPcm.length)
+        for (let i = 0; i < combinedPcm.length; i++) {
+          floatData[i] = combinedPcm[i] / 32768.0
+        }
+
+        // Create audio buffer
+        const audioBuffer = audioContext.createBuffer(1, floatData.length, sampleRate)
+        audioBuffer.getChannelData(0).set(floatData)
+
+        // Create and schedule buffer source
+        const source = audioContext.createBufferSource()
+        source.buffer = audioBuffer
+        source.connect(audioContext.destination)
+
+        if (!playbackStarted) {
+          nextPlayTime = audioContext.currentTime
+          playbackStarted = true
+          console.log('TTS streaming playback started')
+        }
+
+        source.start(nextPlayTime)
+        nextPlayTime += audioBuffer.duration
+      }
+
+      // Read and play chunks as they arrive
+      while (true) {
+        const { done, value } = await reader.read()
+        
+        if (done) {
+          // Play any remaining buffered audio
+          if (pcmChunks.length > 0) {
+            schedulePlayback()
+          }
+          break
+        }
+
+        if (value && value.length > 0) {
+          // Handle byte alignment for Int16 (2 bytes per sample)
+          let bytes: Uint8Array
+
+          if (pendingByte !== null) {
+            // Prepend the pending byte from previous chunk
+            bytes = new Uint8Array(value.length + 1)
+            bytes[0] = pendingByte
+            bytes.set(value, 1)
+            pendingByte = null
+          } else {
+            bytes = value
+          }
+
+          // Check if we have an odd number of bytes
+          let alignedLength = bytes.length
+          if (bytes.length % 2 !== 0) {
+            // Save the last byte for the next chunk
+            pendingByte = bytes[bytes.length - 1]
+            alignedLength = bytes.length - 1
+          }
+
+          if (alignedLength > 0) {
+            // Create Int16Array from aligned bytes
+            const alignedBuffer = bytes.buffer.slice(
+              bytes.byteOffset,
+              bytes.byteOffset + alignedLength
+            )
+            const int16Data = new Int16Array(alignedBuffer)
+            pcmChunks.push(int16Data)
+            totalSamples += int16Data.length
+
+            // Start playback once we have enough buffer
+            if (!playbackStarted && totalSamples >= minBufferSamples) {
+              schedulePlayback()
+            } else if (playbackStarted) {
+              // Continue scheduling chunks as they arrive
+              schedulePlayback()
+            }
+          }
+        }
+      }
+
+      console.log('TTS stream complete:', { totalSamples, durationSeconds: totalSamples / sampleRate })
+
+      // Wait for all scheduled audio to finish
+      const remainingTime = nextPlayTime - audioContext.currentTime
+      if (remainingTime > 0) {
+        await new Promise(resolve => setTimeout(resolve, remainingTime * 1000 + 100))
+      }
+
+      // Close audio context only if not already closed
+      if (audioContext.state !== 'closed') {
+        await audioContext.close()
+      }
+      this.currentAudioContext = null
+      this.isPlaying = false
+
+    } catch (error) {
+      console.error('Streaming playback error:', error)
+      this.isPlaying = false
+      throw error
     }
   }
 
@@ -112,41 +339,7 @@ class SpeechService {
    * Play text as speech (using streaming endpoint)
    */
   async speak(text: string, voice: VoiceId = 'en-CA-female'): Promise<void> {
-    // Stop any current playback
-    this.stop()
-
-    const audioBlob = await this.textToSpeechStream(text, voice)
-    if (!audioBlob) {
-      throw new Error('Failed to generate speech')
-    }
-
-    this.currentAudioUrl = URL.createObjectURL(audioBlob)
-    this.audioElement = new Audio(this.currentAudioUrl)
-    this.isPlaying = true
-
-    return new Promise((resolve, reject) => {
-      if (!this.audioElement) {
-        reject(new Error('Audio element not created'))
-        return
-      }
-
-      this.audioElement.onended = () => {
-        this.cleanup()
-        resolve()
-      }
-
-      this.audioElement.onerror = (e) => {
-        console.error('Audio playback error:', e)
-        this.cleanup()
-        reject(new Error('Audio playback error'))
-      }
-
-      this.audioElement.play().catch((e) => {
-        console.error('Audio play() failed:', e)
-        this.cleanup()
-        reject(e)
-      })
-    })
+    return this.speakStreaming(text, voice)
   }
 
   /**
@@ -184,10 +377,24 @@ class SpeechService {
    * Stop current audio playback
    */
   stop(): void {
+    // Abort any in-flight fetch requests
+    if (this.abortController) {
+      this.abortController.abort()
+      this.abortController = null
+    }
+
+    // Stop HTML Audio element playback
     if (this.audioElement) {
       this.audioElement.pause()
       this.audioElement.currentTime = 0
     }
+
+    // Close Web Audio API context (only if not already closed)
+    if (this.currentAudioContext && this.currentAudioContext.state !== 'closed') {
+      this.currentAudioContext.close().catch(() => {})
+    }
+    this.currentAudioContext = null
+
     this.cleanup()
   }
 
