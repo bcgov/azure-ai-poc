@@ -44,6 +44,7 @@
 			style-src 'self' https://fonts.googleapis.com https://use.fontawesome.com 'unsafe-inline' https://*.azurefd.net;
 			font-src 'self' https://fonts.gstatic.com;
 			img-src 'self' data: https://fonts.googleapis.com https://www.w3.org https://*.gov.bc.ca https://*.tile.openstreetmap.org https://*.azurefd.net;
+			media-src 'self' blob:;
 			frame-ancestors 'self';
 			form-action 'self';
 			block-all-mixed-content;
