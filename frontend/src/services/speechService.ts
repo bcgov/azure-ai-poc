@@ -304,7 +304,7 @@ class AudioRecorder {
   }
 
   /**
-   * Stop recording and return audio blob
+   * Stop recording and return audio blob converted to WAV format
    */
   async stopRecording(): Promise<Blob | null> {
     return new Promise((resolve) => {
@@ -313,14 +313,96 @@ class AudioRecorder {
         return
       }
 
-      this.mediaRecorder.onstop = () => {
+      this.mediaRecorder.onstop = async () => {
         const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' })
-        this.cleanup()
-        resolve(audioBlob)
+        
+        // Convert WebM to WAV format for Azure Speech Service
+        try {
+          const wavBlob = await this.convertToWav(audioBlob)
+          this.cleanup()
+          resolve(wavBlob)
+        } catch (error) {
+          console.error('Failed to convert audio to WAV:', error)
+          this.cleanup()
+          resolve(audioBlob) // Fallback to original blob
+        }
       }
 
       this.mediaRecorder.stop()
     })
+  }
+
+  /**
+   * Convert audio blob to WAV format
+   */
+  private async convertToWav(blob: Blob): Promise<Blob> {
+    const audioContext = new AudioContext({ sampleRate: 16000 })
+    const arrayBuffer = await blob.arrayBuffer()
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
+    
+    // Convert to mono if stereo
+    const channelData = audioBuffer.numberOfChannels === 1 
+      ? audioBuffer.getChannelData(0)
+      : this.mergeChannels(audioBuffer)
+    
+    // Create WAV file
+    const wavBuffer = this.encodeWav(channelData, audioBuffer.sampleRate)
+    await audioContext.close()
+    
+    return new Blob([wavBuffer], { type: 'audio/wav' })
+  }
+
+  /**
+   * Merge stereo channels to mono
+   */
+  private mergeChannels(audioBuffer: AudioBuffer): Float32Array {
+    const left = audioBuffer.getChannelData(0)
+    const right = audioBuffer.getChannelData(1)
+    const mono = new Float32Array(left.length)
+    
+    for (let i = 0; i < left.length; i++) {
+      mono[i] = (left[i] + right[i]) / 2
+    }
+    
+    return mono
+  }
+
+  /**
+   * Encode Float32Array to WAV format
+   */
+  private encodeWav(samples: Float32Array, sampleRate: number): ArrayBuffer {
+    const buffer = new ArrayBuffer(44 + samples.length * 2)
+    const view = new DataView(buffer)
+
+    // WAV header
+    const writeString = (offset: number, string: string) => {
+      for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i))
+      }
+    }
+
+    writeString(0, 'RIFF')
+    view.setUint32(4, 36 + samples.length * 2, true)
+    writeString(8, 'WAVE')
+    writeString(12, 'fmt ')
+    view.setUint32(16, 16, true) // PCM format
+    view.setUint16(20, 1, true) // PCM
+    view.setUint16(22, 1, true) // Mono
+    view.setUint32(24, sampleRate, true)
+    view.setUint32(28, sampleRate * 2, true) // Byte rate
+    view.setUint16(32, 2, true) // Block align
+    view.setUint16(34, 16, true) // Bits per sample
+    writeString(36, 'data')
+    view.setUint32(40, samples.length * 2, true)
+
+    // Convert float samples to 16-bit PCM
+    const offset = 44
+    for (let i = 0; i < samples.length; i++) {
+      const s = Math.max(-1, Math.min(1, samples[i]))
+      view.setInt16(offset + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true)
+    }
+
+    return buffer
   }
 
   /**
@@ -348,6 +430,11 @@ class SpeechRecognitionService {
   private isListening = false
   private audioRecorder: AudioRecorder = new AudioRecorder()
   private useAzureBackend = false
+  private silenceTimer: number | null = null
+  private silenceDetectionTimeout = 4500 // 4.5 seconds of silence
+  private audioContext: AudioContext | null = null
+  private analyser: AnalyserNode | null = null
+  private silenceThreshold = -50 // dB threshold for silence detection
 
   /**
    * Check if speech recognition is supported
@@ -445,7 +532,7 @@ class SpeechRecognitionService {
     language: string = 'en-US'
   ): Promise<boolean> {
     if (this.isListening) {
-      this.stopListeningAzure()
+      await this.stopListeningAzure()
     }
 
     const started = await this.audioRecorder.startRecording()
@@ -456,27 +543,104 @@ class SpeechRecognitionService {
 
     this.isListening = true
 
-    // Auto-stop after 10 seconds and send to Azure
-    setTimeout(async () => {
-      if (this.isListening) {
-        const audioBlob = await this.audioRecorder.stopRecording()
-        this.isListening = false
+    // Set up audio context for silence detection
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      this.audioContext = new AudioContext()
+      const source = this.audioContext.createMediaStreamSource(stream)
+      this.analyser = this.audioContext.createAnalyser()
+      this.analyser.fftSize = 2048
+      this.analyser.smoothingTimeConstant = 0.8
+      source.connect(this.analyser)
 
-        if (audioBlob) {
-          const text = await speechService.speechToText(audioBlob, language)
-          if (text) {
-            onResult({
-              transcript: text,
-              isFinal: true,
-            })
-          } else {
-            onError?.('Failed to recognize speech')
+      // Start monitoring for silence
+      this.startSilenceDetection(async () => {
+        console.log('Silence detected, stopping recording')
+        if (this.isListening) {
+          const audioBlob = await this.audioRecorder.stopRecording()
+          this.isListening = false
+          this.cleanupSilenceDetection()
+
+          if (audioBlob) {
+            const text = await speechService.speechToText(audioBlob, language)
+            if (text) {
+              onResult({
+                transcript: text,
+                isFinal: true,
+              })
+            } else {
+              onError?.('Failed to recognize speech')
+            }
+          }
+        }
+      })
+    } catch (error) {
+      console.error('Failed to set up silence detection:', error)
+      // Continue without silence detection as fallback
+    }
+
+    return true
+  }
+
+  /**
+   * Start monitoring audio levels for silence detection
+   */
+  private startSilenceDetection(onSilence: () => void): void {
+    if (!this.analyser) return
+
+    const bufferLength = this.analyser.frequencyBinCount
+    const dataArray = new Uint8Array(bufferLength)
+    let isSilent = false
+
+    const checkAudioLevel = () => {
+      if (!this.analyser || !this.isListening) return
+
+      this.analyser.getByteFrequencyData(dataArray)
+      
+      // Calculate average volume
+      const average = dataArray.reduce((sum, value) => sum + value, 0) / bufferLength
+      const dB = 20 * Math.log10(average / 255)
+
+      if (dB < this.silenceThreshold) {
+        // Silence detected
+        if (!isSilent) {
+          isSilent = true
+          // Start silence timer
+          this.silenceTimer = window.setTimeout(() => {
+            onSilence()
+          }, this.silenceDetectionTimeout)
+        }
+      } else {
+        // Sound detected, reset silence detection
+        if (isSilent) {
+          isSilent = false
+          if (this.silenceTimer) {
+            clearTimeout(this.silenceTimer)
+            this.silenceTimer = null
           }
         }
       }
-    }, 10000)
 
-    return true
+      // Continue monitoring
+      requestAnimationFrame(checkAudioLevel)
+    }
+
+    checkAudioLevel()
+  }
+
+  /**
+   * Clean up silence detection resources
+   */
+  private cleanupSilenceDetection(): void {
+    if (this.silenceTimer) {
+      clearTimeout(this.silenceTimer)
+      this.silenceTimer = null
+    }
+    if (this.audioContext) {
+      this.audioContext.close()
+      this.audioContext = null
+    }
+    this.analyser = null
   }
 
   /**
@@ -489,6 +653,7 @@ class SpeechRecognitionService {
   ): Promise<void> {
     if (!this.isListening) return
 
+    this.cleanupSilenceDetection()
     const audioBlob = await this.audioRecorder.stopRecording()
     this.isListening = false
 

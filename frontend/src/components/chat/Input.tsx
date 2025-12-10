@@ -153,7 +153,7 @@ const Input: FC<InputProps> = ({
           </div>
         </div>
       )}
-      <div className="copilot-input-wrapper">
+      <div className="copilot-input-wrapper" style={{ position: 'relative' }}>
         <textarea
           ref={textareaRef}
           className="copilot-textarea"
@@ -163,7 +163,45 @@ const Input: FC<InputProps> = ({
           placeholder={isListening ? 'Listening...' : (deepResearchEnabled ? 'Ask a research question...' : placeholder)}
           disabled={isLoading || isListening}
           rows={1}
+          style={{
+            paddingRight: value.trim() && !isLoading ? '3rem' : undefined,
+          }}
         />
+        {value.trim() && !isLoading && (
+          <button
+            type="button"
+            onClick={() => onChange('')}
+            style={{
+              position: 'absolute',
+              right: '0.75rem',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              background: 'transparent',
+              border: 'none',
+              color: '#656d76',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '0.25rem',
+              borderRadius: '50%',
+              width: '1.5rem',
+              height: '1.5rem',
+              transition: 'all 0.2s ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = '#f0f0f0'
+              e.currentTarget.style.color = '#333'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent'
+              e.currentTarget.style.color = '#656d76'
+            }}
+            title="Clear text"
+          >
+            <i className="bi bi-x-lg" style={{ fontSize: '0.875rem' }}></i>
+          </button>
+        )}
         <div className="copilot-input-controls">
           <div className="copilot-input-left">
             {onUploadClick && (
@@ -226,28 +264,6 @@ const Input: FC<InputProps> = ({
                   <i className="bi bi-info-circle"></i>
                 </button>
               </div>
-            )}
-            {speechSupported && (
-              <button
-                type="button"
-                onClick={() => setUseAzureSpeech(!useAzureSpeech)}
-                style={{
-                  background: 'transparent',
-                  border: '1px solid #d0d7de',
-                  borderRadius: '0.5rem',
-                  padding: '0.35rem 0.75rem',
-                  fontSize: '0.75rem',
-                  color: '#656d76',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.375rem',
-                }}
-                title={`Using ${useAzureSpeech ? 'Azure Speech' : 'Browser'} for voice input`}
-              >
-                <i className={`bi ${useAzureSpeech ? 'bi-cloud-check' : 'bi-browser-chrome'}`}></i>
-                {useAzureSpeech ? 'Azure' : 'Browser'}
-              </button>
             )}
           </div>
           <div className="copilot-input-right">
