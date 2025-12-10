@@ -50,7 +50,7 @@
 			block-all-mixed-content;
 			connect-src 'self' https://*.gov.bc.ca wss://*.gov.bc.ca https://*.azurefd.net;"
 		Referrer-Policy "same-origin"
-		Permissions-Policy "fullscreen=(self), camera=(), microphone=()"
+		Permissions-Policy "fullscreen=(self), camera=(), microphone=(self)"
 		Cross-Origin-Resource-Policy "cross-origin"
 		Cross-Origin-Opener-Policy "same-origin"
 	}
