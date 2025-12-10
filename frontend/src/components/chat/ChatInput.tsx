@@ -39,6 +39,7 @@ const ChatInput: FC<ChatInputProps> = ({
   const [isListening, setIsListening] = useState(false)
   const [speechSupported, setSpeechSupported] = useState(false)
   const [speechError, setSpeechError] = useState<string | null>(null)
+  const [useAzureSpeech, setUseAzureSpeech] = useState(false)
 
   useEffect(() => {
     // Check if speech recognition is supported
@@ -78,28 +79,58 @@ const ChatInput: FC<ChatInputProps> = ({
     return `Questions will be answered by searching across all your uploaded documents${streamingEnabled ? ' with streaming' : ''}`
   }
 
-  const handleVoiceInput = () => {
+  const handleVoiceInput = async () => {
     if (isListening) {
-      speechRecognitionService.stopListening()
+      if (useAzureSpeech) {
+        await speechRecognitionService.stopListeningAzure(
+          (result) => {
+            setCurrentQuestion(result.transcript)
+          },
+          (error) => {
+            setSpeechError(error)
+          },
+          'en-US'
+        )
+      } else {
+        speechRecognitionService.stopListening()
+      }
       setIsListening(false)
       return
     }
 
     setSpeechError(null)
-    const started = speechRecognitionService.startListening(
-      (result) => {
-        setCurrentQuestion(result.transcript)
-        if (result.isFinal) {
+    
+    if (useAzureSpeech) {
+      const started = await speechRecognitionService.startListeningAzure(
+        (result) => {
+          setCurrentQuestion(result.transcript)
+          if (result.isFinal) {
+            setIsListening(false)
+          }
+        },
+        (error) => {
+          setSpeechError(error)
           setIsListening(false)
-        }
-      },
-      (error) => {
-        setSpeechError(error)
-        setIsListening(false)
-      },
-      'en-CA'
-    )
-    setIsListening(started)
+        },
+        'en-US'
+      )
+      setIsListening(started)
+    } else {
+      const started = speechRecognitionService.startListening(
+        (result) => {
+          setCurrentQuestion(result.transcript)
+          if (result.isFinal) {
+            setIsListening(false)
+          }
+        },
+        (error) => {
+          setSpeechError(error)
+          setIsListening(false)
+        },
+        'en-CA'
+      )
+      setIsListening(started)
+    }
   }
 
   const deepResearchTooltip = (
@@ -122,6 +153,18 @@ const ChatInput: FC<ChatInputProps> = ({
               onChange={(e) => setStreamingEnabled(e.target.checked)}
               className="small"
               disabled={deepResearchEnabled}
+            />
+          </div>
+
+          <div className="d-flex align-items-center">
+            <Form.Check
+              type="switch"
+              id="azure-speech-toggle"
+              label="Azure Speech"
+              checked={useAzureSpeech}
+              onChange={(e) => setUseAzureSpeech(e.target.checked)}
+              className="small"
+              title="Use Azure Speech Services for voice input (more accurate but requires backend)"
             />
           </div>
 
@@ -289,7 +332,7 @@ const ChatInput: FC<ChatInputProps> = ({
           {speechSupported && !isListening && (
             <span className="ms-2">
               <i className="bi bi-mic me-1"></i>
-              Voice input available
+              Voice input: {useAzureSpeech ? 'Azure Speech' : 'Browser'}
             </span>
           )}
         </small>

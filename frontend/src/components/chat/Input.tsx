@@ -1,5 +1,6 @@
 import type { FC } from 'react'
 import { useRef, useEffect, useState } from 'react'
+import { speechRecognitionService } from '@/services/speechService'
 
 interface InputProps {
   value: string
@@ -26,6 +27,14 @@ const Input: FC<InputProps> = ({
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [showResearchInfo, setShowResearchInfo] = useState(false)
+  const [isListening, setIsListening] = useState(false)
+  const [speechSupported, setSpeechSupported] = useState(false)
+  const [useAzureSpeech, setUseAzureSpeech] = useState(false)
+
+  useEffect(() => {
+    // Check if speech recognition is supported
+    setSpeechSupported(speechRecognitionService.isSupported())
+  }, [])
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -47,6 +56,44 @@ const Input: FC<InputProps> = ({
   const handleSubmit = () => {
     if (value.trim() && !isLoading) {
       onSubmit()
+    }
+  }
+
+  const handleVoiceInput = async () => {
+    if (isListening) {
+      if (useAzureSpeech) {
+        await speechRecognitionService.stopListeningAzure(
+          (result) => onChange(result.transcript),
+          undefined,
+          'en-US'
+        )
+      } else {
+        speechRecognitionService.stopListening()
+      }
+      setIsListening(false)
+      return
+    }
+
+    if (useAzureSpeech) {
+      const started = await speechRecognitionService.startListeningAzure(
+        (result) => {
+          onChange(result.transcript)
+          if (result.isFinal) setIsListening(false)
+        },
+        () => setIsListening(false),
+        'en-US'
+      )
+      setIsListening(started)
+    } else {
+      const started = speechRecognitionService.startListening(
+        (result) => {
+          onChange(result.transcript)
+          if (result.isFinal) setIsListening(false)
+        },
+        () => setIsListening(false),
+        'en-US'
+      )
+      setIsListening(started)
     }
   }
 
@@ -113,8 +160,8 @@ const Input: FC<InputProps> = ({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={deepResearchEnabled ? 'Ask a research question...' : placeholder}
-          disabled={isLoading}
+          placeholder={isListening ? 'Listening...' : (deepResearchEnabled ? 'Ask a research question...' : placeholder)}
+          disabled={isLoading || isListening}
           rows={1}
         />
         <div className="copilot-input-controls">
@@ -180,8 +227,60 @@ const Input: FC<InputProps> = ({
                 </button>
               </div>
             )}
+            {speechSupported && (
+              <button
+                type="button"
+                onClick={() => setUseAzureSpeech(!useAzureSpeech)}
+                style={{
+                  background: 'transparent',
+                  border: '1px solid #d0d7de',
+                  borderRadius: '0.5rem',
+                  padding: '0.35rem 0.75rem',
+                  fontSize: '0.75rem',
+                  color: '#656d76',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.375rem',
+                }}
+                title={`Using ${useAzureSpeech ? 'Azure Speech' : 'Browser'} for voice input`}
+              >
+                <i className={`bi ${useAzureSpeech ? 'bi-cloud-check' : 'bi-browser-chrome'}`}></i>
+                {useAzureSpeech ? 'Azure' : 'Browser'}
+              </button>
+            )}
           </div>
           <div className="copilot-input-right">
+            {speechSupported && (
+              <button
+                type="button"
+                onClick={handleVoiceInput}
+                disabled={isLoading}
+                style={{
+                  background: isListening ? '#dc3545' : 'transparent',
+                  border: isListening ? 'none' : '1px solid #d0d7de',
+                  borderRadius: '50%',
+                  width: '2.25rem',
+                  height: '2.25rem',
+                  color: isListening ? 'white' : '#656d76',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'all 0.2s ease',
+                  marginRight: '0.5rem',
+                }}
+                title={isListening ? 'Stop listening' : 'Voice input'}
+              >
+                <i 
+                  className={`bi ${isListening ? 'bi-mic-fill' : 'bi-mic'}`}
+                  style={{
+                    fontSize: '1rem',
+                    animation: isListening ? 'pulse 1s infinite' : 'none',
+                  }}
+                ></i>
+              </button>
+            )}
             <div className="copilot-model-select">
               GPT-4o mini
               <i className="bi bi-chevron-down"></i>
