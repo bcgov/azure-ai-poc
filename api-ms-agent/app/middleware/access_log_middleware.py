@@ -23,11 +23,17 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
         """Process request and log access details."""
         start_time = time.perf_counter()
 
+        # Get path for filtering
+        path = request.url.path
+
+        # Skip logging for health check and root endpoints
+        if path in ("/", "/health"):
+            return await call_next(request)
+
         # Get client info
         client_host = request.client.host if request.client else "-"
         client_port = request.client.port if request.client else "-"
         method = request.method
-        path = request.url.path
         query = request.url.query
         full_path = f"{path}?{query}" if query else path
         http_version = request.scope.get("http_version", "1.1")

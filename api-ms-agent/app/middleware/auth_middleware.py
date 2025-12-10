@@ -15,6 +15,7 @@ logger = get_logger(__name__)
 EXCLUDED_ROUTES: set[str] = {
     # Health checks
     "/health",
+    "/api/health",
     "/api/v1/health",
     "/api/v1/chat/health",
     "/api/v1/research/health",
@@ -29,10 +30,7 @@ EXCLUDED_ROUTES: set[str] = {
 }
 
 # Route prefixes that don't require authentication
-EXCLUDED_PREFIXES: tuple[str, ...] = (
-    "/docs",
-    "/redoc",
-)
+EXCLUDED_PREFIXES: tuple[str, ...] = ("/docs", "/redoc", "/", "/health", "/api/health")
 
 
 class AuthMiddleware(BaseHTTPMiddleware):

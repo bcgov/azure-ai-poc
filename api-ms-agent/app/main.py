@@ -155,7 +155,7 @@ def create_app() -> FastAPI:
     app.add_middleware(AuthMiddleware)
 
     # Root endpoints (excluded from auth)
-    @app.get("/api")
+    @app.get("/")
     async def root():
         """Root endpoint - service status."""
         return {
@@ -167,6 +167,11 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health():
+        """Health check endpoint."""
+        return {"status": "healthy", "process": _collect_process_metrics()}
+
+    @app.get("/api/health")
+    async def api_health():
         """Health check endpoint."""
         return {"status": "healthy", "process": _collect_process_metrics()}
 
