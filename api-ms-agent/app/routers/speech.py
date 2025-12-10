@@ -68,7 +68,8 @@ async def text_to_speech_stream(request: TextToSpeechRequest):
     if not speech_service.is_configured():
         raise HTTPException(
             status_code=503,
-            detail="Speech service is not configured. Please set AZURE_SPEECH_KEY and AZURE_SPEECH_REGION.",
+            detail="Speech service is not configured. "
+            "Please set AZURE_SPEECH_KEY and AZURE_SPEECH_REGION.",
         )
 
     logger.info(
@@ -86,6 +87,55 @@ async def text_to_speech_stream(request: TextToSpeechRequest):
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post(
+    "/tts/stream/pcm",
+    summary="Stream text to speech (PCM)",
+    description="Stream text to speech as raw PCM for Web Audio API progressive playback",
+)
+async def text_to_speech_stream_pcm(request: TextToSpeechRequest):
+    """
+    Convert text to speech and stream raw PCM audio for progressive playback.
+
+    PCM format: 24kHz, 16-bit, mono - ideal for Web Audio API decoding.
+
+    Args:
+        request: Text and voice configuration
+
+    Returns:
+        Streaming PCM audio response with metadata header
+    """
+    speech_service = get_speech_service()
+
+    if not speech_service.is_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Speech service is not configured. "
+            "Please set AZURE_SPEECH_KEY and AZURE_SPEECH_REGION.",
+        )
+
+    logger.info(
+        "tts_stream_pcm_request",
+        text_length=len(request.text),
+        voice=request.voice,
+    )
+
+    return StreamingResponse(
+        speech_service.text_to_speech_stream(
+            text=request.text,
+            voice=request.voice,
+            output_format="raw-24khz-16bit-mono-pcm",
+        ),
+        media_type="audio/pcm",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "X-Audio-Sample-Rate": "24000",
+            "X-Audio-Channels": "1",
+            "X-Audio-Bits-Per-Sample": "16",
         },
     )
 
@@ -118,7 +168,8 @@ async def text_to_speech(request: TextToSpeechRequest) -> Response:
     if not speech_service.is_configured():
         raise HTTPException(
             status_code=503,
-            detail="Speech service is not configured. Please set AZURE_SPEECH_KEY and AZURE_SPEECH_REGION.",
+            detail="Speech service is not configured. "
+            "Please set AZURE_SPEECH_KEY and AZURE_SPEECH_REGION.",
         )
 
     logger.info(
