@@ -86,15 +86,13 @@ class SpeechService:
                         message="Failed to get auth token for managed identity",
                     )
                     return None
-                # Use endpoint parameter with auth token
-                speech_config = speechsdk.SpeechConfig(
-                    auth_token=auth_token,
-                    endpoint=self.endpoint,
-                )
+                # Create config with endpoint only, then set auth token separately
+                # (SDK doesn't allow both auth_token and endpoint in constructor)
+                speech_config = speechsdk.SpeechConfig(endpoint=self.endpoint)
+                speech_config.authorization_token = auth_token
             else:
                 # Use endpoint parameter with subscription key (as per MS docs)
                 speech_config = speechsdk.SpeechConfig(
-                    
                     subscription=self.speech_key,
                     endpoint=self.endpoint,
                 )
