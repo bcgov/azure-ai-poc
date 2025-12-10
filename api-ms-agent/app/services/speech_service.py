@@ -116,7 +116,9 @@ class SpeechService:
         text: str,
         voice: str = "en-CA-female",
         output_format: Literal[
-            "audio-16khz-128kbitrate-mono-mp3", "audio-24khz-160kbitrate-mono-mp3"
+            "audio-16khz-128kbitrate-mono-mp3",
+            "audio-24khz-160kbitrate-mono-mp3",
+            "raw-24khz-16bit-mono-pcm",
         ] = "audio-24khz-160kbitrate-mono-mp3",
         chunk_size: int = 4096,
     ):
@@ -126,11 +128,11 @@ class SpeechService:
         Args:
             text: The text to convert to speech
             voice: Voice identifier (e.g., "en-US-female", "en-CA-male")
-            output_format: Audio output format
+            output_format: Audio output format (MP3 or raw PCM for streaming)
             chunk_size: Size of chunks to yield (used for buffering)
 
         Yields:
-            Audio chunks in MP3 format as they are synthesized
+            Audio chunks as they are synthesized
         """
         import asyncio
         import queue
@@ -155,6 +157,10 @@ class SpeechService:
             if output_format == "audio-16khz-128kbitrate-mono-mp3":
                 speech_config.set_speech_synthesis_output_format(
                     speechsdk.SpeechSynthesisOutputFormat.Audio16Khz128KBitRateMonoMp3
+                )
+            elif output_format == "raw-24khz-16bit-mono-pcm":
+                speech_config.set_speech_synthesis_output_format(
+                    speechsdk.SpeechSynthesisOutputFormat.Raw24Khz16BitMonoPcm
                 )
             else:
                 speech_config.set_speech_synthesis_output_format(
