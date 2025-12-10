@@ -345,7 +345,6 @@ class EmbeddingService:
             List of document metadata
         """
         documents = await self.cosmos.list_user_documents(user_id, limit)
-        logger.info("documents_listed", user_id=user_id, count=len(documents))
         return documents
 
     async def close(self) -> None:
