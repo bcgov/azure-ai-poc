@@ -176,6 +176,7 @@ module "backend" {
   cosmosdb_db_name        = module.cosmos.cosmosdb_sql_database_name
   cosmosdb_container_name = module.cosmos.cosmosdb_sql_database_container_name
   azure_speech_endpoint   = module.azure_openai.speech_endpoint
+  speech_key              = module.azure_openai.speech_key
   #keycloak
   keycloak_url = var.keycloak_url
   depends_on   = [module.frontend, module.azure_openai]

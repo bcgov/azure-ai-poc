@@ -71,3 +71,8 @@ output "speech_id" {
   description = "The resource ID of the Azure Speech service"
   value       = azurerm_cognitive_account.speech.id
 }
+output "speech_key" {
+  description = "The API key for the Azure Speech service"
+  value       = azurerm_cognitive_account.speech.primary_access_key
+  sensitive   = true
+}
