@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     # Azure Speech Services settings (for TTS)
     azure_speech_key: str = ""
     azure_speech_region: str = "canadacentral"
-
+    azure_speech_endpoint: str = ""
     # MCP base URLs for BC APIs (override defaults if needed)
     geocoder_base_url: str = ""
     orgbook_base_url: str = ""

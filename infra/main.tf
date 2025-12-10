@@ -138,8 +138,8 @@ module "frontend" {
   # Azure AI Search
   azure_search_endpoint = module.azure_ai_search.search_service_url
   azure_search_host     = module.azure_ai_search.search_service_host
-
-  depends_on = [module.monitoring, module.network, module.azure_ai_search]
+  proxy_image           = var.proxy_image
+  depends_on            = [module.monitoring, module.network, module.azure_ai_search]
 }
 
 module "backend" {
@@ -175,7 +175,7 @@ module "backend" {
   cosmosdb_endpoint       = module.cosmos.cosmosdb_endpoint
   cosmosdb_db_name        = module.cosmos.cosmosdb_sql_database_name
   cosmosdb_container_name = module.cosmos.cosmosdb_sql_database_container_name
-
+  azure_speech_endpoint   = module.azure_openai.speech_endpoint
   #keycloak
   keycloak_url = var.keycloak_url
   depends_on   = [module.frontend, module.azure_openai]
@@ -267,5 +267,17 @@ resource "azurerm_role_assignment" "backend_cognitive_services_user" {
   depends_on = [
     module.backend,
     module.document_intelligence
+  ]
+}
+
+# Azure Speech Services role assignment for backend managed identity
+resource "azurerm_role_assignment" "backend_speech_services_user" {
+  scope                = module.azure_openai.speech_id
+  role_definition_name = "Cognitive Services Speech User"
+  principal_id         = module.backend.backend_managed_identity_principal_id
+
+  depends_on = [
+    module.backend,
+    module.azure_openai
   ]
 }

@@ -70,7 +70,7 @@ async def text_to_speech(request: TextToSpeechRequest) -> Response:
         voice=request.voice,
     )
 
-    if audio_data is None:
+    if audio_data is None or len(audio_data) == 0:
         raise HTTPException(
             status_code=500,
             detail="Failed to synthesize speech. Please try again.",

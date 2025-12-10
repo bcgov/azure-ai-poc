@@ -66,3 +66,8 @@ output "speech_endpoint" {
   value       = azurerm_cognitive_account.speech.endpoint
   sensitive   = false
 }
+
+output "speech_id" {
+  description = "The resource ID of the Azure Speech service"
+  value       = azurerm_cognitive_account.speech.id
+}
