@@ -39,6 +39,7 @@ class SpeechService:
 
         if self.use_managed_identity:
             self._credential = DefaultAzureCredential()
+            self.speech_key = settings.azure_speech_key  # added as managed identity not working.
             logger.info("Using managed identity for Azure Speech Services")
         else:
             self.speech_key = settings.azure_speech_key

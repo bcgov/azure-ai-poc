@@ -199,7 +199,7 @@ variable "azure_speech_endpoint" {
   type        = string
   nullable    = false
 }
-variable "speech_key" {
+variable "azure_speech_key" {
   description = "The API key for the Azure Speech service."
   type        = string
   nullable    = false
