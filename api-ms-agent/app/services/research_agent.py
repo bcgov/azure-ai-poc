@@ -609,7 +609,7 @@ class DeepResearchAgentService:
             results = search_service._search_client.search(
                 search_text="*",
                 filter=f"document_id eq '{document_id}' and user_id eq '{user_id}'",
-                select=["content", "chunk_index", "title", "filename"],
+                select=["content", "chunk_index", "page_number", "title", "filename"],
                 order_by=["chunk_index asc"],
                 top=1000,
             )

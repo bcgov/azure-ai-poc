@@ -102,16 +102,18 @@ class ChatAgentService {
     sessionId?: string,
     history?: ChatMessage[],
     documentId?: string,
+    model?: string,
   ): Promise<ApiResponse<ChatResponse>> {
     try {
       // Ensure token is refreshed before making the request via the http client
       await this.getAuthHeaders()
 
-      const request: ChatRequest & { document_id?: string } = {
+      const request: ChatRequest & { document_id?: string; model?: string } = {
         message,
         session_id: sessionId,
         history: history?.map((msg) => ({ role: msg.role, content: msg.content })),
         document_id: documentId,
+        model,
       }
 
       const resp = await httpClient.post(`${this.baseUrl}/`, request)
@@ -145,9 +147,10 @@ class ChatAgentService {
     onChunk?: (chunk: string) => void,
     onError?: (error: string) => void,
     documentId?: string,
+    model?: string,
   ): Promise<{ sources: SourceInfo[]; hasSufficientInfo: boolean; sessionId?: string } | null> {
     try {
-      const result = await this.sendMessage(message, sessionId, history, documentId)
+      const result = await this.sendMessage(message, sessionId, history, documentId, model)
 
       if (result.success && result.data) {
         const response = result.data.response

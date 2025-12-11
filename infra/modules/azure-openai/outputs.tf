@@ -31,6 +31,11 @@ output "gpt_deployment_name" {
   value       = azurerm_cognitive_deployment.gpt4o_mini.name
 }
 
+output "gpt_nano_deployment_name" {
+  description = "The name of the GPT-4.1 Nano model deployment"
+  value       = azurerm_cognitive_deployment.gpt41_nano.name
+}
+
 output "embedding_deployment_name" {
   description = "The name of the embedding model deployment"
   value       = azurerm_cognitive_deployment.text_embedding_large.name

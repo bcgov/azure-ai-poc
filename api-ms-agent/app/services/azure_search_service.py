@@ -50,6 +50,7 @@ class DocumentChunk:
     content: str
     embedding: list[float]
     chunk_index: int
+    page_number: int | None = None  # 1-based page number from document
     metadata: dict[str, Any] = field(default_factory=dict)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
@@ -131,19 +132,14 @@ class AzureSearchService:
             # Don't raise - allow service to work without search
 
     async def _ensure_index_exists(self) -> None:
-        """Ensure the search index exists with proper vector configuration."""
+        """Ensure the search index exists with proper vector configuration.
+
+        Always uses create_or_update_index to ensure schema is up to date.
+        """
         if not self._index_client:
             return
 
         try:
-            # Check if index already exists
-            try:
-                await self._index_client.get_index(self._index_name)
-                logger.info("azure_search_index_exists", index=self._index_name)
-                return
-            except Exception:
-                pass  # Index doesn't exist, create it
-
             # Define the index schema with vector search
             fields = [
                 SimpleField(
@@ -170,6 +166,12 @@ class AzureSearchService:
                 ),
                 SimpleField(
                     name="chunk_index",
+                    type=SearchFieldDataType.Int32,
+                    filterable=True,
+                    sortable=True,
+                ),
+                SimpleField(
+                    name="page_number",
                     type=SearchFieldDataType.Int32,
                     filterable=True,
                     sortable=True,
@@ -232,8 +234,9 @@ class AzureSearchService:
                 vector_search=vector_search,
             )
 
-            await self._index_client.create_index(index)
-            logger.info("azure_search_index_created", index=self._index_name)
+            # Use create_or_update_index to handle schema updates
+            await self._index_client.create_or_update_index(index)
+            logger.info("azure_search_index_created_or_updated", index=self._index_name)
 
         except Exception as error:
             logger.error("azure_search_index_create_failed", error=str(error))
@@ -280,6 +283,7 @@ class AzureSearchService:
                     "content": chunk.content,
                     "embedding": chunk.embedding,
                     "chunk_index": chunk.chunk_index,
+                    "page_number": chunk.page_number or 0,
                     "title": (chunk.metadata or {}).get("title", ""),
                     "filename": (chunk.metadata or {}).get("filename", ""),
                     "content_type": (chunk.metadata or {}).get("content_type", ""),
@@ -327,6 +331,7 @@ class AzureSearchService:
         content: str,
         embedding: list[float],
         chunk_index: int,
+        page_number: int | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> DocumentChunk:
         """
@@ -338,6 +343,7 @@ class AzureSearchService:
             content: The text content of the chunk
             embedding: The vector embedding
             chunk_index: Index of this chunk in the document
+            page_number: 1-based page number from the source document
             metadata: Optional additional metadata
 
         Returns:
@@ -353,6 +359,7 @@ class AzureSearchService:
             content=content,
             embedding=embedding,
             chunk_index=chunk_index,
+            page_number=page_number,
             metadata=metadata or {},
             created_at=now,
         )
@@ -368,6 +375,7 @@ class AzureSearchService:
             "content": content,
             "embedding": embedding,
             "chunk_index": chunk_index,
+            "page_number": page_number or 0,
             "title": (metadata or {}).get("title", ""),
             "filename": (metadata or {}).get("filename", ""),
             "content_type": (metadata or {}).get("content_type", ""),
@@ -449,6 +457,7 @@ class AzureSearchService:
                     "user_id",
                     "content",
                     "chunk_index",
+                    "page_number",
                     "title",
                     "filename",
                 ],
@@ -471,6 +480,7 @@ class AzureSearchService:
                         "user_id": result.get("user_id", ""),
                         "content": result["content"],
                         "chunk_index": result.get("chunk_index", 0),
+                        "page_number": result.get("page_number", 0),
                         "similarity": similarity,
                         "metadata": {
                             "title": result.get("title", ""),

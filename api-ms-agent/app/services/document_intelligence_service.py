@@ -48,6 +48,14 @@ SUPPORTED_EXTENSIONS = {
 
 
 @dataclass
+class ParagraphWithPage:
+    """A paragraph with its page number."""
+
+    content: str
+    page_number: int  # 1-based page number
+
+
+@dataclass
 class DocumentAnalysisResult:
     """Result from document analysis."""
 
@@ -55,6 +63,7 @@ class DocumentAnalysisResult:
     pages: int
     tables: list[dict[str, Any]] = field(default_factory=list)
     paragraphs: list[str] = field(default_factory=list)
+    paragraphs_with_pages: list[ParagraphWithPage] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -346,10 +355,21 @@ class DocumentIntelligenceService:
             # Extract full text content
             full_content = result.content or ""
 
-            # Extract paragraphs for structured access
+            # Extract paragraphs for structured access (legacy: just content)
             paragraphs = []
+            # Extract paragraphs with page numbers for citations
+            paragraphs_with_pages = []
             if result.paragraphs:
-                paragraphs = [p.content for p in result.paragraphs if p.content]
+                for p in result.paragraphs:
+                    if p.content:
+                        paragraphs.append(p.content)
+                        # Get page number from bounding_regions (1-based)
+                        page_num = 1  # Default to page 1
+                        if p.bounding_regions and len(p.bounding_regions) > 0:
+                            page_num = p.bounding_regions[0].page_number
+                        paragraphs_with_pages.append(
+                            ParagraphWithPage(content=p.content, page_number=page_num)
+                        )
 
             # Extract tables as structured data
             tables = []
@@ -388,6 +408,7 @@ class DocumentIntelligenceService:
                 pages=page_count,
                 tables=tables,
                 paragraphs=paragraphs,
+                paragraphs_with_pages=paragraphs_with_pages,
                 metadata={
                     "source": "azure_document_intelligence",
                     "model": "prebuilt-layout",

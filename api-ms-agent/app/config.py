@@ -21,7 +21,8 @@ class Settings(BaseSettings):
     # Azure OpenAI settings
     azure_openai_endpoint: str = ""
     azure_openai_api_key: str = ""  # Optional if using managed identity
-    azure_openai_deployment: str = "gpt-4o"
+    azure_openai_deployment: str = "gpt-4o-mini"
+    azure_openai_nano_deployment: str = "gpt-4.1-nano"
     azure_openai_api_version: str = "2024-10-21"
 
     # Azure OpenAI Embedding settings

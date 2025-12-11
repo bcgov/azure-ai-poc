@@ -56,6 +56,7 @@ const ChatInterface: FC = () => {
   const [pendingDocumentSelection, setPendingDocumentSelection] = useState<
     string | null
   >(null)
+  const [selectedModel, setSelectedModel] = useState<'gpt-4o-mini' | 'gpt-41-nano'>('gpt-4o-mini')
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -451,6 +452,8 @@ const ChatInterface: FC = () => {
           chatHistory,
           onChunk,
           onError,
+          selectedDocument || undefined,
+          selectedModel,
         )
       } catch (err: any) {
         console.error('Chat Agent streaming error:', err)
@@ -473,6 +476,8 @@ const ChatInterface: FC = () => {
           questionText,
           sessionId,
           chatHistory,
+          selectedDocument || undefined,
+          selectedModel,
         )
 
         let assistantContent = ''
@@ -933,6 +938,23 @@ const ChatInterface: FC = () => {
                       <i className="bi bi-info-circle"></i>
                     </Button>
                   </OverlayTrigger>
+                </div>
+
+                <div className="d-flex align-items-center">
+                  <select
+                    value={selectedModel}
+                    onChange={(e) => setSelectedModel(e.target.value as 'gpt-4o-mini' | 'gpt-41-nano')}
+                    style={{ 
+                      width: 'auto', 
+                      fontSize: '0.875rem',
+                      padding: '0.25rem 0.5rem',
+                      borderRadius: '0.25rem',
+                      border: '1px solid #ced4da',
+                    }}
+                  >
+                    <option value="gpt-4o-mini">GPT-4o mini</option>
+                    <option value="gpt-41-nano">GPT-4.1 Nano</option>
+                  </select>
                 </div>
 
                 {deepResearchEnabled ? (

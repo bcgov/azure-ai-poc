@@ -287,24 +287,43 @@ class ChatAgentService:
                 logger.info("Using API key for Azure OpenAI")
         return self._client
 
-    def _get_agent(self, document_context: str | None = None) -> ChatAgent:
+    def _get_model_deployment(self, model: str | None = None) -> str:
+        """Get the deployment name for the specified model.
+
+        Args:
+            model: Model identifier ('gpt-4o-mini', 'gpt-41-nano', or None for default)
+
+        Returns:
+            Azure OpenAI deployment name
+        """
+        if model == "gpt-41-nano":
+            return settings.azure_openai_nano_deployment
+        # Default to gpt-4o-mini
+        return settings.azure_openai_deployment
+
+    def _get_agent(
+        self, document_context: str | None = None, model: str | None = None
+    ) -> ChatAgent:
         """Get or create the ChatAgent with tools.
 
         Uses a cached base agent when no document context is provided
-        to avoid recreation overhead.
+        and using the default model to avoid recreation overhead.
 
         Args:
             document_context: Optional document context to include in instructions
+            model: Model to use ('gpt-4o-mini' or 'gpt-41-nano')
 
         Returns:
             ChatAgent configured with reasoning tools
         """
-        # If no document context, use cached base agent
-        if not document_context:
+        model_deployment = self._get_model_deployment(model)
+
+        # If no document context and using default model, use cached base agent
+        if not document_context and model_deployment == settings.azure_openai_deployment:
             if self._base_agent is None:
                 chat_client = OpenAIChatClient(
                     async_client=self._get_client(),
-                    model_id=settings.azure_openai_deployment,
+                    model_id=model_deployment,
                 )
                 self._base_agent = ChatAgent(
                     name="Chat Agent",
@@ -314,14 +333,16 @@ class ChatAgentService:
                     temperature=settings.llm_temperature,
                     max_tokens=settings.llm_max_output_tokens,
                 )
-                logger.debug("Base ChatAgent cached")
+                logger.debug("Base ChatAgent cached", model=model_deployment)
             return self._base_agent
 
-        # Document context requires fresh agent with modified instructions
-        trimmed_context = _trim_text(document_context, MAX_DOC_CONTEXT_CHARS)
-        instructions = (
-            SYSTEM_INSTRUCTIONS
-            + f"""
+        # Document context or non-default model requires fresh agent
+        instructions = SYSTEM_INSTRUCTIONS
+        if document_context:
+            trimmed_context = _trim_text(document_context, MAX_DOC_CONTEXT_CHARS)
+            instructions = (
+                SYSTEM_INSTRUCTIONS
+                + f"""
 
 ## DOCUMENT CONTEXT PROVIDED
 
@@ -331,11 +352,11 @@ REDACT any PII before including in your response.
 
 DOCUMENT:
 {trimmed_context}"""
-        )
+            )
 
         chat_client = OpenAIChatClient(
             async_client=self._get_client(),
-            model_id=settings.azure_openai_deployment,
+            model_id=model_deployment,
         )
 
         agent = ChatAgent(
@@ -347,7 +368,11 @@ DOCUMENT:
             max_tokens=settings.llm_max_output_tokens,
         )
 
-        logger.debug("ChatAgent created with document context")
+        logger.debug(
+            "ChatAgent created",
+            model=model_deployment,
+            has_document_context=document_context is not None,
+        )
         return agent
 
     async def chat(
@@ -357,6 +382,7 @@ DOCUMENT:
         session_id: str | None = None,
         user_id: str | None = None,
         document_context: str | None = None,
+        model: str | None = None,
     ) -> ChatResult:
         """
         Process a chat message using MAF ChatAgent with ReAct reasoning.
@@ -367,6 +393,7 @@ DOCUMENT:
             session_id: Optional session identifier for logging
             user_id: User's Keycloak sub for tracking and context
             document_context: Optional document context from RAG search
+            model: Model to use ('gpt-4o-mini' or 'gpt-41-nano')
 
         Returns:
             ChatResult containing the response and source information
@@ -381,11 +408,12 @@ DOCUMENT:
             message_length=len(message),
             history_length=len(history) if history else 0,
             has_document_context=document_context is not None,
+            model=model or "default",
         )
 
         try:
-            # Get agent with optional document context
-            agent = self._get_agent(document_context)
+            # Get agent with optional document context and model selection
+            agent = self._get_agent(document_context, model)
 
             # Build the query with history context if provided
             query = message

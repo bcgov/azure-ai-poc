@@ -8,12 +8,13 @@ import type { Document } from '@/components/chat/DocumentList'
 describe('DocumentDeleteConfirm', () => {
   const mockDocument: Document = {
     id: 'doc-123',
-    filename: 'test-document.pdf',
-    uploadedAt: '2024-01-20T10:00:00Z',
-    totalPages: 10,
+    document_id: 'doc-123',
+    title: 'test-document.pdf',
+    chunk_count: 10,
   }
 
-  const mockGetFileIcon = vi.fn((filename: string) => {
+  const mockGetFileIcon = vi.fn((filename: string | null | undefined) => {
+    if (!filename) return 'bi-file-text'
     if (filename.endsWith('.pdf')) return 'bi-file-pdf'
     if (filename.endsWith('.md')) return 'bi-file-text'
     return 'bi-file-earmark'

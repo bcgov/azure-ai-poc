@@ -68,6 +68,8 @@ module "azure_openai" {
   log_analytics_workspace_id    = module.monitoring.log_analytics_workspace_id
   gpt_deployment_name           = var.azure_openai_deployment_name
   gpt_deployment_capacity       = var.openai_gpt_deployment_capacity
+  gpt_nano_deployment_name      = var.azure_openai_nano_deployment_name
+  gpt_nano_deployment_capacity  = var.openai_gpt_nano_deployment_capacity
   embedding_deployment_name     = var.azure_openai_embedding_deployment
   embedding_deployment_capacity = var.openai_embedding_deployment_capacity
 
