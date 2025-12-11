@@ -9,6 +9,7 @@
 # - Cosmos DB (endpoint + key)
 # - Azure AI Search (endpoint + key)
 # - Azure Document Intelligence (endpoint + key)
+# - Azure Speech Services (key + region)
 #
 # PREREQUISITES:
 # - Azure CLI installed and authenticated (az login)
@@ -320,6 +321,47 @@ sync_document_intelligence() {
     fi
 }
 
+# Query Azure Speech Services
+sync_azure_speech() {
+    log_info "Querying Azure Speech Services..."
+
+    # Find Speech Services accounts
+    local speech_accounts
+    speech_accounts=$(az cognitiveservices account list \
+        --resource-group "$RESOURCE_GROUP" \
+        --query "[?kind=='SpeechServices']" \
+        --output json 2>/dev/null || echo "[]")
+
+    local account_count=$(echo "$speech_accounts" | jq 'length')
+
+    if [[ "$account_count" -eq 0 ]]; then
+        log_warn "No Speech Services accounts found in resource group: $RESOURCE_GROUP"
+        return
+    fi
+
+    # Use first account if multiple exist
+    local account_name=$(echo "$speech_accounts" | jq -r '.[0].name')
+    local location=$(echo "$speech_accounts" | jq -r '.[0].location')
+
+    log_info "Found Speech Services account: $account_name"
+
+    # Get API key
+    local api_key
+    api_key=$(az cognitiveservices account keys list \
+        --name "$account_name" \
+        --resource-group "$RESOURCE_GROUP" \
+        --query "key1" \
+        --output tsv 2>/dev/null || echo "")
+
+    if [[ -n "$api_key" ]]; then
+        update_env_var "AZURE_SPEECH_KEY" "$api_key"
+        update_env_var "AZURE_SPEECH_REGION" "$location"
+        log_success "Speech Services key and region synced"
+    else
+        log_warn "Failed to retrieve Speech Services key"
+    fi
+}
+
 # Main execution
 main() {
     log_info "Starting Azure service keys sync..."
@@ -336,6 +378,7 @@ main() {
     sync_cosmos_db
     sync_azure_search
     sync_document_intelligence
+    sync_azure_speech
 
     echo ""
     log_success "Azure service keys sync completed!"

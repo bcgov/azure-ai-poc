@@ -92,6 +92,7 @@ async def query_orchestrator(
         result = await orchestrator.process_query(
             query=request.query,
             session_id=request.session_id,
+            user_id=current_user.sub,
         )
 
         # Map sources to the response model

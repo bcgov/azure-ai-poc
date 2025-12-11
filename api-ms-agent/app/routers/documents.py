@@ -1,6 +1,5 @@
 """Documents router - API endpoints for document indexing and vector search."""
 
-import logging
 from datetime import datetime, UTC
 from typing import Annotated
 
@@ -9,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.auth.dependencies import get_current_user_from_request
 from app.auth.models import KeycloakUser
+from app.logger import get_logger
 from app.services.azure_search_service import AzureSearchService, get_azure_search_service
 from app.services.cosmos_db_service import CosmosDbService, get_cosmos_db_service
 from app.services.document_intelligence_service import (
@@ -20,7 +20,7 @@ from app.services.embedding_service import EmbeddingService, get_embedding_servi
 
 router = APIRouter()
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class IndexDocumentRequest(BaseModel):
@@ -135,6 +135,12 @@ async def upload_document(
         )
 
     user_id = current_user.sub if current_user else "anonymous"
+    logger.info(
+        "document_upload_requested",
+        filename=file.filename,
+        user_id=user_id,
+        content_type=file.content_type,
+    )
 
     try:
         content_bytes = await file.read()
@@ -173,6 +179,15 @@ async def upload_document(
             chunk_overlap=200,
         )
 
+        logger.info(
+            "document_upload_completed",
+            document_id=document.id,
+            filename=file.filename,
+            user_id=user_id,
+            total_chunks=len(document.chunks),
+            total_pages=total_pages,
+        )
+
         return UploadDocumentResponse(
             id=document.id,
             filename=file.filename or "unknown",
@@ -187,7 +202,12 @@ async def upload_document(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     except Exception as e:
-        logger.error(f"Error processing document upload: {e}")
+        logger.error(
+            "document_upload_failed",
+            filename=file.filename,
+            user_id=user_id,
+            error=str(e),
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Upload error: {str(e)}",
@@ -229,6 +249,7 @@ async def list_documents(
 ) -> DocumentListResponse:
     """List all indexed documents for the current user."""
     user_id = current_user.sub
+    logger.debug("list_documents_requested", user_id=user_id, limit=limit)
 
     try:
         documents = await embedding_service.list_documents(user_id, limit)
@@ -246,6 +267,7 @@ async def list_documents(
             total=len(documents),
         )
     except Exception as e:
+        logger.error("list_documents_failed", user_id=user_id, error=str(e))
         raise HTTPException(status_code=500, detail=f"List error: {str(e)}") from e
 
 
@@ -261,6 +283,12 @@ async def index_document(
     The document is chunked and each chunk is embedded and stored in Cosmos DB.
     """
     user_id = current_user.sub
+    logger.info(
+        "document_index_requested",
+        user_id=user_id,
+        document_id=request.document_id,
+        title=request.title,
+    )
 
     try:
         document = await embedding_service.index_document(
@@ -273,6 +301,13 @@ async def index_document(
             },
             chunk_size=request.chunk_size,
             chunk_overlap=request.chunk_overlap,
+        )
+
+        logger.info(
+            "document_index_completed",
+            user_id=user_id,
+            document_id=document.id,
+            chunks_created=len(document.chunks),
         )
 
         return IndexDocumentResponse(
@@ -297,6 +332,13 @@ async def search_documents(
     Perform vector similarity search across indexed documents.
     """
     user_id = current_user.sub
+    logger.info(
+        "document_search_requested",
+        user_id=user_id,
+        query_length=len(request.query),
+        document_id=request.document_id,
+        top_k=request.top_k,
+    )
 
     try:
         results = await embedding_service.search(
@@ -305,6 +347,12 @@ async def search_documents(
             document_id=request.document_id,
             top_k=request.top_k,
             min_similarity=request.min_similarity,
+        )
+
+        logger.info(
+            "document_search_completed",
+            user_id=user_id,
+            results_count=len(results),
         )
 
         return SearchResponse(
@@ -323,6 +371,7 @@ async def search_documents(
         )
 
     except Exception as e:
+        logger.error("document_search_failed", user_id=user_id, error=str(e))
         raise HTTPException(status_code=500, detail=f"Search error: {str(e)}") from e
 
 
@@ -334,15 +383,32 @@ async def delete_document(
 ) -> dict:
     """Delete a document and all its chunks."""
     user_id = current_user.sub
+    logger.info(
+        "document_delete_requested",
+        user_id=user_id,
+        document_id=document_id,
+    )
 
     try:
         count = await embedding_service.delete_document(document_id, user_id)
+        logger.info(
+            "document_delete_completed",
+            user_id=user_id,
+            document_id=document_id,
+            chunks_deleted=count,
+        )
         return {
             "status": "deleted",
             "document_id": document_id,
             "chunks_deleted": count,
         }
     except Exception as e:
+        logger.error(
+            "document_delete_failed",
+            user_id=user_id,
+            document_id=document_id,
+            error=str(e),
+        )
         raise HTTPException(status_code=500, detail=f"Delete error: {str(e)}") from e
 
 

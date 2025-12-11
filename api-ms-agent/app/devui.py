@@ -47,9 +47,7 @@ def _collect_entities() -> list[object]:
     try:
         research_agent = get_deep_research_service()._create_research_agent()  # noqa: SLF001
         entities.append(research_agent)
-        logger.info(
-            "devui_entity_added", entity=getattr(research_agent, "name", "research_agent")
-        )
+        logger.info("devui_entity_added", entity=getattr(research_agent, "name", "research_agent"))
     except Exception as exc:  # noqa: BLE001
         logger.warning("devui_research_agent_init_failed", error=str(exc))
     return entities

@@ -194,3 +194,13 @@ variable "azure_document_intelligence_endpoint" {
   nullable    = false
 }
 
+variable "azure_speech_endpoint" {
+  description = "The endpoint for the Azure Speech service."
+  type        = string
+  nullable    = false
+}
+variable "azure_speech_key" {
+  description = "The API key for the Azure Speech service."
+  type        = string
+  nullable    = false
+}

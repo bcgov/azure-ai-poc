@@ -6,7 +6,11 @@ This service provides:
 - Document embeddings storage with metadata
 - Index management for document chunks
 - Managed identity authentication with key fallback
+
+Uses the async Azure Search SDK (azure.search.documents.aio) for non-blocking I/O.
 """
+
+from __future__ import annotations
 
 import time
 from contextlib import asynccontextmanager
@@ -15,9 +19,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 from azure.core.credentials import AzureKeyCredential
-from azure.identity import DefaultAzureCredential
-from azure.search.documents import SearchClient
-from azure.search.documents.indexes import SearchIndexClient
+from azure.identity.aio import DefaultAzureCredential
+from azure.search.documents.aio import SearchClient
+from azure.search.documents.indexes.aio import SearchIndexClient
 from azure.search.documents.indexes.models import (
     HnswAlgorithmConfiguration,
     SearchableField,
@@ -61,7 +65,10 @@ class VectorSearchOptions:
 
 
 class AzureSearchService:
-    """Service for Azure AI Search vector operations."""
+    """Service for Azure AI Search vector operations.
+
+    Uses the async Azure Search SDK for non-blocking I/O operations.
+    """
 
     # Embedding dimensions for text-embedding-3-large
     EMBEDDING_DIMENSIONS = 3072
@@ -70,10 +77,11 @@ class AzureSearchService:
         """Initialize the Azure Search service."""
         self._index_client: SearchIndexClient | None = None
         self._search_client: SearchClient | None = None
+        self._credential: DefaultAzureCredential | None = None
         self._initialized = False
         self._index_name = settings.azure_search_index_name
 
-    def _initialize_client(self) -> None:
+    async def _initialize_client(self) -> None:
         """Initialize the Azure Search clients with managed identity or key authentication."""
         if self._initialized:
             return
@@ -90,10 +98,13 @@ class AzureSearchService:
         try:
             # Use key authentication for local, managed identity for cloud
             if settings.environment == "local" and settings.azure_search_key:
-                credential = AzureKeyCredential(settings.azure_search_key)
+                credential: AzureKeyCredential | DefaultAzureCredential = AzureKeyCredential(
+                    settings.azure_search_key
+                )
                 logger.info("azure_search_init", auth_method="key")
             else:
-                credential = DefaultAzureCredential()
+                self._credential = DefaultAzureCredential()
+                credential = self._credential
                 logger.info("azure_search_init", auth_method="managed_identity")
 
             # Create index client for index management
@@ -103,7 +114,7 @@ class AzureSearchService:
             )
 
             # Ensure index exists
-            self._ensure_index_exists()
+            await self._ensure_index_exists()
 
             # Create search client for document operations
             self._search_client = SearchClient(
@@ -119,7 +130,7 @@ class AzureSearchService:
             logger.error("azure_search_init_failed", error=str(error))
             # Don't raise - allow service to work without search
 
-    def _ensure_index_exists(self) -> None:
+    async def _ensure_index_exists(self) -> None:
         """Ensure the search index exists with proper vector configuration."""
         if not self._index_client:
             return
@@ -127,7 +138,7 @@ class AzureSearchService:
         try:
             # Check if index already exists
             try:
-                self._index_client.get_index(self._index_name)
+                await self._index_client.get_index(self._index_name)
                 logger.info("azure_search_index_exists", index=self._index_name)
                 return
             except Exception:
@@ -221,18 +232,93 @@ class AzureSearchService:
                 vector_search=vector_search,
             )
 
-            self._index_client.create_index(index)
+            await self._index_client.create_index(index)
             logger.info("azure_search_index_created", index=self._index_name)
 
         except Exception as error:
             logger.error("azure_search_index_create_failed", error=str(error))
             raise
 
-    def _ensure_initialized(self) -> bool:
+    async def _ensure_initialized(self) -> bool:
         """Ensure the service is initialized. Returns True if ready."""
         if not self._initialized:
-            self._initialize_client()
+            await self._initialize_client()
         return self._initialized
+
+    async def bulk_store_chunks(
+        self,
+        chunks: list[DocumentChunk],
+        batch_size: int = 1000,
+    ) -> int:
+        """
+        Bulk store document chunks in Azure Search with batching.
+
+        Azure Search supports up to 1000 documents per upload batch.
+        This is significantly faster than individual uploads.
+
+        Args:
+            chunks: List of DocumentChunk objects to store
+            batch_size: Number of documents per upload batch (max 1000)
+
+        Returns:
+            Number of successfully stored chunks
+        """
+        if not chunks:
+            return 0
+
+        if not await self._ensure_initialized():
+            return 0
+
+        # Prepare all documents
+        documents = []
+        for chunk in chunks:
+            documents.append(
+                {
+                    "id": chunk.id,
+                    "document_id": chunk.document_id,
+                    "user_id": chunk.user_id,
+                    "content": chunk.content,
+                    "embedding": chunk.embedding,
+                    "chunk_index": chunk.chunk_index,
+                    "title": (chunk.metadata or {}).get("title", ""),
+                    "filename": (chunk.metadata or {}).get("filename", ""),
+                    "content_type": (chunk.metadata or {}).get("content_type", ""),
+                    "total_chunks": (chunk.metadata or {}).get("total_chunks", 0),
+                    "created_at": chunk.created_at.isoformat(),
+                }
+            )
+
+        success_count = 0
+        total_batches = (len(documents) + batch_size - 1) // batch_size
+
+        try:
+            for i in range(0, len(documents), batch_size):
+                batch = documents[i : i + batch_size]
+                batch_num = (i // batch_size) + 1
+
+                result = await self._search_client.upload_documents(batch)
+                batch_success = sum(1 for r in result if r.succeeded)
+                success_count += batch_success
+
+                logger.debug(
+                    "bulk_upload_batch_complete",
+                    batch=batch_num,
+                    total_batches=total_batches,
+                    succeeded=batch_success,
+                    failed=len(batch) - batch_success,
+                )
+
+            logger.info(
+                "bulk_chunks_stored",
+                total_chunks=len(chunks),
+                succeeded=success_count,
+                batches=total_batches,
+            )
+            return success_count
+
+        except Exception as error:
+            logger.error("bulk_store_failed", error=str(error), stored=success_count)
+            raise
 
     async def store_document_chunk(
         self,
@@ -271,7 +357,7 @@ class AzureSearchService:
             created_at=now,
         )
 
-        if not self._ensure_initialized():
+        if not await self._ensure_initialized():
             return chunk
 
         # Prepare document for Azure Search
@@ -290,7 +376,7 @@ class AzureSearchService:
         }
 
         try:
-            result = self._search_client.upload_documents(documents=[document])
+            result = await self._search_client.upload_documents(documents=[document])
             if result[0].succeeded:
                 logger.debug(
                     "chunk_stored",
@@ -308,6 +394,7 @@ class AzureSearchService:
         except Exception as error:
             logger.error("chunk_store_failed", error=str(error), chunk_id=chunk_id)
             raise
+            raise
 
     async def vector_search(
         self,
@@ -324,7 +411,7 @@ class AzureSearchService:
         Returns:
             List of similar document chunks with similarity scores
         """
-        if not self._ensure_initialized():
+        if not await self._ensure_initialized():
             logger.warning("azure_search_not_initialized")
             return []
 
@@ -350,8 +437,8 @@ class AzureSearchService:
 
             start_time = time.time()
 
-            # Execute search
-            results = self._search_client.search(
+            # Execute search (async iteration)
+            results = await self._search_client.search(
                 search_text=None,
                 vector_queries=[vector_query],
                 filter=filter_expression,
@@ -367,9 +454,9 @@ class AzureSearchService:
                 ],
             )
 
-            # Process results
+            # Process results (async iteration)
             items = []
-            for result in results:
+            async for result in results:
                 # Azure Search returns @search.score for relevance
                 similarity = result.get("@search.score", 0.0)
 
@@ -418,12 +505,12 @@ class AzureSearchService:
         Returns:
             List of document metadata
         """
-        if not self._ensure_initialized():
+        if not await self._ensure_initialized():
             return []
 
         try:
             # Query to get documents for user, group by document_id
-            results = self._search_client.search(
+            results = await self._search_client.search(
                 search_text="*",
                 filter=f"user_id eq '{user_id}'",
                 select=[
@@ -437,9 +524,9 @@ class AzureSearchService:
                 top=1000,  # Get more to aggregate
             )
 
-            # Aggregate documents
+            # Aggregate documents (async iteration)
             documents_map: dict[str, dict] = {}
-            for result in results:
+            async for result in results:
                 doc_id = result.get("document_id")
                 if doc_id and doc_id not in documents_map:
                     documents_map[doc_id] = {
@@ -471,26 +558,26 @@ class AzureSearchService:
         Returns:
             Number of chunks deleted
         """
-        if not self._ensure_initialized():
+        if not await self._ensure_initialized():
             return 0
 
         try:
             # Find all chunks for the document
-            results = self._search_client.search(
+            results = await self._search_client.search(
                 search_text="*",
                 filter=f"document_id eq '{document_id}' and user_id eq '{user_id}'",
                 select=["id"],
                 top=1000,
             )
 
-            # Collect chunk IDs to delete
-            chunk_ids = [{"id": result["id"]} for result in results]
+            # Collect chunk IDs to delete (async iteration)
+            chunk_ids = [{"id": result["id"]} async for result in results]
 
             if not chunk_ids:
                 return 0
 
             # Delete the chunks
-            delete_result = self._search_client.delete_documents(documents=chunk_ids)
+            delete_result = await self._search_client.delete_documents(chunk_ids)
 
             deleted_count = sum(1 for r in delete_result if r.succeeded)
             logger.info(
@@ -515,7 +602,7 @@ class AzureSearchService:
         Returns:
             Health check result with status and details
         """
-        if not self._ensure_initialized():
+        if not await self._ensure_initialized():
             return {
                 "status": "unconfigured",
                 "details": {
@@ -529,7 +616,7 @@ class AzureSearchService:
 
             # Try to get index stats
             if self._index_client:
-                self._index_client.get_index(self._index_name)
+                await self._index_client.get_index(self._index_name)
 
             response_time = (time.time() - start_time) * 1000
 
@@ -554,10 +641,17 @@ class AzureSearchService:
                 },
             }
 
-    def dispose(self) -> None:
+    async def dispose(self) -> None:
         """Dispose of the Azure Search clients."""
+        if self._search_client:
+            await self._search_client.close()
+        if self._index_client:
+            await self._index_client.close()
+        if self._credential:
+            await self._credential.close()
         self._index_client = None
         self._search_client = None
+        self._credential = None
         self._initialized = False
         logger.info("azure_search_disposed")
 

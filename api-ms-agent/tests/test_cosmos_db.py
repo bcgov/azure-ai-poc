@@ -12,6 +12,24 @@ from app.services.cosmos_db_service import (
 )
 
 
+class AsyncIterator:
+    """Helper class to create async iterators from lists for testing."""
+
+    def __init__(self, items):
+        self.items = items
+        self.index = 0
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self.index >= len(self.items):
+            raise StopAsyncIteration
+        item = self.items[self.index]
+        self.index += 1
+        return item
+
+
 class TestCosmosDbServiceUnconfigured:
     """Tests for Cosmos DB service when not configured."""
 
@@ -121,34 +139,42 @@ class TestCosmosDbServiceConfigured:
     @pytest.mark.asyncio
     async def test_create_session_with_cosmos(self, mock_cosmos_client, configured_settings):
         """Test creating a session with Cosmos configured."""
+        container = mock_cosmos_client["container"]
+        container.create_item = AsyncMock(return_value={"id": "session123"})
+
         service = CosmosDbService()
         service._initialized = True
-        service.chat_container = mock_cosmos_client["container"]
+        service.chat_container = container
 
         session = await service.create_session("user123", "Test Session")
 
         assert session.user_id == "user123"
         assert session.title == "Test Session"
-        mock_cosmos_client["container"].create_item.assert_called_once()
+        container.create_item.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_save_and_load_message(self, mock_cosmos_client, configured_settings):
         """Test saving and loading messages."""
         container = mock_cosmos_client["container"]
 
-        # Setup mock for query
-        container.query_items.return_value = [
-            {
-                "id": "msg1",
-                "session_id": "session123",
-                "user_id": "user123",
-                "role": "user",
-                "content": "Hello!",
-                "timestamp": "2024-01-01T00:00:00+00:00",
-                "sources": [],
-                "metadata": {},
-            }
-        ]
+        # Setup mock for query - use async iterator
+        container.query_items.return_value = AsyncIterator(
+            [
+                {
+                    "id": "msg1",
+                    "session_id": "session123",
+                    "user_id": "user123",
+                    "role": "user",
+                    "content": "Hello!",
+                    "timestamp": "2024-01-01T00:00:00+00:00",
+                    "sources": [],
+                    "metadata": {},
+                }
+            ]
+        )
+
+        # Setup mock for create_item as AsyncMock
+        container.create_item = AsyncMock(return_value={"id": "msg1"})
 
         service = CosmosDbService()
         service._initialized = True
@@ -172,7 +198,8 @@ class TestCosmosDbServiceConfigured:
     async def test_delete_session(self, mock_cosmos_client, configured_settings):
         """Test deleting a session."""
         container = mock_cosmos_client["container"]
-        container.query_items.return_value = [{"id": "msg1"}, {"id": "msg2"}]
+        container.query_items.return_value = AsyncIterator([{"id": "msg1"}, {"id": "msg2"}])
+        container.delete_item = AsyncMock()
 
         service = CosmosDbService()
         service._initialized = True

@@ -10,7 +10,9 @@ dependencies = [
     "azure-cosmos>=4.9.0",
     "azure-identity>=1.25.1",
     "azure-search-documents>=11.6.0",
+    "ddgs>=7.5.3",
     "fastapi>=0.122.0",
+    "httpx>=0.28.0",
     "openai>=2.8.1",
     "pydantic-settings>=2.12.0",
     "python-dotenv>=1.2.1",
@@ -19,6 +21,7 @@ dependencies = [
     "uvicorn>=0.38.0",
     "psutil>=6.0.0",
     "agent-framework-devui>=1.0.0b251120",
+    "azure-cognitiveservices-speech>=1.47.0",
 ]
 
 [dependency-groups]

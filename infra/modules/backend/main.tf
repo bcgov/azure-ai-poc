@@ -88,9 +88,11 @@ resource "azurerm_linux_web_app" "backend" {
     AZURE_COSMOSDB_DIAGNOSTICS_LEVEL = "info"
     AZURE_LOG_LEVEL                  = "error"
     #Keycloak Configuration
-    KEYCLOAK_URL       = var.keycloak_url
-    KEYCLOAK_REALM     = "standard"
-    KEYCLOAK_CLIENT_ID = "azure-poc-6086"
+    KEYCLOAK_URL          = var.keycloak_url
+    KEYCLOAK_REALM        = "standard"
+    KEYCLOAK_CLIENT_ID    = "azure-poc-6086"
+    AZURE_SPEECH_ENDPOINT = var.azure_speech_endpoint
+    AZURE_SPEECH_KEY      = var.azure_speech_key
   }
   logs {
     detailed_error_messages = true

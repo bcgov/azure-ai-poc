@@ -1,16 +1,20 @@
 """Authentication service for JWT validation with Keycloak."""
 
+import time
 from typing import Any
 
-import httpx
 from fastapi import HTTPException, status
 from jose import JWTError, jwt
 
 from app.auth.models import KeycloakUser
 from app.config import settings
+from app.http_client import get_http_client
 from app.logger import get_logger
 
 logger = get_logger(__name__)
+
+# JWKS cache TTL in seconds (10 minutes - balances key rotation detection with performance)
+_JWKS_CACHE_TTL_SECONDS = 600
 
 
 class AuthService:
@@ -31,6 +35,7 @@ class AuthService:
             f"{self.keycloak_url}/realms/{self.keycloak_realm}/protocol/openid-connect/certs"
         )
         self._jwks_cache: dict[str, Any] | None = None
+        self._jwks_cache_time: float = 0.0
 
     async def validate_token(self, token: str) -> KeycloakUser:
         """Validate JWT token and return user information."""
@@ -64,7 +69,6 @@ class AuthService:
                     audience=self.keycloak_client_id,
                     options={"verify_exp": True},
                 )
-                logger.info("Token decoded successfully", sub=payload.get("sub"))
             except JWTError as e:
                 logger.error("JWT verification failed", error=str(e))
                 raise HTTPException(
@@ -96,13 +100,23 @@ class AuthService:
             ) from e
 
     async def _get_signing_key(self, kid: str) -> str:
-        """Get the signing key from Keycloak JWKS endpoint."""
+        """Get the signing key from Keycloak JWKS endpoint with TTL-based caching."""
         try:
-            if not self._jwks_cache:
-                async with httpx.AsyncClient() as client:
-                    response = await client.get(self.jwks_uri, timeout=30.0)
-                    response.raise_for_status()
-                    self._jwks_cache = response.json()
+            # Check if cache is expired or empty
+            cache_age = time.time() - self._jwks_cache_time
+            cache_expired = cache_age > _JWKS_CACHE_TTL_SECONDS
+
+            if not self._jwks_cache or cache_expired:
+                client = await get_http_client()
+                response = await client.get(self.jwks_uri)
+                response.raise_for_status()
+                self._jwks_cache = response.json()
+                self._jwks_cache_time = time.time()
+                logger.debug(
+                    "jwks_cache_refreshed",
+                    cache_was_expired=cache_expired,
+                    keys_count=len(self._jwks_cache.get("keys", [])),
+                )
 
             # Find the key with matching kid
             for key_data in self._jwks_cache.get("keys", []):
@@ -127,6 +141,12 @@ class AuthService:
                             kid=str(kid),
                         )
                         raise
+
+            # Key not found - force refresh cache once in case of key rotation
+            if not cache_expired:
+                logger.info("jwks_key_not_found_refreshing", kid=kid)
+                self._jwks_cache = None  # Force refresh on next call
+                return await self._get_signing_key(kid)  # Retry with fresh cache
 
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

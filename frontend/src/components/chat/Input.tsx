@@ -1,5 +1,6 @@
 import type { FC } from 'react'
 import { useRef, useEffect, useState } from 'react'
+import { speechRecognitionService } from '@/services/speechService'
 
 interface InputProps {
   value: string
@@ -26,6 +27,14 @@ const Input: FC<InputProps> = ({
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [showResearchInfo, setShowResearchInfo] = useState(false)
+  const [isListening, setIsListening] = useState(false)
+  const [speechSupported, setSpeechSupported] = useState(false)
+  const [useAzureSpeech, setUseAzureSpeech] = useState(false)
+
+  useEffect(() => {
+    // Check if speech recognition is supported
+    setSpeechSupported(speechRecognitionService.isSupported())
+  }, [])
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -47,6 +56,44 @@ const Input: FC<InputProps> = ({
   const handleSubmit = () => {
     if (value.trim() && !isLoading) {
       onSubmit()
+    }
+  }
+
+  const handleVoiceInput = async () => {
+    if (isListening) {
+      if (useAzureSpeech) {
+        await speechRecognitionService.stopListeningAzure(
+          (result) => onChange(result.transcript),
+          undefined,
+          'en-US'
+        )
+      } else {
+        speechRecognitionService.stopListening()
+      }
+      setIsListening(false)
+      return
+    }
+
+    if (useAzureSpeech) {
+      const started = await speechRecognitionService.startListeningAzure(
+        (result) => {
+          onChange(result.transcript)
+          if (result.isFinal) setIsListening(false)
+        },
+        () => setIsListening(false),
+        'en-US'
+      )
+      setIsListening(started)
+    } else {
+      const started = speechRecognitionService.startListening(
+        (result) => {
+          onChange(result.transcript)
+          if (result.isFinal) setIsListening(false)
+        },
+        () => setIsListening(false),
+        'en-US'
+      )
+      setIsListening(started)
     }
   }
 
@@ -75,13 +122,14 @@ const Input: FC<InputProps> = ({
                 Deep Research uses an AI-powered multi-phase workflow for comprehensive analysis:
               </p>
               <ul style={{ margin: 0, paddingLeft: '1.25rem', opacity: 0.9, lineHeight: 1.6 }}>
+                <li><strong>Web Search:</strong> Fetches <em>current data</em> from the internet for up-to-date information</li>
                 <li><strong>Planning:</strong> Creates a research plan with questions and methodology</li>
                 <li><strong>Research:</strong> Gathers findings on each subtopic with confidence levels</li>
-                <li><strong>Synthesis:</strong> Produces a comprehensive report with conclusions</li>
+                <li><strong>Synthesis:</strong> Produces a comprehensive report with citations & source URLs</li>
               </ul>
               <p style={{ margin: '0.75rem 0 0 0', opacity: 0.85, fontSize: '0.8rem' }}>
-                <i className="bi bi-clock me-1"></i>
-                Takes 30-60 seconds for thorough, well-structured answers.
+                <i className="bi bi-globe me-1"></i>
+                Goes outbound to the web for current data, ensuring results are up-to-date.
               </p>
             </div>
             <button
@@ -105,17 +153,55 @@ const Input: FC<InputProps> = ({
           </div>
         </div>
       )}
-      <div className="copilot-input-wrapper">
+      <div className="copilot-input-wrapper" style={{ position: 'relative' }}>
         <textarea
           ref={textareaRef}
           className="copilot-textarea"
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={deepResearchEnabled ? 'Ask a research question...' : placeholder}
-          disabled={isLoading}
+          placeholder={isListening ? 'Listening...' : (deepResearchEnabled ? 'Ask a research question...' : placeholder)}
+          disabled={isLoading || isListening}
           rows={1}
+          style={{
+            paddingRight: value.trim() && !isLoading ? '3rem' : undefined,
+          }}
         />
+        {value.trim() && !isLoading && (
+          <button
+            type="button"
+            onClick={() => onChange('')}
+            style={{
+              position: 'absolute',
+              right: '0.75rem',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              background: 'transparent',
+              border: 'none',
+              color: '#656d76',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '0.25rem',
+              borderRadius: '50%',
+              width: '1.5rem',
+              height: '1.5rem',
+              transition: 'all 0.2s ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = '#f0f0f0'
+              e.currentTarget.style.color = '#333'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent'
+              e.currentTarget.style.color = '#656d76'
+            }}
+            title="Clear text"
+          >
+            <i className="bi bi-x-lg" style={{ fontSize: '0.875rem' }}></i>
+          </button>
+        )}
         <div className="copilot-input-controls">
           <div className="copilot-input-left">
             {onUploadClick && (
@@ -181,6 +267,36 @@ const Input: FC<InputProps> = ({
             )}
           </div>
           <div className="copilot-input-right">
+            {speechSupported && (
+              <button
+                type="button"
+                onClick={handleVoiceInput}
+                disabled={isLoading}
+                style={{
+                  background: isListening ? '#dc3545' : 'transparent',
+                  border: isListening ? 'none' : '1px solid #d0d7de',
+                  borderRadius: '50%',
+                  width: '2.25rem',
+                  height: '2.25rem',
+                  color: isListening ? 'white' : '#656d76',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'all 0.2s ease',
+                  marginRight: '0.5rem',
+                }}
+                title={isListening ? 'Stop listening' : 'Voice input'}
+              >
+                <i 
+                  className={`bi ${isListening ? 'bi-mic-fill' : 'bi-mic'}`}
+                  style={{
+                    fontSize: '1rem',
+                    animation: isListening ? 'pulse 1s infinite' : 'none',
+                  }}
+                ></i>
+              </button>
+            )}
             <div className="copilot-model-select">
               GPT-4o mini
               <i className="bi bi-chevron-down"></i>

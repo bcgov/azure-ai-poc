@@ -3,6 +3,13 @@ import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { SourceInfo } from '@/services/chatAgentService'
+import { speechService } from '@/services/speechService'
+import {
+  sortSourcesByConfidence,
+  getSourceIcon,
+  getConfidenceColor,
+  formatSourceType,
+} from '@/utils/sourceUtils'
 
 interface MessageProps {
   type: 'user' | 'assistant'
@@ -10,6 +17,9 @@ interface MessageProps {
   sources?: SourceInfo[]
   hasSufficientInfo?: boolean
   isStreaming?: boolean
+  onRetry?: () => void
+  onThumbsUp?: () => void
+  onThumbsDown?: () => void
 }
 
 const Message: FC<MessageProps> = ({
@@ -18,8 +28,20 @@ const Message: FC<MessageProps> = ({
   sources,
   hasSufficientInfo,
   isStreaming,
+  onRetry,
+  onThumbsUp,
+  onThumbsDown,
 }) => {
   const [expandedSources, setExpandedSources] = useState<Set<number>>(new Set())
+  const [showAllSources, setShowAllSources] = useState(false)
+  const [isHovered, setIsHovered] = useState(false)
+  const [copiedMessage, setCopiedMessage] = useState(false)
+  const [feedbackGiven, setFeedbackGiven] = useState<'up' | 'down' | null>(null)
+  const [isSpeaking, setIsSpeaking] = useState(false)
+  const [speakError, setSpeakError] = useState<string | null>(null)
+
+  // Sort sources by confidence (highest first)
+  const sortedSources = sources ? sortSourcesByConfidence(sources) : []
 
   const toggleSource = (index: number) => {
     setExpandedSources((prev) => {
@@ -33,38 +55,66 @@ const Message: FC<MessageProps> = ({
     })
   }
 
-  const getSourceIcon = (sourceType: string) => {
-    switch (sourceType) {
-      case 'llm_knowledge':
-        return 'bi-cpu'
-      case 'document':
-        return 'bi-file-text'
-      case 'web':
-        return 'bi-globe'
-      case 'api':
-        return 'bi-code-square'
-      default:
-        return 'bi-question-circle'
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(content)
+      setCopiedMessage(true)
+      setTimeout(() => setCopiedMessage(false), 2000)
+    } catch (err) {
+      console.error('Failed to copy message:', err)
     }
   }
 
-  const getConfidenceColor = (confidence: string) => {
-    switch (confidence) {
-      case 'high':
-        return '#16a34a'
-      case 'medium':
-        return '#ca8a04'
-      case 'low':
-        return '#dc2626'
-      default:
-        return '#6b7280'
+  const handleThumbsUp = () => {
+    setFeedbackGiven('up')
+    onThumbsUp?.()
+  }
+
+  const handleThumbsDown = () => {
+    setFeedbackGiven('down')
+    onThumbsDown?.()
+  }
+
+  const handleSpeak = async () => {
+    if (isSpeaking) {
+      speechService.stop()
+      setIsSpeaking(false)
+      return
+    }
+
+    setSpeakError(null)
+    setIsSpeaking(true)
+    
+    try {
+      await speechService.speak(content)
+    } catch (err) {
+      console.error('Speech error:', err)
+      setSpeakError('Failed to play audio')
+      setTimeout(() => setSpeakError(null), 3000)
+    } finally {
+      setIsSpeaking(false)
     }
   }
 
   if (type === 'user') {
     return (
-      <div className="copilot-message user">
-        <div className="message-content">{content}</div>
+      <div
+        className="copilot-message user"
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+      >
+        <div className="message-content">
+          <div className={`message-actions user-actions ${isHovered ? 'visible' : ''}`}>
+            <button
+              className="action-btn"
+              onClick={handleCopy}
+              title={copiedMessage ? 'Copied!' : 'Copy message'}
+            >
+              <i className={`bi ${copiedMessage ? 'bi-check' : 'bi-clipboard'}`}></i>
+            </button>
+          </div>
+          {content}
+        </div>
       </div>
     )
   }
@@ -88,14 +138,14 @@ const Message: FC<MessageProps> = ({
         ) : null}
 
         {/* Sources */}
-        {sources && sources.length > 0 && (
+        {sortedSources && sortedSources.length > 0 && (
           <div className="copilot-sources">
             <div className="copilot-sources-label">
               <i className="bi bi-info-circle me-1"></i>
-              Sources ({sources.length}):
+              Sources ({sortedSources.length}):
             </div>
             <div className="sources-list">
-              {sources.map((source, index) => (
+              {(showAllSources ? sortedSources : sortedSources.slice(0, 3)).map((source, index) => (
                 <div key={index} className="source-item">
                   <div
                     className={`copilot-source-badge ${source.confidence}`}
@@ -104,7 +154,7 @@ const Message: FC<MessageProps> = ({
                     title="Click to expand details"
                   >
                     <i className={`${getSourceIcon(source.source_type)} me-1`}></i>
-                    <span>{source.source_type.replace('_', ' ')}</span>
+                    <span>{formatSourceType(source.source_type)}</span>
                     <span
                       className="confidence-dot"
                       style={{
@@ -219,6 +269,26 @@ const Message: FC<MessageProps> = ({
                   )}
                 </div>
               ))}
+              {/* Show toggle when more than 3 sources */}
+              {sortedSources.length > 3 && (
+                <button
+                  onClick={() => setShowAllSources(!showAllSources)}
+                  style={{
+                    marginTop: '0.5rem',
+                    padding: '0.25rem 0.5rem',
+                    background: 'transparent',
+                    border: '1px solid #6c757d',
+                    borderRadius: '4px',
+                    color: '#6c757d',
+                    cursor: 'pointer',
+                    fontSize: '0.85rem',
+                  }}
+                >
+                  {showAllSources
+                    ? 'Show less'
+                    : `+${sortedSources.length - 3} more sources`}
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -228,6 +298,56 @@ const Message: FC<MessageProps> = ({
           <div className="copilot-warning">
             <i className="bi bi-exclamation-triangle me-1"></i>
             Limited information available
+          </div>
+        )}
+
+        {/* Action Bar - GitHub Copilot Chat style */}
+        {!isStreaming && content && (
+          <div className="message-actions assistant-actions">
+            {onRetry && (
+              <button
+                className="action-btn"
+                onClick={onRetry}
+                title="Retry"
+              >
+                <i className="bi bi-arrow-clockwise"></i>
+              </button>
+            )}
+            <button
+              className={`action-btn ${feedbackGiven === 'up' ? 'active' : ''}`}
+              onClick={handleThumbsUp}
+              title="Good response"
+              disabled={feedbackGiven !== null}
+            >
+              <i className={`bi ${feedbackGiven === 'up' ? 'bi-hand-thumbs-up-fill' : 'bi-hand-thumbs-up'}`}></i>
+            </button>
+            <button
+              className={`action-btn ${feedbackGiven === 'down' ? 'active' : ''}`}
+              onClick={handleThumbsDown}
+              title="Bad response"
+              disabled={feedbackGiven !== null}
+            >
+              <i className={`bi ${feedbackGiven === 'down' ? 'bi-hand-thumbs-down-fill' : 'bi-hand-thumbs-down'}`}></i>
+            </button>
+            <button
+              className="action-btn"
+              onClick={handleCopy}
+              title={copiedMessage ? 'Copied!' : 'Copy response'}
+            >
+              <i className={`bi ${copiedMessage ? 'bi-check' : 'bi-clipboard'}`}></i>
+            </button>
+            <button
+              className={`action-btn ${isSpeaking ? 'active' : ''}`}
+              onClick={handleSpeak}
+              title={isSpeaking ? 'Stop speaking' : 'Read aloud'}
+            >
+              <i className={`bi ${isSpeaking ? 'bi-stop-fill' : 'bi-volume-up'}`}></i>
+            </button>
+            {speakError && (
+              <span className="text-danger small ms-2" style={{ fontSize: '0.7rem' }}>
+                {speakError}
+              </span>
+            )}
           </div>
         )}
       </div>
