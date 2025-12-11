@@ -245,6 +245,81 @@ class AzureSearchService:
             await self._initialize_client()
         return self._initialized
 
+    async def bulk_store_chunks(
+        self,
+        chunks: list[DocumentChunk],
+        batch_size: int = 1000,
+    ) -> int:
+        """
+        Bulk store document chunks in Azure Search with batching.
+
+        Azure Search supports up to 1000 documents per upload batch.
+        This is significantly faster than individual uploads.
+
+        Args:
+            chunks: List of DocumentChunk objects to store
+            batch_size: Number of documents per upload batch (max 1000)
+
+        Returns:
+            Number of successfully stored chunks
+        """
+        if not chunks:
+            return 0
+
+        if not await self._ensure_initialized():
+            return 0
+
+        # Prepare all documents
+        documents = []
+        for chunk in chunks:
+            documents.append(
+                {
+                    "id": chunk.id,
+                    "document_id": chunk.document_id,
+                    "user_id": chunk.user_id,
+                    "content": chunk.content,
+                    "embedding": chunk.embedding,
+                    "chunk_index": chunk.chunk_index,
+                    "title": (chunk.metadata or {}).get("title", ""),
+                    "filename": (chunk.metadata or {}).get("filename", ""),
+                    "content_type": (chunk.metadata or {}).get("content_type", ""),
+                    "total_chunks": (chunk.metadata or {}).get("total_chunks", 0),
+                    "created_at": chunk.created_at.isoformat(),
+                }
+            )
+
+        success_count = 0
+        total_batches = (len(documents) + batch_size - 1) // batch_size
+
+        try:
+            for i in range(0, len(documents), batch_size):
+                batch = documents[i : i + batch_size]
+                batch_num = (i // batch_size) + 1
+
+                result = await self._search_client.upload_documents(documents=batch)
+                batch_success = sum(1 for r in result if r.succeeded)
+                success_count += batch_success
+
+                logger.debug(
+                    "bulk_upload_batch_complete",
+                    batch=batch_num,
+                    total_batches=total_batches,
+                    succeeded=batch_success,
+                    failed=len(batch) - batch_success,
+                )
+
+            logger.info(
+                "bulk_chunks_stored",
+                total_chunks=len(chunks),
+                succeeded=success_count,
+                batches=total_batches,
+            )
+            return success_count
+
+        except Exception as error:
+            logger.error("bulk_store_failed", error=str(error), stored=success_count)
+            raise
+
     async def store_document_chunk(
         self,
         document_id: str,
