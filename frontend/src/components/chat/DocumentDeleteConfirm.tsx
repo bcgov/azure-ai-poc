@@ -8,7 +8,7 @@ interface DocumentDeleteConfirmProps {
   onConfirm: () => void
   onCancel: () => void
   isDeleting: boolean
-  getFileIcon: (filename: string) => string
+  getFileIcon: (filename: string | undefined | null) => string
 }
 
 const DocumentDeleteConfirm: FC<DocumentDeleteConfirmProps> = ({
@@ -19,6 +19,9 @@ const DocumentDeleteConfirm: FC<DocumentDeleteConfirmProps> = ({
   isDeleting,
   getFileIcon,
 }) => {
+  // Use title (from API) or fallback to filename for backward compatibility
+  const documentName = document?.title || document?.id || 'this document'
+
   return (
     <Modal show={show} onHide={onCancel} centered>
       <Modal.Header closeButton>
@@ -31,12 +34,12 @@ const DocumentDeleteConfirm: FC<DocumentDeleteConfirmProps> = ({
         <div className="text-center py-3">
           <i
             className={`${
-              document ? getFileIcon(document.filename) : 'bi-file-text'
+              document ? getFileIcon(documentName) : 'bi-file-text'
             } display-4 text-danger mb-3`}
           ></i>
           <h5>Delete Document</h5>
           <p className="text-muted">
-            Are you sure you want to delete "{document?.filename}"?
+            Are you sure you want to delete "{documentName}"?
           </p>
           <p className="text-warning small">
             <i className="bi bi-exclamation-triangle me-1"></i>

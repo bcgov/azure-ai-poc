@@ -65,7 +65,8 @@ const ChatInterface: FC = () => {
   const shouldAutoScrollOnNewMessage = useRef(true)
 
   // Helper function to get appropriate icon for file type
-  const getFileIcon = (filename: string): string => {
+  const getFileIcon = (filename: string | undefined | null): string => {
+    if (!filename) return 'bi-file-text'
     const extension = filename.toLowerCase().split('.').pop() || ''
     switch (extension) {
       case 'pdf':
@@ -1136,7 +1137,7 @@ const ChatInterface: FC = () => {
             ></i>
             <h5>Delete Document</h5>
             <p className="text-muted">
-              Are you sure you want to delete "{documentToDelete?.title}"?
+              Are you sure you want to delete "{documentToDelete?.title || 'this document'}"?
             </p>
             <p className="text-warning small">
               <i className="bi bi-exclamation-triangle me-1"></i>

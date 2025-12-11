@@ -50,7 +50,8 @@ const ChatPage: FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const getFileIcon = (filename: string): string => {
+  const getFileIcon = (filename: string | undefined | null): string => {
+    if (!filename) return 'bi-file-text'
     const extension = filename.toLowerCase().split('.').pop() || ''
     switch (extension) {
       case 'pdf':
