@@ -13,6 +13,10 @@ from app.config import settings
 _HOSTNAME = socket.gethostname()
 _PID = os.getpid()
 
+# Performance setting: caller info adds ~5-10μs overhead per log call
+# Only enable in debug mode or via explicit config
+_ENABLE_CALLER_INFO = settings.debug
+
 
 def _add_caller_info(
     logger: logging.Logger,
@@ -21,7 +25,14 @@ def _add_caller_info(
 ) -> dict:
     """
     Add caller information (class, method, line number) to the log event.
+
+    This is a performance-sensitive function that walks the call stack.
+    Only enabled in debug mode to avoid production overhead.
     """
+    # Skip caller info in production for performance
+    if not _ENABLE_CALLER_INFO:
+        return event_dict
+
     # Walk up the stack to find the actual caller (skip structlog internals)
     frame = inspect.currentframe()
     try:

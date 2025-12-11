@@ -7,7 +7,11 @@ This service provides:
 - Document metadata storage (not embeddings)
 - Workflow state persistence for Microsoft Agent Framework
 - Managed identity authentication with key fallback
+
+Uses the async Cosmos DB SDK (azure.cosmos.aio) for non-blocking I/O operations.
 """
+
+from __future__ import annotations
 
 import time
 import uuid
@@ -16,14 +20,21 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from azure.cosmos import ContainerProxy, CosmosClient, DatabaseProxy, PartitionKey
+from azure.cosmos.aio import ContainerProxy, CosmosClient, DatabaseProxy
 from azure.cosmos.exceptions import CosmosHttpResponseError, CosmosResourceNotFoundError
-from azure.identity import DefaultAzureCredential
+from azure.cosmos.partition_key import PartitionKey
+from azure.identity.aio import DefaultAzureCredential
 
 from app.config import settings
 from app.logger import get_logger
 
 logger = get_logger(__name__)
+
+# LRU cache for chat history (performance optimization)
+# Key: (session_id, user_id), Value: (timestamp, messages)
+_chat_history_cache: dict[tuple[str, str], tuple[float, list[ChatMessage]]] = {}
+_CACHE_TTL_SECONDS = 30  # Cache TTL - short to ensure freshness
+_MAX_CACHE_SIZE = 100  # Maximum sessions to cache
 
 
 @dataclass
@@ -88,7 +99,10 @@ class WorkflowState:
 
 
 class CosmosDbService:
-    """Service for Cosmos DB operations for chat, metadata, and workflow persistence."""
+    """Service for Cosmos DB operations for chat, metadata, and workflow persistence.
+
+    Uses the async Cosmos DB SDK for non-blocking I/O operations.
+    """
 
     # Container names
     CHAT_CONTAINER = "chat_history"
@@ -103,8 +117,9 @@ class CosmosDbService:
         self.documents_container: ContainerProxy | None = None
         self.workflows_container: ContainerProxy | None = None
         self._initialized = False
+        self._credential: DefaultAzureCredential | None = None
 
-    def _initialize_client(self) -> None:
+    async def _initialize_client(self) -> None:
         """Initialize the Cosmos DB client with managed identity or key authentication."""
         if self._initialized:
             return
@@ -132,19 +147,22 @@ class CosmosDbService:
                 )
                 logger.info("cosmos_db_init", auth_method="key")
             else:
-                credential = DefaultAzureCredential()
+                self._credential = DefaultAzureCredential()
                 self.client = CosmosClient(
                     url=endpoint,
-                    credential=credential,
+                    credential=self._credential,
                     enable_endpoint_discovery=True,
                     connection_timeout=connection_timeout,
                 )
                 logger.info("cosmos_db_init", auth_method="managed_identity")
 
+            # Initialize the async client
+            await self.client.__aenter__()
+
             self.database = self.client.get_database_client(database_name)
 
             # Ensure containers exist (create if they don't)
-            self._ensure_containers_exist()
+            await self._ensure_containers_exist()
 
             # Get container clients
             self.chat_container = self.database.get_container_client(self.CHAT_CONTAINER)
@@ -158,14 +176,14 @@ class CosmosDbService:
             logger.error("cosmos_db_init_failed", error=str(error))
             # Don't raise - allow service to work without persistence
 
-    def _ensure_containers_exist(self) -> None:
+    async def _ensure_containers_exist(self) -> None:
         """Ensure the required containers exist in the database."""
         if not self.database:
             return
 
         # Create chat_history container if it doesn't exist
         try:
-            self.database.create_container_if_not_exists(
+            await self.database.create_container_if_not_exists(
                 id=self.CHAT_CONTAINER,
                 partition_key=PartitionKey(path="/user_id"),
                 offer_throughput=400,
@@ -181,7 +199,7 @@ class CosmosDbService:
 
         # Create documents container for metadata only (embeddings in Azure AI Search)
         try:
-            self.database.create_container_if_not_exists(
+            await self.database.create_container_if_not_exists(
                 id=self.DOCUMENTS_CONTAINER,
                 partition_key=PartitionKey(path="/user_id"),
                 offer_throughput=400,
@@ -197,7 +215,7 @@ class CosmosDbService:
 
         # Create workflows container for agent framework state persistence
         try:
-            self.database.create_container_if_not_exists(
+            await self.database.create_container_if_not_exists(
                 id=self.WORKFLOWS_CONTAINER,
                 partition_key=PartitionKey(path="/user_id"),
                 offer_throughput=400,
@@ -211,10 +229,10 @@ class CosmosDbService:
                     error=str(e),
                 )
 
-    def _ensure_initialized(self) -> bool:
+    async def _ensure_initialized(self) -> bool:
         """Ensure the service is initialized. Returns True if ready."""
         if not self._initialized:
-            self._initialize_client()
+            await self._initialize_client()
         return self._initialized
 
     # ============= Chat History Operations =============
@@ -232,7 +250,7 @@ class CosmosDbService:
         """
         session_id = f"session_{uuid.uuid4()}"
 
-        if not self._ensure_initialized():
+        if not await self._ensure_initialized():
             return ConversationSession(
                 id=f"sess_{session_id}",
                 session_id=session_id,
@@ -260,7 +278,7 @@ class CosmosDbService:
         }
 
         try:
-            self.chat_container.create_item(body=item)
+            await self.chat_container.create_item(body=item)
             logger.info("session_created", session_id=session_id, user_id=user_id)
             return session
         except Exception as error:
@@ -301,7 +319,7 @@ class CosmosDbService:
             metadata=metadata or {},
         )
 
-        if not self._ensure_initialized():
+        if not await self._ensure_initialized():
             return message
 
         item = {
@@ -317,8 +335,11 @@ class CosmosDbService:
         }
 
         try:
-            self.chat_container.create_item(body=item)
+            await self.chat_container.create_item(body=item)
             logger.debug("message_saved", message_id=message_id, session_id=session_id)
+
+            # Invalidate cache so next read gets fresh data
+            self._invalidate_chat_cache(session_id, user_id)
 
             # Update session metadata - pass content for title if user message
             first_msg = content if role == "user" else None
@@ -332,6 +353,23 @@ class CosmosDbService:
             )
             return message
 
+    def _invalidate_chat_cache(self, session_id: str, user_id: str) -> None:
+        """Invalidate cache entry for a session when new messages are added."""
+        cache_key = (session_id, user_id)
+        if cache_key in _chat_history_cache:
+            del _chat_history_cache[cache_key]
+            logger.debug("chat_cache_invalidated", session_id=session_id)
+
+    def _prune_cache_if_needed(self) -> None:
+        """Remove oldest entries if cache exceeds max size."""
+        if len(_chat_history_cache) > _MAX_CACHE_SIZE:
+            # Sort by timestamp and remove oldest 20%
+            sorted_items = sorted(_chat_history_cache.items(), key=lambda x: x[1][0])
+            items_to_remove = len(sorted_items) // 5  # Remove 20%
+            for key, _ in sorted_items[:items_to_remove]:
+                del _chat_history_cache[key]
+            logger.debug("chat_cache_pruned", removed=items_to_remove)
+
     async def get_chat_history(
         self,
         session_id: str,
@@ -339,7 +377,10 @@ class CosmosDbService:
         limit: int = 50,
     ) -> list[ChatMessage]:
         """
-        Get chat history for a session.
+        Get chat history for a session with LRU caching.
+
+        Uses an in-memory cache with TTL to reduce database queries
+        for frequently accessed sessions.
 
         Args:
             session_id: The session identifier
@@ -349,8 +390,20 @@ class CosmosDbService:
         Returns:
             List of chat messages ordered by timestamp
         """
-        if not self._ensure_initialized():
+        if not await self._ensure_initialized():
             return []
+
+        # Check cache first
+        cache_key = (session_id, user_id)
+        if cache_key in _chat_history_cache:
+            cached_time, cached_messages = _chat_history_cache[cache_key]
+            if time.time() - cached_time < _CACHE_TTL_SECONDS:
+                logger.debug(
+                    "chat_history_cache_hit",
+                    session_id=session_id,
+                    message_count=len(cached_messages),
+                )
+                return cached_messages[:limit]
 
         try:
             query = """
@@ -367,13 +420,14 @@ class CosmosDbService:
                 {"name": "@limit", "value": limit},
             ]
 
-            items = list(
-                self.chat_container.query_items(
+            # Async iteration over query results
+            items = [
+                item
+                async for item in self.chat_container.query_items(
                     query=query,
                     parameters=parameters,
-                    enable_cross_partition_query=True,
                 )
-            )
+            ]
 
             messages = []
             for item in items:
@@ -389,6 +443,10 @@ class CosmosDbService:
                         metadata=item.get("metadata", {}),
                     )
                 )
+
+            # Update cache
+            self._prune_cache_if_needed()
+            _chat_history_cache[cache_key] = (time.time(), messages)
 
             logger.debug(
                 "chat_history_loaded",
@@ -416,7 +474,7 @@ class CosmosDbService:
         Returns:
             List of conversation sessions
         """
-        if not self._ensure_initialized():
+        if not await self._ensure_initialized():
             return []
 
         try:
@@ -432,13 +490,13 @@ class CosmosDbService:
                 {"name": "@limit", "value": limit},
             ]
 
-            items = list(
-                self.chat_container.query_items(
+            items = [
+                item
+                async for item in self.chat_container.query_items(
                     query=query,
                     parameters=parameters,
-                    enable_cross_partition_query=True,
                 )
-            )
+            ]
 
             sessions = []
             for item in items:
@@ -476,7 +534,7 @@ class CosmosDbService:
         Returns:
             True if deletion was successful
         """
-        if not self._ensure_initialized():
+        if not await self._ensure_initialized():
             return False
 
         try:
@@ -493,17 +551,19 @@ class CosmosDbService:
                 """
                 parameters = [{"name": "@session_id", "value": sid}]
 
-                items = list(
-                    self.chat_container.query_items(
+                items = [
+                    item
+                    async for item in self.chat_container.query_items(
                         query=query,
                         parameters=parameters,
-                        enable_cross_partition_query=True,
                     )
-                )
+                ]
 
                 for item in items:
                     try:
-                        self.chat_container.delete_item(item=item["id"], partition_key=user_id)
+                        await self.chat_container.delete_item(
+                            item=item["id"], partition_key=user_id
+                        )
                     except CosmosResourceNotFoundError:
                         pass
 
@@ -517,7 +577,7 @@ class CosmosDbService:
             deleted = False
             for doc_id in doc_ids_to_try:
                 try:
-                    self.chat_container.delete_item(
+                    await self.chat_container.delete_item(
                         item=doc_id,
                         partition_key=user_id,
                     )
@@ -549,13 +609,13 @@ class CosmosDbService:
         item_id = f"sess_{session_id}"  # Unique document ID
 
         try:
-            existing = self.chat_container.read_item(
+            existing = await self.chat_container.read_item(
                 item=item_id,
                 partition_key=user_id,
             )
             existing["message_count"] = existing.get("message_count", 0) + 1
             existing["last_updated"] = datetime.now(UTC).isoformat()
-            self.chat_container.replace_item(item=item_id, body=existing)
+            await self.chat_container.replace_item(item=item_id, body=existing)
         except CosmosResourceNotFoundError:
             # Session doesn't exist yet - create it
             now = datetime.now(UTC)
@@ -576,7 +636,7 @@ class CosmosDbService:
                 "tags": [],
             }
             try:
-                self.chat_container.create_item(body=new_session)
+                await self.chat_container.create_item(body=new_session)
                 logger.info("session_auto_created", session_id=session_id, user_id=user_id)
             except Exception as create_error:
                 logger.debug(
@@ -644,7 +704,7 @@ class CosmosDbService:
             metadata=metadata or {},
         )
 
-        if not self._ensure_initialized():
+        if not await self._ensure_initialized():
             return doc_meta
 
         item = {
@@ -662,7 +722,7 @@ class CosmosDbService:
         }
 
         try:
-            self.documents_container.upsert_item(body=item)
+            await self.documents_container.upsert_item(body=item)
             logger.info("document_metadata_saved", document_id=document_id, user_id=user_id)
             return doc_meta
         except Exception as error:
@@ -680,7 +740,7 @@ class CosmosDbService:
         Returns:
             List of document metadata
         """
-        if not self._ensure_initialized():
+        if not await self._ensure_initialized():
             return []
 
         try:
@@ -695,13 +755,14 @@ class CosmosDbService:
                 {"name": "@limit", "value": limit},
             ]
 
-            items = list(
-                self.documents_container.query_items(
+            items = [
+                item
+                async for item in self.documents_container.query_items(
                     query=query,
                     parameters=parameters,
                     partition_key=user_id,
                 )
-            )
+            ]
 
             result = [
                 {
@@ -738,11 +799,11 @@ class CosmosDbService:
         Returns:
             True if deleted successfully
         """
-        if not self._ensure_initialized():
+        if not await self._ensure_initialized():
             return False
 
         try:
-            self.documents_container.delete_item(
+            await self.documents_container.delete_item(
                 item=f"doc_{document_id}",
                 partition_key=user_id,
             )
@@ -800,7 +861,7 @@ class CosmosDbService:
             updated_at=now,
         )
 
-        if not self._ensure_initialized():
+        if not await self._ensure_initialized():
             return workflow_state
 
         item = {
@@ -819,7 +880,7 @@ class CosmosDbService:
         }
 
         try:
-            self.workflows_container.upsert_item(body=item)
+            await self.workflows_container.upsert_item(body=item)
             logger.info(
                 "workflow_state_saved",
                 workflow_id=workflow_id,
@@ -842,11 +903,11 @@ class CosmosDbService:
         Returns:
             The workflow state or None if not found
         """
-        if not self._ensure_initialized():
+        if not await self._ensure_initialized():
             return None
 
         try:
-            item = self.workflows_container.read_item(
+            item = await self.workflows_container.read_item(
                 item=f"wf_{workflow_id}",
                 partition_key=user_id,
             )
@@ -889,7 +950,7 @@ class CosmosDbService:
         Returns:
             List of workflow states
         """
-        if not self._ensure_initialized():
+        if not await self._ensure_initialized():
             return []
 
         try:
@@ -914,13 +975,14 @@ class CosmosDbService:
                 OFFSET 0 LIMIT @limit
             """
 
-            items = list(
-                self.workflows_container.query_items(
+            items = [
+                item
+                async for item in self.workflows_container.query_items(
                     query=query,
                     parameters=parameters,
                     partition_key=user_id,
                 )
-            )
+            ]
 
             return [
                 WorkflowState(
@@ -954,11 +1016,11 @@ class CosmosDbService:
         Returns:
             True if deleted successfully
         """
-        if not self._ensure_initialized():
+        if not await self._ensure_initialized():
             return False
 
         try:
-            self.workflows_container.delete_item(
+            await self.workflows_container.delete_item(
                 item=f"wf_{workflow_id}",
                 partition_key=user_id,
             )
@@ -980,7 +1042,7 @@ class CosmosDbService:
         Returns:
             Health check result with status and details
         """
-        if not self._ensure_initialized():
+        if not await self._ensure_initialized():
             return {
                 "status": "unconfigured",
                 "details": {
@@ -994,7 +1056,7 @@ class CosmosDbService:
 
             # Read container metadata to verify connection
             if self.chat_container:
-                self.chat_container.read()
+                await self.chat_container.read()
 
             response_time = (time.time() - start_time) * 1000
 
@@ -1018,15 +1080,19 @@ class CosmosDbService:
                 },
             }
 
-    def dispose(self) -> None:
+    async def dispose(self) -> None:
         """Dispose of the Cosmos DB client."""
         if self.client:
+            await self.client.close()
             self.client = None
             self.database = None
             self.chat_container = None
             self.documents_container = None
             self.workflows_container = None
             self._initialized = False
+            if self._credential:
+                await self._credential.close()
+                self._credential = None
             logger.info("cosmos_db_disposed")
 
 

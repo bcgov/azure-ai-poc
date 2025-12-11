@@ -13,6 +13,7 @@ from fastapi import FastAPI
 
 from app.config import settings
 from app.devui import DevUIServer, start_devui_async
+from app.http_client import close_http_client
 from app.logger import get_logger, setup_logging
 from app.middleware.access_log_middleware import AccessLogMiddleware
 from app.middleware.auth_middleware import AuthMiddleware
@@ -126,7 +127,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     embedding_service = get_embedding_service()
     await embedding_service.close()
     cosmos_service = get_cosmos_db_service()
-    cosmos_service.dispose()
+    await cosmos_service.dispose()
+    azure_search_service = get_azure_search_service()
+    await azure_search_service.dispose()
+
+    # Close shared HTTP client
+    await close_http_client()
 
     if devui_server:
         devui_server.stop()

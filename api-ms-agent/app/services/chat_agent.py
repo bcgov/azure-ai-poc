@@ -10,7 +10,6 @@ tools instead of custom-coding ReAct loops.
 All responses MUST include source attribution for traceability.
 """
 
-import json
 from dataclasses import dataclass, field
 from textwrap import shorten
 from typing import Any
@@ -252,6 +251,7 @@ class ChatAgentService:
     def __init__(self) -> None:
         """Initialize the chat agent service."""
         self._agent: ChatAgent | None = None
+        self._base_agent: ChatAgent | None = None  # Cached agent without document context
         self._client: AsyncAzureOpenAI | None = None
         self._credential: DefaultAzureCredential | None = None
         logger.info("ChatAgentService initialized with MAF ChatAgent")
@@ -290,17 +290,38 @@ class ChatAgentService:
     def _get_agent(self, document_context: str | None = None) -> ChatAgent:
         """Get or create the ChatAgent with tools.
 
+        Uses a cached base agent when no document context is provided
+        to avoid recreation overhead.
+
         Args:
             document_context: Optional document context to include in instructions
 
         Returns:
             ChatAgent configured with reasoning tools
         """
-        # Build instructions with optional document context
-        instructions = SYSTEM_INSTRUCTIONS
-        if document_context:
-            trimmed_context = _trim_text(document_context, MAX_DOC_CONTEXT_CHARS)
-            instructions += f"""
+        # If no document context, use cached base agent
+        if not document_context:
+            if self._base_agent is None:
+                chat_client = OpenAIChatClient(
+                    async_client=self._get_client(),
+                    model_id=settings.azure_openai_deployment,
+                )
+                self._base_agent = ChatAgent(
+                    name="Chat Agent",
+                    chat_client=chat_client,
+                    instructions=SYSTEM_INSTRUCTIONS,
+                    tools=CHAT_TOOLS,
+                    temperature=settings.llm_temperature,
+                    max_tokens=settings.llm_max_output_tokens,
+                )
+                logger.debug("Base ChatAgent cached")
+            return self._base_agent
+
+        # Document context requires fresh agent with modified instructions
+        trimmed_context = _trim_text(document_context, MAX_DOC_CONTEXT_CHARS)
+        instructions = (
+            SYSTEM_INSTRUCTIONS
+            + f"""
 
 ## DOCUMENT CONTEXT PROVIDED
 
@@ -310,8 +331,8 @@ REDACT any PII before including in your response.
 
 DOCUMENT:
 {trimmed_context}"""
+        )
 
-        # Create fresh agent (to include document context in instructions)
         chat_client = OpenAIChatClient(
             async_client=self._get_client(),
             model_id=settings.azure_openai_deployment,
@@ -326,7 +347,7 @@ DOCUMENT:
             max_tokens=settings.llm_max_output_tokens,
         )
 
-        logger.debug(f"ChatAgent created with {len(CHAT_TOOLS)} tools")
+        logger.debug("ChatAgent created with document context")
         return agent
 
     async def chat(

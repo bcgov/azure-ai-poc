@@ -6,6 +6,7 @@ to get current information from the web for research reports.
 """
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 from ddgs import DDGS
@@ -14,6 +15,10 @@ from ddgs.exceptions import DDGSException, RatelimitException
 from app.logger import get_logger
 
 logger = get_logger(__name__)
+
+# Dedicated thread pool for web search operations
+# Larger than default to handle concurrent research requests
+_WEB_SEARCH_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="web_search_")
 
 
 @dataclass
@@ -32,11 +37,12 @@ class WebSearchService:
 
     Provides free web search without API keys for research augmentation.
     Uses the official duckduckgo-search library for reliable results.
+    Uses a dedicated thread pool to avoid blocking the main event loop.
     """
 
     def __init__(self) -> None:
         """Initialize the web search service."""
-        logger.info("WebSearchService initialized")
+        logger.info("WebSearchService initialized with dedicated thread pool")
 
     async def search(
         self,
@@ -56,9 +62,10 @@ class WebSearchService:
         logger.info("web_search_started", query=query, max_results=max_results)
 
         try:
-            # Run synchronous DuckDuckGo search in thread pool
-            results = await asyncio.get_event_loop().run_in_executor(
-                None,
+            # Run synchronous DuckDuckGo search in dedicated thread pool
+            loop = asyncio.get_event_loop()
+            results = await loop.run_in_executor(
+                _WEB_SEARCH_EXECUTOR,
                 lambda: self._search_sync(query, max_results),
             )
 
