@@ -1,6 +1,7 @@
 import apiService from '@/service/api-service'
 import { chatAgentService, type ChatMessage as ChatServiceMessage } from '@/services/chatAgentService'
 import { documentService, type DocumentItem } from '@/services/documentService'
+import { fetchModels, type ModelInfo } from '@/services/modelsService'
 import type { FC } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import {
@@ -56,7 +57,8 @@ const ChatInterface: FC = () => {
   const [pendingDocumentSelection, setPendingDocumentSelection] = useState<
     string | null
   >(null)
-  const [selectedModel, setSelectedModel] = useState<'gpt-4o-mini' | 'gpt-41-nano'>('gpt-4o-mini')
+  const [selectedModel, setSelectedModel] = useState<string>('gpt-4o-mini')
+  const [models, setModels] = useState<ModelInfo[]>([])
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -101,6 +103,20 @@ const ChatInterface: FC = () => {
   // Load documents on component mount
   useEffect(() => {
     loadDocuments()
+  }, [])
+
+  // Fetch available models from API on mount
+  useEffect(() => {
+    fetchModels()
+      .then(setModels)
+      .catch((err) => {
+        console.error('Failed to fetch models:', err)
+        // Fallback to hardcoded defaults if API fails
+        setModels([
+          { id: 'gpt-4o-mini', deployment: 'gpt-4o-mini', display_name: 'GPT-4o mini', description: '', is_default: true },
+          { id: 'gpt-41-nano', deployment: 'gpt-4.1-nano', display_name: 'GPT-4.1 Nano', description: '', is_default: false },
+        ])
+      })
   }, [])
 
   // Handle pending document selection after documents are loaded (backup mechanism)
@@ -347,7 +363,12 @@ const ChatInterface: FC = () => {
 
       try {
         // Start deep research workflow
-        const startResult = await chatAgentService.startDeepResearch(questionText)
+        const startResult = await chatAgentService.startDeepResearch(
+          questionText,
+          undefined, // userId handled by backend auth
+          selectedDocument || undefined, // Pass document ID for document-based research
+          selectedModel, // Pass selected model
+        )
 
         if (!startResult.success || !startResult.data) {
           throw new Error(startResult.error || 'Failed to start deep research')
@@ -943,7 +964,7 @@ const ChatInterface: FC = () => {
                 <div className="d-flex align-items-center">
                   <select
                     value={selectedModel}
-                    onChange={(e) => setSelectedModel(e.target.value as 'gpt-4o-mini' | 'gpt-41-nano')}
+                    onChange={(e) => setSelectedModel(e.target.value)}
                     style={{ 
                       width: 'auto', 
                       fontSize: '0.875rem',
@@ -952,8 +973,9 @@ const ChatInterface: FC = () => {
                       border: '1px solid #ced4da',
                     }}
                   >
-                    <option value="gpt-4o-mini">GPT-4o mini</option>
-                    <option value="gpt-41-nano">GPT-4.1 Nano</option>
+                    {models.map((model) => (
+                      <option key={model.id} value={model.id}>{model.display_name}</option>
+                    ))}
                   </select>
                 </div>
 

@@ -20,8 +20,6 @@ from agent_framework import (
     ChatMessage,
     ai_function,
 )
-from azure.identity.aio import DefaultAzureCredential, get_bearer_token_provider
-from openai import AsyncAzureOpenAI
 
 from app.config import settings
 from app.logger import get_logger
@@ -195,6 +193,7 @@ class ResearchState:
     feedback_history: list[str] = field(default_factory=list)
     document_id: str | None = None  # For document-based research
     document_context: str | None = None  # Full document content for scanning
+    model: str | None = None  # Model to use for research
 
 
 # ==================== AI Functions for Research Workflow ====================
@@ -544,9 +543,7 @@ class DeepResearchAgentService:
 
     def __init__(self) -> None:
         """Initialize the deep research agent service."""
-        self._client: AsyncAzureOpenAI | None = None
         self._deep_research_agent: ChatAgent | None = None
-        self._credential: DefaultAzureCredential | None = None
         self._active_runs: dict[str, Any] = {}  # Track active workflow runs
         self._cosmos_db: Any | None = None  # Lazy-loaded Cosmos DB service
         logger.info("DeepResearchAgentService initialized with Agent Framework SDK")
@@ -558,29 +555,6 @@ class DeepResearchAgentService:
 
             self._cosmos_db = CosmosDbService()
         return self._cosmos_db
-
-    def _get_client(self) -> AsyncAzureOpenAI:
-        """Get or create the Azure OpenAI client with managed identity or API key."""
-        if self._client is None:
-            if settings.use_managed_identity:
-                self._credential = DefaultAzureCredential()
-                token_provider = get_bearer_token_provider(
-                    self._credential, "https://cognitiveservices.azure.com/.default"
-                )
-                self._client = AsyncAzureOpenAI(
-                    azure_endpoint=settings.azure_openai_endpoint,
-                    azure_ad_token_provider=token_provider,
-                    api_version=settings.azure_openai_api_version,
-                )
-                logger.info("Using managed identity for Azure OpenAI")
-            else:
-                self._client = AsyncAzureOpenAI(
-                    azure_endpoint=settings.azure_openai_endpoint,
-                    api_key=settings.azure_openai_api_key,
-                    api_version=settings.azure_openai_api_version,
-                )
-                logger.info("Using API key for Azure OpenAI")
-        return self._client
 
     async def _fetch_document_content(
         self,
@@ -652,19 +626,27 @@ class DeepResearchAgentService:
             )
             return None
 
-    def _create_research_agent(
+    async def _create_research_agent(
         self,
         document_context: str | None = None,
+        model: str | None = None,
     ) -> ChatAgent:
         if self._deep_research_agent is not None:
             return self._deep_research_agent
         """Create a ChatAgent configured for deep research."""
         from agent_framework.openai import OpenAIChatClient
 
-        # Create OpenAI chat client using the Azure OpenAI async client
+        from app.services.openai_clients import (
+            get_client_for_model,
+            get_deployment_for_model,
+        )
+
+        # Create OpenAI chat client using the centralized client factory
+        client = await get_client_for_model(model)
+        model_deployment = get_deployment_for_model(model)
         chat_client = OpenAIChatClient(
-            async_client=self._get_client(),
-            model_id=settings.azure_openai_deployment,
+            async_client=client,
+            model_id=model_deployment,
         )
 
         # Get current date for the LLM to understand "current" means today
@@ -831,6 +813,7 @@ When citing from this document, use:
         topic: str,
         user_id: str | None = None,
         document_id: str | None = None,
+        model: str | None = None,
     ) -> dict:
         """
         Start a new research workflow.
@@ -839,6 +822,7 @@ When citing from this document, use:
             topic: The topic to research.
             user_id: Optional user ID for tracking.
             document_id: Optional document ID for document-based research.
+            model: Model to use ('gpt-4o-mini' or 'gpt-41-nano').
 
         Returns:
             Dictionary with run_id and initial status.
@@ -858,6 +842,7 @@ When citing from this document, use:
             user_id=user_id,
             document_id=document_id,
             document_context=document_context,
+            model=model,
         )
 
         logger.info(
@@ -867,10 +852,11 @@ When citing from this document, use:
             user_id=user_id,
             document_id=document_id,
             has_document_context=document_context is not None,
+            model=model,
         )
 
         # Create a fresh agent for this run
-        agent = self._create_research_agent(document_context=document_context)
+        agent = await self._create_research_agent(document_context=document_context, model=model)
         thread = agent.get_new_thread()
 
         # Store the agent, thread, and state for tracking
@@ -1351,9 +1337,7 @@ Provide comprehensive, detailed responses at each phase."""
         }
 
     async def close(self) -> None:
-        """Clean up resources."""
-        if self._client:
-            await self._client.close()
+        """Clean up resources. Clients are managed by openai_clients module."""
         self._active_runs.clear()
         logger.info("DeepResearchAgentService closed")
 

@@ -159,7 +159,7 @@ class DocumentIntelligenceService:
             )
         logger.info("DocumentIntelligenceService initialized")
 
-    def _get_client(self):
+    async def _get_client(self):
         """Get or create the Document Intelligence client."""
         if self._use_fallback:
             raise ValueError(
@@ -168,14 +168,14 @@ class DocumentIntelligenceService:
             )
 
         if self._client is None:
-            # Lazy import Azure SDK only when needed
-            from azure.ai.documentintelligence import DocumentIntelligenceClient
+            # Lazy import Azure SDK only when needed - use async client
+            from azure.ai.documentintelligence.aio import DocumentIntelligenceClient
             from azure.ai.documentintelligence.models import (
                 AnalyzeResult,
                 DocumentAnalysisFeature,
             )
             from azure.core.credentials import AzureKeyCredential
-            from azure.identity import DefaultAzureCredential
+            from azure.identity.aio import DefaultAzureCredential
 
             # Store references for use in analyze_document
             self._AnalyzeResult = AnalyzeResult
@@ -299,7 +299,7 @@ class DocumentIntelligenceService:
             endpoint=settings.azure_document_intelligence_endpoint,
         )
 
-        client = self._get_client()
+        client = await self._get_client()
 
         try:
             logger.debug(
@@ -320,7 +320,7 @@ class DocumentIntelligenceService:
                     proxy_endpoint=endpoint,
                 )
                 polling_method = _create_proxy_polling_method(endpoint)
-                poller = client.begin_analyze_document(
+                poller = await client.begin_analyze_document(
                     model_id="prebuilt-layout",
                     body=BytesIO(content),
                     content_type=resolved_content_type,
@@ -328,7 +328,7 @@ class DocumentIntelligenceService:
                 )
             else:
                 # Use default polling for direct Azure endpoint
-                poller = client.begin_analyze_document(
+                poller = await client.begin_analyze_document(
                     model_id="prebuilt-layout",
                     body=BytesIO(content),
                     content_type=resolved_content_type,
@@ -340,7 +340,7 @@ class DocumentIntelligenceService:
                 status=str(poller.status()) if hasattr(poller, "status") else "unknown",
             )
 
-            result = poller.result()
+            result = await poller.result()
 
             logger.debug(
                 "document_intelligence_result_received",
@@ -478,7 +478,7 @@ class DocumentIntelligenceService:
     async def close(self) -> None:
         """Close the client and release resources."""
         if self._client:
-            self._client.close()
+            await self._client.close()
             self._client = None
         if self._credential:
             await self._credential.close()

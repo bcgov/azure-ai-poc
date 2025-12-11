@@ -1,14 +1,9 @@
 import type { FC } from 'react'
 import { useRef, useEffect, useState } from 'react'
 import { speechRecognitionService } from '@/services/speechService'
+import { fetchModels, type ModelInfo } from '@/services/modelsService'
 
-// Available models for the dropdown
-const MODELS = [
-  { id: 'gpt-4o-mini', name: 'GPT-4o mini' },
-  { id: 'gpt-41-nano', name: 'GPT-4.1 Nano' },
-] as const
-
-type ModelId = (typeof MODELS)[number]['id']
+type ModelId = string
 
 interface InputProps {
   value: string
@@ -47,6 +42,21 @@ const Input: FC<InputProps> = ({
   const [speechSupported, setSpeechSupported] = useState(false)
   const [useAzureSpeech, setUseAzureSpeech] = useState(false)
   const [showModelDropdown, setShowModelDropdown] = useState(false)
+  const [models, setModels] = useState<ModelInfo[]>([])
+
+  // Fetch available models from API on mount
+  useEffect(() => {
+    fetchModels()
+      .then(setModels)
+      .catch((err) => {
+        console.error('Failed to fetch models:', err)
+        // Fallback to hardcoded defaults if API fails
+        setModels([
+          { id: 'gpt-4o-mini', deployment: 'gpt-4o-mini', display_name: 'GPT-4o mini', description: '', is_default: true },
+          { id: 'gpt-41-nano', deployment: 'gpt-4.1-nano', display_name: 'GPT-4.1 Nano', description: '', is_default: false },
+        ])
+      })
+  }, [])
 
   useEffect(() => {
     // Check if speech recognition is supported
@@ -393,7 +403,7 @@ const Input: FC<InputProps> = ({
               onClick={() => setShowModelDropdown(!showModelDropdown)}
               style={{ position: 'relative', cursor: 'pointer' }}
             >
-              {MODELS.find((m) => m.id === selectedModel)?.name || 'GPT-4o mini'}
+              {models.find((m) => m.id === selectedModel)?.display_name || 'GPT-4o mini'}
               <i className="bi bi-chevron-down"></i>
               {showModelDropdown && (
                 <div
@@ -411,7 +421,7 @@ const Input: FC<InputProps> = ({
                   }}
                   onClick={(e) => e.stopPropagation()}
                 >
-                  {MODELS.map((model) => (
+                  {models.map((model) => (
                     <div
                       key={model.id}
                       onClick={() => {
@@ -437,7 +447,7 @@ const Input: FC<InputProps> = ({
                           selectedModel === model.id ? '#f0f4ff' : 'transparent'
                       }}
                     >
-                      {model.name}
+                      {model.display_name}
                     </div>
                   ))}
                 </div>

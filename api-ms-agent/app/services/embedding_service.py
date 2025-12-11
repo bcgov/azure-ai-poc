@@ -14,9 +14,6 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from azure.identity.aio import DefaultAzureCredential, get_bearer_token_provider
-from openai import AsyncAzureOpenAI
-
 from app.config import settings
 from app.logger import get_logger
 from app.services.azure_search_service import (
@@ -30,6 +27,7 @@ from app.services.cosmos_db_service import (
     get_cosmos_db_service,
 )
 from app.services.document_intelligence_service import ParagraphWithPage
+from app.services.openai_clients import get_embedding_client
 
 logger = get_logger(__name__)
 
@@ -83,36 +81,9 @@ class EmbeddingService:
             search_service: Optional Azure Search service instance for vector operations
             cosmos_service: Optional Cosmos DB service instance for metadata
         """
-        self._client: AsyncAzureOpenAI | None = None
-        self._credential: DefaultAzureCredential | None = None
         self.search = search_service or get_azure_search_service()
         self.cosmos = cosmos_service or get_cosmos_db_service()
         logger.info("EmbeddingService initialized with Azure AI Search backend")
-
-    async def _get_client(self) -> AsyncAzureOpenAI:
-        """Get or create the Azure OpenAI client for embeddings."""
-        if self._client is None:
-            endpoint = settings.azure_openai_embedding_endpoint or settings.azure_openai_endpoint
-
-            if settings.use_managed_identity:
-                self._credential = DefaultAzureCredential()
-                token_provider = get_bearer_token_provider(
-                    self._credential, "https://cognitiveservices.azure.com/.default"
-                )
-                self._client = AsyncAzureOpenAI(
-                    azure_endpoint=endpoint,
-                    azure_ad_token_provider=token_provider,
-                    api_version=settings.azure_openai_api_version,
-                )
-                logger.info("Using managed identity for embeddings")
-            else:
-                self._client = AsyncAzureOpenAI(
-                    azure_endpoint=endpoint,
-                    api_key=settings.azure_openai_api_key,
-                    api_version=settings.azure_openai_api_version,
-                )
-                logger.info("Using API key for embeddings")
-        return self._client
 
     async def generate_embedding(self, text: str) -> list[float]:
         """
@@ -124,7 +95,7 @@ class EmbeddingService:
         Returns:
             The embedding vector
         """
-        client = await self._get_client()
+        client = await get_embedding_client()
 
         try:
             response = await client.embeddings.create(
@@ -165,7 +136,7 @@ class EmbeddingService:
         if not texts:
             return []
 
-        client = await self._get_client()
+        client = await get_embedding_client()
 
         async def process_batch(batch: list[str]) -> list[list[float]]:
             """Process a single batch of texts."""
@@ -525,11 +496,7 @@ class EmbeddingService:
         return documents
 
     async def close(self) -> None:
-        """Clean up resources."""
-        if self._credential:
-            await self._credential.close()
-        if self._client:
-            await self._client.close()
+        """Clean up resources. Clients are managed by openai_clients module."""
         logger.info("EmbeddingService closed")
 
 

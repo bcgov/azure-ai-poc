@@ -46,7 +46,7 @@ const ChatPage: FC = () => {
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(false)
   const [deepResearchRunId, setDeepResearchRunId] = useState<string | null>(null)
   const [isLoadingDocuments, setIsLoadingDocuments] = useState(false)
-  const [selectedModel, setSelectedModel] = useState<'gpt-4o-mini' | 'gpt-41-nano'>('gpt-4o-mini')
+  const [selectedModel, setSelectedModel] = useState<string>('gpt-4o-mini')
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -345,6 +345,7 @@ const ChatPage: FC = () => {
         question,
         undefined, // userId handled by backend auth
         selectedDocument || undefined, // Pass document ID for document-based research
+        selectedModel, // Pass selected model
       )
       
       if (!startResult.success || !startResult.data?.run_id) {

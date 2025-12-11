@@ -49,11 +49,13 @@ export interface OrchestratorHealthStatus {
  *
  * @param query - Natural language query
  * @param sessionId - Optional session ID for tracking conversation context
+ * @param model - Optional model to use ('gpt-4o-mini' or 'gpt-41-nano')
  * @returns Promise with the orchestrator response including citations
  */
 export async function queryOrchestrator(
   query: string,
-  sessionId?: string
+  sessionId?: string,
+  model?: string
 ): Promise<OrchestratorQueryResponse> {
   try {
     const response = await httpClient.post<OrchestratorQueryResponse>(
@@ -61,6 +63,7 @@ export async function queryOrchestrator(
       {
         query,
         session_id: sessionId,
+        model,
       }
     );
     return response.data;
