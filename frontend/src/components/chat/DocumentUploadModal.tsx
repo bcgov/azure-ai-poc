@@ -55,7 +55,7 @@ const DocumentUploadModal: FC<DocumentUploadModalProps> = ({
       <Modal.Body>
         <Form onSubmit={handleSubmit}>
           <Form.Group className="mb-3">
-            <Form.Label>Select a document to upload</Form.Label>
+            <Form.Label>Select a document to upload (Files larger than 5MB may take longer)</Form.Label>
             <Form.Control
               type="file"
               ref={fileInputRef}
