@@ -48,11 +48,11 @@ from agent_framework import (
     executor,
     handler,
 )
-from azure.identity.aio import DefaultAzureCredential, get_bearer_token_provider
 from openai import AsyncAzureOpenAI
 
 from app.config import settings
 from app.logger import get_logger
+from app.services.openai_clients import get_client_for_model, get_deployment_for_model
 
 logger = get_logger(__name__)
 
@@ -99,6 +99,8 @@ class WorkflowState:
 
     topic: str
     require_approval: bool = False
+    model: str | None = None
+    model_deployment: str | None = None
     plan: ResearchPlan | None = None
     findings: list[ResearchFinding] = field(default_factory=list)
     final_report: str = ""
@@ -117,9 +119,10 @@ class PlanningExecutor(Executor):
     and generates research questions, subtopics, and methodology.
     """
 
-    def __init__(self, client: AsyncAzureOpenAI):
+    def __init__(self, client: AsyncAzureOpenAI, model_deployment: str):
         super().__init__(id="planning_executor")
         self.client = client
+        self.model_deployment = model_deployment
 
     @handler
     async def create_plan(self, state: WorkflowState, ctx: WorkflowContext[WorkflowState]) -> None:
@@ -129,7 +132,7 @@ class PlanningExecutor(Executor):
 
         try:
             response = await self.client.chat.completions.create(
-                model=settings.azure_openai_deployment,
+                model=self.model_deployment,
                 messages=[
                     {
                         "role": "system",
@@ -190,9 +193,10 @@ class ResearchExecutor(Executor):
     Iterates through each subtopic and gathers findings.
     """
 
-    def __init__(self, client: AsyncAzureOpenAI):
+    def __init__(self, client: AsyncAzureOpenAI, model_deployment: str):
         super().__init__(id="research_executor")
         self.client = client
+        self.model_deployment = model_deployment
 
     @handler
     async def conduct_research(
@@ -215,7 +219,7 @@ class ResearchExecutor(Executor):
                 logger.info(f"[ResearchExecutor] Researching: {subtopic}")
 
                 response = await self.client.chat.completions.create(
-                    model=settings.azure_openai_deployment,
+                    model=self.model_deployment,
                     messages=[
                         {
                             "role": "system",
@@ -277,9 +281,10 @@ class SynthesisExecutor(Executor):
     Creates a comprehensive report from all research findings.
     """
 
-    def __init__(self, client: AsyncAzureOpenAI):
+    def __init__(self, client: AsyncAzureOpenAI, model_deployment: str):
         super().__init__(id="synthesis_executor")
         self.client = client
+        self.model_deployment = model_deployment
 
     @handler
     async def synthesize_report(
@@ -305,7 +310,7 @@ class SynthesisExecutor(Executor):
             )
 
             response = await self.client.chat.completions.create(
-                model=settings.azure_openai_deployment,
+                model=self.model_deployment,
                 messages=[
                     {
                         "role": "system",
@@ -412,50 +417,27 @@ class WorkflowResearchAgentService:
 
     def __init__(self) -> None:
         """Initialize the workflow research agent service."""
-        self._client: AsyncAzureOpenAI | None = None
-        self._credential: DefaultAzureCredential | None = None
         self._active_runs: dict[str, Any] = {}
         logger.info("WorkflowResearchAgentService initialized")
 
-    def _get_client(self) -> AsyncAzureOpenAI:
-        """Get or create the Azure OpenAI client with managed identity or API key."""
-        if self._client is None:
-            if settings.use_managed_identity:
-                self._credential = DefaultAzureCredential()
-                token_provider = get_bearer_token_provider(
-                    self._credential, "https://cognitiveservices.azure.com/.default"
-                )
-                self._client = AsyncAzureOpenAI(
-                    azure_endpoint=settings.azure_openai_endpoint,
-                    azure_ad_token_provider=token_provider,
-                    api_version=settings.azure_openai_api_version,
-                )
-                logger.info("Using managed identity for Azure OpenAI")
-            else:
-                self._client = AsyncAzureOpenAI(
-                    azure_endpoint=settings.azure_openai_endpoint,
-                    api_key=settings.azure_openai_api_key,
-                    api_version=settings.azure_openai_api_version,
-                )
-                logger.info("Using API key for Azure OpenAI")
-        return self._client
-
-    def _build_workflow(self, require_approval: bool):
+    async def _build_workflow(self, require_approval: bool, model: str | None = None):
         """
         Build the research workflow using WorkflowBuilder.
 
         Args:
             require_approval: Whether to include approval step.
+            model: Model to use ('gpt-4o-mini' or 'gpt-41-nano').
 
         Returns:
             Built workflow ready for execution.
         """
-        client = self._get_client()
+        client = await get_client_for_model(model)
+        model_deployment = get_deployment_for_model(model)
 
-        # Create executors
-        planner = PlanningExecutor(client)
-        researcher = ResearchExecutor(client)
-        synthesizer = SynthesisExecutor(client)
+        # Create executors with model deployment
+        planner = PlanningExecutor(client, model_deployment)
+        researcher = ResearchExecutor(client, model_deployment)
+        synthesizer = SynthesisExecutor(client, model_deployment)
         approval = ApprovalExecutor()
 
         # Build workflow graph
@@ -511,6 +493,7 @@ class WorkflowResearchAgentService:
         topic: str,
         require_approval: bool | None = None,
         user_id: str | None = None,
+        model: str | None = None,
     ) -> dict:
         """
         Start a new research workflow.
@@ -519,11 +502,13 @@ class WorkflowResearchAgentService:
             topic: The topic to research.
             require_approval: Explicit approval flag. If None, auto-detected from topic.
             user_id: Optional user ID for tracking.
+            model: Model to use ('gpt-4o-mini' or 'gpt-41-nano').
 
         Returns:
             Dictionary with run_id and initial status.
         """
         run_id = str(uuid4())
+        model_deployment = get_deployment_for_model(model)
 
         # Auto-detect approval requirement if not explicitly set
         if require_approval is None:
@@ -532,6 +517,8 @@ class WorkflowResearchAgentService:
         initial_state = WorkflowState(
             topic=topic,
             require_approval=require_approval,
+            model=model,
+            model_deployment=model_deployment,
         )
 
         logger.info(
@@ -540,9 +527,10 @@ class WorkflowResearchAgentService:
             topic=topic,
             require_approval=require_approval,
             user_id=user_id,
+            model=model_deployment,
         )
 
-        workflow = self._build_workflow(require_approval)
+        workflow = await self._build_workflow(require_approval, model)
 
         self._active_runs[run_id] = {
             "workflow": workflow,
@@ -728,9 +716,7 @@ class WorkflowResearchAgentService:
         }
 
     async def close(self) -> None:
-        """Clean up resources."""
-        if self._client:
-            await self._client.close()
+        """Clean up resources. Clients are managed by openai_clients module."""
         self._active_runs.clear()
         logger.info("WorkflowResearchAgentService closed")
 

@@ -38,6 +38,10 @@ class OrchestratorQueryRequest(BaseModel):
         None,
         description="Optional session ID for tracking conversation context",
     )
+    model: str | None = Field(
+        default=None,
+        description="Model to use: 'gpt-4o-mini' (default) or 'gpt-41-nano'",
+    )
 
 
 class SourceInfo(BaseModel):
@@ -93,6 +97,7 @@ async def query_orchestrator(
             query=request.query,
             session_id=request.session_id,
             user_id=current_user.sub,
+            model=request.model,
         )
 
         # Map sources to the response model

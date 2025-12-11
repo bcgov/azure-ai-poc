@@ -32,8 +32,7 @@ from typing import Any
 
 from agent_framework import ChatAgent, FunctionCallContent, FunctionResultContent, ai_function
 from agent_framework.azure import AzureOpenAIChatClient
-from azure.identity.aio import DefaultAzureCredential, get_bearer_token_provider
-from openai import AsyncAzureOpenAI
+from azure.identity.aio import DefaultAzureCredential
 
 from app.config import settings
 from app.logger import get_logger
@@ -442,35 +441,11 @@ class OrchestratorAgentService:
 
     def __init__(self) -> None:
         """Initialize the orchestrator agent service."""
-        self._agent: ChatAgent | None = None
-        self._client: AsyncAzureOpenAI | None = None
+        self._agents: dict[str, ChatAgent] = {}  # Cache agents per model
         self._credential: DefaultAzureCredential | None = None
         logger.info("OrchestratorAgentService initialized with MAF ChatAgent")
 
-    def _get_client(self) -> AsyncAzureOpenAI:
-        """Get or create the Azure OpenAI client with managed identity or API key."""
-        if self._client is None:
-            if settings.use_managed_identity:
-                self._credential = DefaultAzureCredential()
-                token_provider = get_bearer_token_provider(
-                    self._credential, "https://cognitiveservices.azure.com/.default"
-                )
-                self._client = AsyncAzureOpenAI(
-                    azure_endpoint=settings.azure_openai_endpoint,
-                    azure_ad_token_provider=token_provider,
-                    api_version=settings.azure_openai_api_version,
-                )
-                logger.info("Using managed identity for Azure OpenAI")
-            else:
-                self._client = AsyncAzureOpenAI(
-                    azure_endpoint=settings.azure_openai_endpoint,
-                    api_key=settings.azure_openai_api_key,
-                    api_version=settings.azure_openai_api_version,
-                )
-                logger.info("Using API key for Azure OpenAI")
-        return self._client
-
-    def _get_agent(self) -> ChatAgent:
+    def _get_agent(self, model: str | None = None) -> ChatAgent:
         """Get or create the ChatAgent with tools.
 
         Uses MAF's built-in ChatAgent which handles:
@@ -478,55 +453,75 @@ class OrchestratorAgentService:
         - ReAct-style reasoning loop
         - Response synthesis
 
+        Args:
+            model: Model to use ('gpt-4o-mini' or 'gpt-41-nano')
+
         Returns:
             ChatAgent configured with MCP tools
         """
-        if self._agent is None:
-            # Create Azure OpenAI chat client - Per Microsoft best practices:
-            # Use AzureOpenAIChatClient for Azure OpenAI services
-            if settings.use_managed_identity:
+        from app.services.openai_clients import get_deployment_for_model
+
+        model_deployment = get_deployment_for_model(model)
+
+        # Check cache for this model's agent
+        if model_deployment in self._agents:
+            return self._agents[model_deployment]
+
+        # Create Azure OpenAI chat client - Per Microsoft best practices:
+        # Use AzureOpenAIChatClient for Azure OpenAI services
+        if settings.use_managed_identity:
+            if self._credential is None:
                 self._credential = DefaultAzureCredential()
-                chat_client = AzureOpenAIChatClient(
-                    endpoint=settings.azure_openai_endpoint,
-                    credential=self._credential,
-                    deployment_name=settings.azure_openai_deployment,
-                )
-                logger.info("Created AzureOpenAIChatClient with managed identity")
-            else:
-                chat_client = AzureOpenAIChatClient(
-                    endpoint=settings.azure_openai_endpoint,
-                    api_key=settings.azure_openai_api_key,
-                    deployment_name=settings.azure_openai_deployment,
-                )
-                logger.info("Created AzureOpenAIChatClient with API key")
-
-            # Create ChatAgent with tools - MAF handles ReAct internally
-            # NOTE: Per Microsoft best practices:
-            # - tool_choice="auto" allows LLM to decide when to use tools
-            # - description helps with agent identity and discoverability
-            # - temperature and max_tokens control response consistency and cost
-            # - model_id already set in AzureOpenAIChatClient, no need to override
-            # NOTE: allow_multiple_tool_calls is not supported by Azure OpenAI API
-            self._agent = ChatAgent(
-                name="Orchestrator Agent",
-                description="Specialized assistant for BC government data with access to Parks, Geocoder, and OrgBook APIs",
-                chat_client=chat_client,
-                instructions=SYSTEM_INSTRUCTIONS,
-                tools=ORCHESTRATOR_TOOLS,
-                tool_choice="auto",  # Let LLM decide when to use tools
-                temperature=settings.llm_temperature,
-                max_tokens=settings.llm_max_output_tokens,
+            chat_client = AzureOpenAIChatClient(
+                endpoint=settings.azure_openai_endpoint,
+                credential=self._credential,
+                deployment_name=model_deployment,
             )
+            logger.info(
+                "Created AzureOpenAIChatClient with managed identity",
+                model=model_deployment,
+            )
+        else:
+            chat_client = AzureOpenAIChatClient(
+                endpoint=settings.azure_openai_endpoint,
+                api_key=settings.azure_openai_api_key,
+                deployment_name=model_deployment,
+            )
+            logger.info("Created AzureOpenAIChatClient with API key", model=model_deployment)
 
-            logger.info(f"ChatAgent created with {len(ORCHESTRATOR_TOOLS)} tools")
+        # Create ChatAgent with tools - MAF handles ReAct internally
+        # NOTE: Per Microsoft best practices:
+        # - tool_choice="auto" allows LLM to decide when to use tools
+        # - description helps with agent identity and discoverability
+        # - temperature and max_tokens control response consistency and cost
+        # - model_id already set in AzureOpenAIChatClient, no need to override
+        # NOTE: allow_multiple_tool_calls is not supported by Azure OpenAI API
+        agent = ChatAgent(
+            name="Orchestrator Agent",
+            description="Specialized assistant for BC government data",
+            chat_client=chat_client,
+            instructions=SYSTEM_INSTRUCTIONS,
+            tools=ORCHESTRATOR_TOOLS,
+            tool_choice="auto",  # Let LLM decide when to use tools
+            temperature=settings.llm_temperature,
+            max_tokens=settings.llm_max_output_tokens,
+        )
 
-        return self._agent
+        # Cache the agent for this model
+        self._agents[model_deployment] = agent
+        logger.info(
+            f"ChatAgent created with {len(ORCHESTRATOR_TOOLS)} tools",
+            model=model_deployment,
+        )
+
+        return agent
 
     async def process_query(
         self,
         query: str,
         session_id: str | None = None,
         user_id: str | None = None,
+        model: str | None = None,
     ) -> dict[str, Any]:
         """
         Process a user query through the ChatAgent.
@@ -540,19 +535,25 @@ class OrchestratorAgentService:
             query: User's natural language query
             session_id: Optional session ID for tracking
             user_id: User's Keycloak sub for tracking and context
+            model: Model to use ('gpt-4o-mini' or 'gpt-41-nano')
 
         Returns:
             Dictionary with response, sources, and metadata
         """
+        from app.services.openai_clients import get_deployment_for_model
+
+        model_deployment = get_deployment_for_model(model)
+
         logger.info(
             "orchestrator_query_start",
             query=query[:100],
             session_id=session_id,
             user_id=user_id,
+            model=model_deployment,
         )
 
         try:
-            agent = self._get_agent()
+            agent = self._get_agent(model)
 
             # MAF's ChatAgent.run() handles everything:
             # - Tool selection (based on tool_choice="auto")
@@ -568,10 +569,13 @@ class OrchestratorAgentService:
 
             # If no tools were invoked, add a default LLM knowledge source
             if not sources:
+                model_display = settings.get_model_config(
+                    model or settings.get_default_model_id()
+                ).get("display_name", model_deployment)
                 sources = [
                     {
                         "source_type": "llm_knowledge",
-                        "description": f"Response generated by {settings.azure_openai_deployment} using BC government data APIs",
+                        "description": f"Response generated by {model_display} using BC government data APIs",
                         "confidence": "high",
                     }
                 ]
@@ -874,11 +878,7 @@ class OrchestratorAgentService:
         }
 
     async def close(self) -> None:
-        """Clean up resources."""
-        if self._client:
-            await self._client.close()
-            self._client = None
-
+        """Clean up resources. Clients are managed by openai_clients module."""
         if self._credential:
             await self._credential.close()
             self._credential = None

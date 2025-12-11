@@ -30,6 +30,7 @@ const OrchestratorPage: FC = () => {
   const [error, setError] = useState<string | null>(null)
   const [lastFailedQuestion, setLastFailedQuestion] = useState<string | null>(null)
   const [healthStatus, setHealthStatus] = useState<OrchestratorHealthStatus | null>(null)
+  const [selectedModel, setSelectedModel] = useState<string>('gpt-4o-mini')
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -80,7 +81,7 @@ const OrchestratorPage: FC = () => {
     setIsLoading(true)
 
     try {
-      const response = await queryOrchestrator(questionToSend, sessionId)
+      const response = await queryOrchestrator(questionToSend, sessionId, selectedModel)
 
       // Update placeholder with actual response
       setMessages((prev) =>
@@ -324,6 +325,8 @@ const OrchestratorPage: FC = () => {
             onSubmit={handleSubmit}
             isLoading={isLoading}
             placeholder="Ask about BC businesses, locations, or parks..."
+            selectedModel={selectedModel}
+            onModelChange={setSelectedModel}
           />
         </div>
       </div>

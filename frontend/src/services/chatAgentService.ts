@@ -288,11 +288,13 @@ class ChatAgentService {
    * @param topic The research topic
    * @param userId Optional user ID for tracking
    * @param documentId Optional document ID for document-based research
+   * @param model Optional model to use ('gpt-4o-mini' or 'gpt-41-nano')
    */
   async startDeepResearch(
     topic: string,
     userId?: string,
     documentId?: string,
+    model?: string,
   ): Promise<ApiResponse<DeepResearchStartResponse>> {
     try {
       await this.getAuthHeaders()
@@ -301,6 +303,7 @@ class ChatAgentService {
         topic,
         user_id: userId,
         document_id: documentId,
+        model,
       })
       const data = resp.data as DeepResearchStartResponse
       return { success: true, data }

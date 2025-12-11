@@ -16,11 +16,14 @@ from typing import Any
 
 from agent_framework import ChatAgent, ai_function
 from agent_framework.openai import OpenAIChatClient
-from azure.identity.aio import DefaultAzureCredential, get_bearer_token_provider
-from openai import AsyncAzureOpenAI
 
 from app.config import settings
 from app.logger import get_logger
+from app.services.openai_clients import (
+    get_client_for_model,
+    get_deployment_for_model,
+    get_gpt4o_mini_client,
+)
 from app.utils import sort_sources_by_confidence
 
 logger = get_logger(__name__)
@@ -252,56 +255,9 @@ class ChatAgentService:
         """Initialize the chat agent service."""
         self._agent: ChatAgent | None = None
         self._base_agent: ChatAgent | None = None  # Cached agent without document context
-        self._client: AsyncAzureOpenAI | None = None
-        self._credential: DefaultAzureCredential | None = None
         logger.info("ChatAgentService initialized with MAF ChatAgent")
 
-    def _get_client(self) -> AsyncAzureOpenAI:
-        """Get or create the Azure OpenAI client."""
-        if self._client is None:
-            logger.debug(
-                "creating_openai_client",
-                endpoint=settings.azure_openai_endpoint,
-                deployment=settings.azure_openai_deployment,
-                api_version=settings.azure_openai_api_version,
-                use_managed_identity=settings.use_managed_identity,
-            )
-
-            if settings.use_managed_identity:
-                self._credential = DefaultAzureCredential()
-                token_provider = get_bearer_token_provider(
-                    self._credential, "https://cognitiveservices.azure.com/.default"
-                )
-                self._client = AsyncAzureOpenAI(
-                    azure_endpoint=settings.azure_openai_endpoint,
-                    azure_ad_token_provider=token_provider,
-                    api_version=settings.azure_openai_api_version,
-                )
-                logger.info("Using managed identity for Azure OpenAI")
-            else:
-                self._client = AsyncAzureOpenAI(
-                    azure_endpoint=settings.azure_openai_endpoint,
-                    api_key=settings.azure_openai_api_key,
-                    api_version=settings.azure_openai_api_version,
-                )
-                logger.info("Using API key for Azure OpenAI")
-        return self._client
-
-    def _get_model_deployment(self, model: str | None = None) -> str:
-        """Get the deployment name for the specified model.
-
-        Args:
-            model: Model identifier ('gpt-4o-mini', 'gpt-41-nano', or None for default)
-
-        Returns:
-            Azure OpenAI deployment name
-        """
-        if model == "gpt-41-nano":
-            return settings.azure_openai_nano_deployment
-        # Default to gpt-4o-mini
-        return settings.azure_openai_deployment
-
-    def _get_agent(
+    async def _get_agent(
         self, document_context: str | None = None, model: str | None = None
     ) -> ChatAgent:
         """Get or create the ChatAgent with tools.
@@ -316,13 +272,15 @@ class ChatAgentService:
         Returns:
             ChatAgent configured with reasoning tools
         """
-        model_deployment = self._get_model_deployment(model)
+        model_deployment = get_deployment_for_model(model)
+        default_deployment = settings.get_deployment(settings.get_default_model_id())
 
         # If no document context and using default model, use cached base agent
-        if not document_context and model_deployment == settings.azure_openai_deployment:
+        if not document_context and model_deployment == default_deployment:
             if self._base_agent is None:
+                client = await get_gpt4o_mini_client()
                 chat_client = OpenAIChatClient(
-                    async_client=self._get_client(),
+                    async_client=client,
                     model_id=model_deployment,
                 )
                 self._base_agent = ChatAgent(
@@ -354,8 +312,9 @@ DOCUMENT:
 {trimmed_context}"""
             )
 
+        client = await get_client_for_model(model)
         chat_client = OpenAIChatClient(
-            async_client=self._get_client(),
+            async_client=client,
             model_id=model_deployment,
         )
 
@@ -413,7 +372,7 @@ DOCUMENT:
 
         try:
             # Get agent with optional document context and model selection
-            agent = self._get_agent(document_context, model)
+            agent = await self._get_agent(document_context, model)
 
             # Build the query with history context if provided
             query = message
@@ -484,11 +443,7 @@ DOCUMENT:
             raise
 
     async def close(self) -> None:
-        """Clean up resources."""
-        if self._credential:
-            await self._credential.close()
-        if self._client:
-            await self._client.close()
+        """Clean up resources. Clients are managed by openai_clients module."""
         logger.info("ChatAgentService closed")
 
 
