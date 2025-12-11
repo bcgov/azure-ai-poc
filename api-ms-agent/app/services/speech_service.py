@@ -447,19 +447,19 @@ class SpeechService:
         """
         # Remove code blocks
         text = re.sub(r"```[\s\S]*?```", "", text)
-        text = re.sub(r"`[^`]+`", "", text)
+        text = re.sub(r"`[^`]+?`", "", text)
 
         # Remove markdown headers (keep the text)
         text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
 
         # Remove bold/italic markers
-        text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
-        text = re.sub(r"\*([^*]+)\*", r"\1", text)
-        text = re.sub(r"__([^_]+)__", r"\1", text)
-        text = re.sub(r"_([^_]+)_", r"\1", text)
+        text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+        text = re.sub(r"\*(.+?)\*", r"\1", text)
+        text = re.sub(r"__(.+?)__", r"\1", text)
+        text = re.sub(r"_(.+?)_", r"\1", text)
 
         # Remove links, keep text
-        text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+        text = re.sub(r"\[([^\]]*?)\]\(([^)]*)\)", r"\1", text)
 
         # Remove bullet points
         text = re.sub(r"^[\-\*]\s+", "", text, flags=re.MULTILINE)
