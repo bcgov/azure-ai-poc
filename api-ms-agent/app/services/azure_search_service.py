@@ -577,7 +577,7 @@ class AzureSearchService:
                 return 0
 
             # Delete the chunks
-            delete_result = await self._search_client.delete_documents(documents=chunk_ids)
+            delete_result = await self._search_client.delete_documents(chunk_ids)
 
             deleted_count = sum(1 for r in delete_result if r.succeeded)
             logger.info(
