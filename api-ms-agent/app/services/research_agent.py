@@ -202,10 +202,15 @@ class ResearchState:
 
 # In-memory cache for current run (keyed by run_id for fast access during workflow)
 # Cosmos DB is the source of truth, this is just for performance during a single run
-_run_state_cache: dict[str, ResearchState] = {}
+# Format: {run_id: (timestamp, ResearchState)}
+_run_state_cache: dict[str, tuple[float, ResearchState]] = {}
 
 # Prompt/cost guards
 MAX_DOC_CONTEXT_CHARS = 2400
+
+# Cache configuration
+_STATE_CACHE_TTL_SECONDS = 3600  # 1 hour TTL for research state
+_STATE_CACHE_MAX_SIZE = 50  # Maximum research sessions to cache
 
 # Global web search results cache for current research session (keyed by run_id)
 _web_search_cache: dict[str, dict[str, list[dict]]] = {}
@@ -221,15 +226,60 @@ def _get_user_id() -> str:
     return _current_user_id.get()
 
 
-def _get_or_create_state(run_id: str, topic: str = "") -> ResearchState:
-    """Get or create state for a run from cache."""
-    if run_id not in _run_state_cache:
-        _run_state_cache[run_id] = ResearchState(
-            topic=topic,
-            user_id=_get_user_id(),
-            current_phase=ResearchPhase.PLANNING,
+def _prune_state_cache() -> None:
+    """Remove expired entries and enforce max size."""
+    import time as time_module
+
+    now = time_module.time()
+
+    # Remove expired entries
+    expired_keys = [
+        key
+        for key, (timestamp, _) in _run_state_cache.items()
+        if now - timestamp > _STATE_CACHE_TTL_SECONDS
+    ]
+    for key in expired_keys:
+        del _run_state_cache[key]
+        if key in _web_search_cache:
+            del _web_search_cache[key]
+
+    # Enforce max size by removing oldest entries
+    items_to_remove = 0
+    if len(_run_state_cache) > _STATE_CACHE_MAX_SIZE:
+        sorted_items = sorted(_run_state_cache.items(), key=lambda x: x[1][0])
+        items_to_remove = len(sorted_items) - _STATE_CACHE_MAX_SIZE
+        for key, _ in sorted_items[:items_to_remove]:
+            del _run_state_cache[key]
+            if key in _web_search_cache:
+                del _web_search_cache[key]
+
+    if expired_keys or items_to_remove > 0:
+        logger.debug(
+            "research_cache_pruned",
+            expired=len(expired_keys),
+            size_removed=items_to_remove,
         )
-    return _run_state_cache[run_id]
+
+
+def _get_or_create_state(run_id: str, topic: str = "") -> ResearchState:
+    """Get or create state for a run from cache with TTL."""
+    import time as time_module
+
+    _prune_state_cache()
+
+    if run_id in _run_state_cache:
+        _, state = _run_state_cache[run_id]
+        # Update timestamp on access
+        _run_state_cache[run_id] = (time_module.time(), state)
+        return state
+
+    state = ResearchState(
+        topic=topic,
+        user_id=_get_user_id(),
+        current_phase=ResearchPhase.PLANNING,
+    )
+    _run_state_cache[run_id] = (time_module.time(), state)
+    return state
 
 
 def _get_web_cache(run_id: str) -> dict[str, list[dict]]:
@@ -448,7 +498,7 @@ def save_final_report(
     # Automatically add web search sources from cache for this run
     web_cache = _get_web_cache(run_id)
     existing_urls = {s.url for s in sources if s.url}
-    for query, results in web_cache.items():
+    for _query, results in web_cache.items():
         for result in results:
             url = result.get("url")
             if url and url not in existing_urls:
@@ -870,8 +920,10 @@ When citing from this document, use:
         user_id_token = _current_user_id.set(state.user_id or "")
 
         try:
-            # Initialize state cache for this run
-            _run_state_cache[run_id] = state
+            # Initialize state cache for this run with timestamp
+            import time as time_module
+
+            _run_state_cache[run_id] = (time_module.time(), state)
 
             # Build user context for personalization
             user_context = ""
@@ -905,8 +957,10 @@ Provide comprehensive, detailed responses at each phase."""
             )
 
             # Get state from run cache (populated by ai_functions during execution)
-            cached_state = _run_state_cache.get(run_id)
-            if cached_state:
+            cached_entry = _run_state_cache.get(run_id)
+            if cached_entry:
+                # Cache stores (timestamp, state) tuple
+                _, cached_state = cached_entry
                 state.plan = cached_state.plan
                 state.findings = cached_state.findings
                 state.final_report = cached_state.final_report
@@ -957,7 +1011,7 @@ Provide comprehensive, detailed responses at each phase."""
             # Add web search sources from cache for this run
             web_cache = _get_web_cache(run_id)
             existing_urls = {s.url for s in all_sources if s.url}
-            for query, results in web_cache.items():
+            for _query, results in web_cache.items():
                 for result in results:
                     url = result.get("url")
                     if url and url not in existing_urls:

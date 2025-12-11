@@ -11,6 +11,20 @@ from app.logger import get_logger
 
 logger = get_logger(__name__)
 
+# Pre-compiled regex patterns for text cleaning (performance optimization)
+_RE_CODE_BLOCK = re.compile(r"```[\s\S]*?```")
+_RE_INLINE_CODE = re.compile(r"`[^`]+?`")
+_RE_HEADERS = re.compile(r"^#{1,6}\s+", re.MULTILINE)
+_RE_BOLD = re.compile(r"\*\*(.+?)\*\*")
+_RE_ITALIC_STAR = re.compile(r"\*(.+?)\*")
+_RE_BOLD_UNDERSCORE = re.compile(r"__(.+?)__")
+_RE_ITALIC_UNDERSCORE = re.compile(r"_(.+?)_")
+_RE_LINKS = re.compile(r"\[([^\]]*?)\]\(([^)]*)\)")
+_RE_BULLET_DASH = re.compile(r"^[\-\*]\s+", re.MULTILINE)
+_RE_BULLET_NUM = re.compile(r"^\d+\.\s+", re.MULTILINE)
+_RE_HR = re.compile(r"^---+$", re.MULTILINE)
+_RE_MULTI_NEWLINE = re.compile(r"\n{3,}")
+
 
 class SpeechService:
     """Service for text-to-speech and speech-to-text using Azure Speech SDK.
@@ -439,6 +453,8 @@ class SpeechService:
         """
         Clean text for speech synthesis by removing markdown and other formatting.
 
+        Uses pre-compiled regex patterns for better performance.
+
         Args:
             text: Raw text that may contain markdown
 
@@ -446,30 +462,30 @@ class SpeechService:
             Cleaned text suitable for TTS
         """
         # Remove code blocks
-        text = re.sub(r"```[\s\S]*?```", "", text)
-        text = re.sub(r"`[^`]+?`", "", text)
+        text = _RE_CODE_BLOCK.sub("", text)
+        text = _RE_INLINE_CODE.sub("", text)
 
         # Remove markdown headers (keep the text)
-        text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
+        text = _RE_HEADERS.sub("", text)
 
         # Remove bold/italic markers
-        text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
-        text = re.sub(r"\*(.+?)\*", r"\1", text)
-        text = re.sub(r"__(.+?)__", r"\1", text)
-        text = re.sub(r"_(.+?)_", r"\1", text)
+        text = _RE_BOLD.sub(r"\1", text)
+        text = _RE_ITALIC_STAR.sub(r"\1", text)
+        text = _RE_BOLD_UNDERSCORE.sub(r"\1", text)
+        text = _RE_ITALIC_UNDERSCORE.sub(r"\1", text)
 
         # Remove links, keep text
-        text = re.sub(r"\[([^\]]*?)\]\(([^)]*)\)", r"\1", text)
+        text = _RE_LINKS.sub(r"\1", text)
 
         # Remove bullet points
-        text = re.sub(r"^[\-\*]\s+", "", text, flags=re.MULTILINE)
-        text = re.sub(r"^\d+\.\s+", "", text, flags=re.MULTILINE)
+        text = _RE_BULLET_DASH.sub("", text)
+        text = _RE_BULLET_NUM.sub("", text)
 
         # Remove horizontal rules
-        text = re.sub(r"^---+$", "", text, flags=re.MULTILINE)
+        text = _RE_HR.sub("", text)
 
         # Remove multiple newlines
-        text = re.sub(r"\n{3,}", "\n\n", text)
+        text = _RE_MULTI_NEWLINE.sub("\n\n", text)
 
         # Remove leading/trailing whitespace
         text = text.strip()

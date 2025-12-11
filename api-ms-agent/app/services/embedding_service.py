@@ -131,6 +131,52 @@ class EmbeddingService:
             logger.error("embedding_generation_failed", error=str(e))
             raise
 
+    async def generate_embeddings_batch(
+        self, texts: list[str], batch_size: int = 16
+    ) -> list[list[float]]:
+        """
+        Generate embedding vectors for multiple texts in batches.
+
+        This is more efficient than calling generate_embedding repeatedly
+        as it reduces API round-trips.
+
+        Args:
+            texts: List of texts to embed
+            batch_size: Number of texts per API call (Azure OpenAI limit is 16)
+
+        Returns:
+            List of embedding vectors in the same order as input texts
+        """
+        if not texts:
+            return []
+
+        client = await self._get_client()
+        all_embeddings: list[list[float]] = []
+
+        try:
+            # Process in batches
+            for i in range(0, len(texts), batch_size):
+                batch = texts[i : i + batch_size]
+                response = await client.embeddings.create(
+                    model=settings.azure_openai_embedding_deployment,
+                    input=batch,
+                )
+                # Sort by index to maintain order
+                sorted_data = sorted(response.data, key=lambda x: x.index)
+                batch_embeddings = [item.embedding for item in sorted_data]
+                all_embeddings.extend(batch_embeddings)
+
+            logger.debug(
+                "batch_embeddings_generated",
+                total_texts=len(texts),
+                batches=((len(texts) - 1) // batch_size) + 1,
+            )
+            return all_embeddings
+
+        except Exception as e:
+            logger.error("batch_embedding_generation_failed", error=str(e))
+            raise
+
     def _chunk_text(
         self,
         text: str,
@@ -187,6 +233,7 @@ class EmbeddingService:
         """
         Index a document by chunking it and storing embeddings in Azure AI Search.
 
+        Uses batch embedding generation and parallel chunk storage for performance.
         Also stores document metadata in Cosmos DB for listing.
 
         Args:
@@ -200,6 +247,8 @@ class EmbeddingService:
         Returns:
             The indexed document
         """
+        import asyncio
+
         doc_id = document_id or str(uuid.uuid4())
         chunks = self._chunk_text(content, chunk_size, chunk_overlap)
 
@@ -210,20 +259,23 @@ class EmbeddingService:
             num_chunks=len(chunks),
         )
 
-        # Generate embeddings and store chunks in Azure AI Search
-        for i, chunk in enumerate(chunks):
-            embedding = await self.generate_embedding(chunk)
-            await self.search.store_document_chunk(
+        # Generate all embeddings in batches (much faster than sequential)
+        embeddings = await self.generate_embeddings_batch(chunks)
+
+        # Store chunks in parallel using asyncio.gather
+        chunk_metadata = {**(metadata or {}), "total_chunks": len(chunks)}
+        storage_tasks = [
+            self.search.store_document_chunk(
                 document_id=doc_id,
                 user_id=user_id,
                 content=chunk,
                 embedding=embedding,
                 chunk_index=i,
-                metadata={
-                    **(metadata or {}),
-                    "total_chunks": len(chunks),
-                },
+                metadata=chunk_metadata,
             )
+            for i, (chunk, embedding) in enumerate(zip(chunks, embeddings, strict=True))
+        ]
+        await asyncio.gather(*storage_tasks)
 
         # Store document metadata in Cosmos DB
         await self.cosmos.save_document_metadata(
