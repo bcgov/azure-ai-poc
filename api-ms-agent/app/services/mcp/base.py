@@ -16,6 +16,7 @@ import httpx
 from jsonschema import ValidationError as JsonSchemaValidationError
 from jsonschema import validate as jsonschema_validate
 
+from app.http_client import create_scoped_client
 from app.logger import get_logger
 
 logger = get_logger(__name__)
@@ -68,11 +69,23 @@ class MCPTool:
         name: Unique tool name
         description: Human-readable description
         input_schema: JSON Schema for tool inputs
+        _compiled_validator: Pre-compiled JSON schema validator (performance optimization)
     """
 
     name: str
     description: str
     input_schema: dict[str, Any] = field(default_factory=dict)
+    _compiled_validator: Any = field(default=None, repr=False)
+
+    def __post_init__(self):
+        """Pre-compile the JSON schema validator for performance."""
+        if self.input_schema:
+            try:
+                from jsonschema import Draft7Validator
+
+                self._compiled_validator = Draft7Validator(self.input_schema)
+            except Exception:
+                pass  # Fall back to dynamic validation
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to MCP tool specification format."""
@@ -145,13 +158,14 @@ class MCPWrapper(ABC):
         ...
 
     async def _get_client(self) -> httpx.AsyncClient:
-        """Get or create the HTTP client."""
+        """Get or create the HTTP client using centralized connection pooling."""
         if self._client is None or getattr(self._client, "is_closed", False):
-            self._client = httpx.AsyncClient(
+            self._client = create_scoped_client(
                 base_url=self.base_url,
-                timeout=httpx.Timeout(self.timeout),
+                timeout=self.timeout,
                 headers=self.headers,
-                limits=self._client_limits,
+                max_connections=self._client_limits.max_connections,
+                max_keepalive_connections=self._client_limits.max_keepalive_connections,
             )
         return self._client
 
@@ -167,12 +181,23 @@ class MCPWrapper(ABC):
     ) -> tuple[bool, str | None]:
         """Validate arguments against a tool's `input_schema` using jsonschema.
 
+        Uses pre-compiled validator when available for better performance.
+
         Returns:
             (True, None) if validation passes, otherwise (False, error_message)
         """
         if not tool or not getattr(tool, "input_schema", None):
             return True, None
+
         try:
+            # Use pre-compiled validator if available (faster)
+            if tool._compiled_validator:
+                errors = list(tool._compiled_validator.iter_errors(arguments or {}))
+                if errors:
+                    return False, str(errors[0])
+                return True, None
+
+            # Fall back to dynamic validation
             jsonschema_validate(instance=arguments or {}, schema=tool.input_schema)
             return True, None
         except JsonSchemaValidationError as e:

@@ -9,4 +9,5 @@ exec uvicorn app.main:app \
     --workers 1 \
     --server-header \
     --date-header \
-    --limit-concurrency 1000
+    --limit-concurrency 1000 \
+    --no-access-log

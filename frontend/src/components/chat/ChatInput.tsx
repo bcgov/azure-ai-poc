@@ -1,6 +1,7 @@
 import type { FC } from 'react'
 import { useRef, useEffect, useState } from 'react'
 import { Form, Button, Badge, Spinner, OverlayTrigger, Tooltip, Collapse } from 'react-bootstrap'
+import { speechRecognitionService } from '@/services/speechService'
 
 interface ChatInputProps {
   currentQuestion: string
@@ -35,6 +36,15 @@ const ChatInput: FC<ChatInputProps> = ({
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [showDeepResearchInfo, setShowDeepResearchInfo] = useState(false)
+  const [isListening, setIsListening] = useState(false)
+  const [speechSupported, setSpeechSupported] = useState(false)
+  const [speechError, setSpeechError] = useState<string | null>(null)
+  const [useAzureSpeech, setUseAzureSpeech] = useState(false)
+
+  useEffect(() => {
+    // Check if speech recognition is supported
+    setSpeechSupported(speechRecognitionService.isSupported())
+  }, [])
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -69,6 +79,60 @@ const ChatInput: FC<ChatInputProps> = ({
     return `Questions will be answered by searching across all your uploaded documents${streamingEnabled ? ' with streaming' : ''}`
   }
 
+  const handleVoiceInput = async () => {
+    if (isListening) {
+      if (useAzureSpeech) {
+        await speechRecognitionService.stopListeningAzure(
+          (result) => {
+            setCurrentQuestion(result.transcript)
+          },
+          (error) => {
+            setSpeechError(error)
+          },
+          'en-US'
+        )
+      } else {
+        speechRecognitionService.stopListening()
+      }
+      setIsListening(false)
+      return
+    }
+
+    setSpeechError(null)
+    
+    if (useAzureSpeech) {
+      const started = await speechRecognitionService.startListeningAzure(
+        (result) => {
+          setCurrentQuestion(result.transcript)
+          if (result.isFinal) {
+            setIsListening(false)
+          }
+        },
+        (error) => {
+          setSpeechError(error)
+          setIsListening(false)
+        },
+        'en-US'
+      )
+      setIsListening(started)
+    } else {
+      const started = speechRecognitionService.startListening(
+        (result) => {
+          setCurrentQuestion(result.transcript)
+          if (result.isFinal) {
+            setIsListening(false)
+          }
+        },
+        (error) => {
+          setSpeechError(error)
+          setIsListening(false)
+        },
+        'en-CA'
+      )
+      setIsListening(started)
+    }
+  }
+
   const deepResearchTooltip = (
     <Tooltip id="deep-research-tooltip">
       Click the info icon for more details about Deep Research
@@ -89,6 +153,18 @@ const ChatInput: FC<ChatInputProps> = ({
               onChange={(e) => setStreamingEnabled(e.target.checked)}
               className="small"
               disabled={deepResearchEnabled}
+            />
+          </div>
+
+          <div className="d-flex align-items-center">
+            <Form.Check
+              type="switch"
+              id="azure-speech-toggle"
+              label="Azure Speech"
+              checked={useAzureSpeech}
+              onChange={(e) => setUseAzureSpeech(e.target.checked)}
+              className="small"
+              title="Use Azure Speech Services for voice input (more accurate but requires backend)"
             />
           </div>
 
@@ -141,14 +217,14 @@ const ChatInput: FC<ChatInputProps> = ({
                 comprehensive analysis</strong> of complex topics. Unlike regular chat, it:
               </p>
               <ul className="mb-2 ps-3">
+                <li><strong>Searches the web</strong> - Fetches <em>current data</em> from the internet for up-to-date information</li>
                 <li><strong>Creates a research plan</strong> - Breaks down your topic into subtopics and research questions</li>
                 <li><strong>Gathers findings</strong> - Systematically researches each aspect with confidence scoring</li>
-                <li><strong>Synthesizes a report</strong> - Produces a comprehensive final report with citations</li>
-                <li><strong>Human-in-the-loop</strong> - You can approve or provide feedback at each stage</li>
+                <li><strong>Synthesizes a report</strong> - Produces a comprehensive final report with citations & source URLs</li>
               </ul>
               <p className="mb-0 text-muted">
-                <i className="bi bi-clock me-1"></i>
-                <em>Deep Research takes longer but provides more thorough, verifiable results for complex questions.</em>
+                <i className="bi bi-globe me-1"></i>
+                <em>Deep Research goes outbound to the web to fetch current data, ensuring your results are up-to-date.</em>
               </p>
             </div>
           </div>
@@ -161,24 +237,57 @@ const ChatInput: FC<ChatInputProps> = ({
             value={currentQuestion}
             onChange={(e) => setCurrentQuestion(e.target.value)}
             onKeyDown={onKeyPress}
-            placeholder={getPlaceholder()}
-            disabled={isLoading}
+            placeholder={isListening ? 'Listening...' : getPlaceholder()}
+            disabled={isLoading || isListening}
             style={{
               minHeight: 'clamp(2.5rem, 2.75rem, 3rem)',
               maxHeight: 'clamp(6rem, 8rem, 10rem)',
               resize: 'none',
               overflow: 'hidden',
-              paddingRight: 'clamp(3rem, 3.5rem, 4rem)',
+              paddingRight: 'clamp(5.5rem, 6rem, 6.5rem)',
             }}
-            className="form-control"
+            className={`form-control ${isListening ? 'border-danger' : ''}`}
           />
+          
+          {/* Voice Input Button */}
+          {speechSupported && (
+            <Button
+              type="button"
+              variant={isListening ? 'danger' : 'outline-secondary'}
+              onClick={handleVoiceInput}
+              disabled={isLoading || isStreaming}
+              className="position-absolute d-flex align-items-center justify-content-center p-0 border-0"
+              style={{
+                right: '3.25rem',
+                bottom: '0.5rem',
+                width: 'clamp(2rem, 2.25rem, 2.5rem)',
+                height: 'clamp(2rem, 2.25rem, 2.5rem)',
+                borderRadius: '50%',
+                transition: 'all 0.2s ease',
+                backgroundColor: isListening ? '#dc3545' : 'transparent',
+                color: isListening ? '#fff' : '#6c757d',
+              }}
+              title={isListening ? 'Stop listening' : 'Voice input'}
+            >
+              <i
+                className={`bi ${isListening ? 'bi-mic-fill' : 'bi-mic'}`}
+                style={{
+                  fontSize: 'clamp(0.875rem, 1rem, 1.125rem)',
+                  animation: isListening ? 'pulse 1s infinite' : 'none',
+                }}
+              ></i>
+            </Button>
+          )}
+          
+          {/* Send Button */}
           <Button
             type="submit"
             variant="primary"
             disabled={
               !currentQuestion.trim() ||
               isLoading ||
-              isStreaming
+              isStreaming ||
+              isListening
             }
             className="position-absolute d-flex align-items-center justify-content-center p-0 border-0"
             style={{
@@ -208,9 +317,24 @@ const ChatInput: FC<ChatInputProps> = ({
             )}
           </Button>
         </div>
+        
+        {/* Speech Error Message */}
+        {speechError && (
+          <small className="text-danger d-block mt-1">
+            <i className="bi bi-exclamation-triangle me-1"></i>
+            {speechError}
+          </small>
+        )}
+        
         <small className="text-muted">
           <i className="bi bi-info-circle me-1"></i>
           {getHelpText()}
+          {speechSupported && !isListening && (
+            <span className="ms-2">
+              <i className="bi bi-mic me-1"></i>
+              Voice input: {useAzureSpeech ? 'Azure Speech' : 'Browser'}
+            </span>
+          )}
         </small>
       </Form>
     </div>

@@ -10,7 +10,6 @@ tools instead of custom-coding ReAct loops.
 All responses MUST include source attribution for traceability.
 """
 
-import json
 from dataclasses import dataclass, field
 from textwrap import shorten
 from typing import Any
@@ -22,6 +21,7 @@ from openai import AsyncAzureOpenAI
 
 from app.config import settings
 from app.logger import get_logger
+from app.utils import sort_sources_by_confidence
 
 logger = get_logger(__name__)
 
@@ -251,6 +251,7 @@ class ChatAgentService:
     def __init__(self) -> None:
         """Initialize the chat agent service."""
         self._agent: ChatAgent | None = None
+        self._base_agent: ChatAgent | None = None  # Cached agent without document context
         self._client: AsyncAzureOpenAI | None = None
         self._credential: DefaultAzureCredential | None = None
         logger.info("ChatAgentService initialized with MAF ChatAgent")
@@ -289,17 +290,38 @@ class ChatAgentService:
     def _get_agent(self, document_context: str | None = None) -> ChatAgent:
         """Get or create the ChatAgent with tools.
 
+        Uses a cached base agent when no document context is provided
+        to avoid recreation overhead.
+
         Args:
             document_context: Optional document context to include in instructions
 
         Returns:
             ChatAgent configured with reasoning tools
         """
-        # Build instructions with optional document context
-        instructions = SYSTEM_INSTRUCTIONS
-        if document_context:
-            trimmed_context = _trim_text(document_context, MAX_DOC_CONTEXT_CHARS)
-            instructions += f"""
+        # If no document context, use cached base agent
+        if not document_context:
+            if self._base_agent is None:
+                chat_client = OpenAIChatClient(
+                    async_client=self._get_client(),
+                    model_id=settings.azure_openai_deployment,
+                )
+                self._base_agent = ChatAgent(
+                    name="Chat Agent",
+                    chat_client=chat_client,
+                    instructions=SYSTEM_INSTRUCTIONS,
+                    tools=CHAT_TOOLS,
+                    temperature=settings.llm_temperature,
+                    max_tokens=settings.llm_max_output_tokens,
+                )
+                logger.debug("Base ChatAgent cached")
+            return self._base_agent
+
+        # Document context requires fresh agent with modified instructions
+        trimmed_context = _trim_text(document_context, MAX_DOC_CONTEXT_CHARS)
+        instructions = (
+            SYSTEM_INSTRUCTIONS
+            + f"""
 
 ## DOCUMENT CONTEXT PROVIDED
 
@@ -309,8 +331,8 @@ REDACT any PII before including in your response.
 
 DOCUMENT:
 {trimmed_context}"""
+        )
 
-        # Create fresh agent (to include document context in instructions)
         chat_client = OpenAIChatClient(
             async_client=self._get_client(),
             model_id=settings.azure_openai_deployment,
@@ -325,7 +347,7 @@ DOCUMENT:
             max_tokens=settings.llm_max_output_tokens,
         )
 
-        logger.debug(f"ChatAgent created with {len(CHAT_TOOLS)} tools")
+        logger.debug("ChatAgent created with document context")
         return agent
 
     async def chat(
@@ -333,6 +355,7 @@ DOCUMENT:
         message: str,
         history: list[dict[str, str]] | None = None,
         session_id: str | None = None,
+        user_id: str | None = None,
         document_context: str | None = None,
     ) -> ChatResult:
         """
@@ -342,6 +365,7 @@ DOCUMENT:
             message: The user's message
             history: Optional conversation history
             session_id: Optional session identifier for logging
+            user_id: User's Keycloak sub for tracking and context
             document_context: Optional document context from RAG search
 
         Returns:
@@ -353,6 +377,7 @@ DOCUMENT:
         logger.info(
             "chat_request",
             session_id=session_id,
+            user_id=user_id,
             message_length=len(message),
             history_length=len(history) if history else 0,
             has_document_context=document_context is not None,
@@ -377,8 +402,8 @@ DOCUMENT:
 
             response_text = result.text if hasattr(result, "text") else str(result)
 
-            # Get tracked sources or add default
-            sources = (
+            # Get tracked sources or add default, sorted by confidence (highest first)
+            sources = sort_sources_by_confidence(
                 _chat_sources.copy()
                 if _chat_sources
                 else [
@@ -413,6 +438,7 @@ DOCUMENT:
             logger.info(
                 "chat_response",
                 session_id=session_id,
+                user_id=user_id,
                 response_length=len(chat_result.response),
                 source_count=len(chat_result.sources),
                 has_sufficient_info=chat_result.has_sufficient_info,
@@ -421,7 +447,12 @@ DOCUMENT:
             return chat_result
 
         except Exception as e:
-            logger.error("chat_error", error=str(e), session_id=session_id)
+            logger.error(
+                "chat_error",
+                error=str(e),
+                session_id=session_id,
+                user_id=user_id,
+            )
             raise
 
     async def close(self) -> None:

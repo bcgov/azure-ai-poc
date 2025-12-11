@@ -44,12 +44,13 @@
 			style-src 'self' https://fonts.googleapis.com https://use.fontawesome.com 'unsafe-inline' https://*.azurefd.net;
 			font-src 'self' https://fonts.gstatic.com;
 			img-src 'self' data: https://fonts.googleapis.com https://www.w3.org https://*.gov.bc.ca https://*.tile.openstreetmap.org https://*.azurefd.net;
+			media-src 'self' blob:;
 			frame-ancestors 'self';
 			form-action 'self';
 			block-all-mixed-content;
 			connect-src 'self' https://*.gov.bc.ca wss://*.gov.bc.ca https://*.azurefd.net;"
 		Referrer-Policy "same-origin"
-		Permissions-Policy "fullscreen=(self), camera=(), microphone=()"
+		Permissions-Policy "fullscreen=(self), camera=(), microphone=(self)"
 		Cross-Origin-Resource-Policy "cross-origin"
 		Cross-Origin-Opener-Policy "same-origin"
 	}

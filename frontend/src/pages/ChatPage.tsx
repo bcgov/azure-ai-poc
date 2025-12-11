@@ -23,6 +23,7 @@ interface ChatMessageType {
   isStreaming?: boolean
   isResearchPhase?: boolean
   researchPhase?: string
+  originalQuery?: string // For assistant messages, stores the user's query for retry
 }
 
 const ChatPage: FC = () => {
@@ -49,7 +50,8 @@ const ChatPage: FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const getFileIcon = (filename: string): string => {
+  const getFileIcon = (filename: string | undefined | null): string => {
+    if (!filename) return 'bi-file-text'
     const extension = filename.toLowerCase().split('.').pop() || ''
     switch (extension) {
       case 'pdf':
@@ -215,6 +217,7 @@ const ChatPage: FC = () => {
       isStreaming: true,
       isResearchPhase: deepResearchEnabled,
       researchPhase: deepResearchEnabled ? 'Starting research...' : undefined,
+      originalQuery: question,
     }
 
     setMessages((prev) => [...prev, userMessage, placeholderMessage])
@@ -307,6 +310,28 @@ const ChatPage: FC = () => {
     }
   }
 
+  // Retry a specific assistant message by re-sending its original query
+  const handleRetryMessage = (messageId: string, originalQuery: string) => {
+    if (isLoading || !originalQuery) return
+    
+    // Remove the assistant message being retried (keep the user message)
+    setMessages((prev) => prev.filter((msg) => msg.id !== messageId))
+    
+    // Re-submit the original query
+    void handleSubmit(originalQuery)
+  }
+
+  // Placeholder for thumbs up/down feedback - can be connected to analytics later
+  const handleThumbsUp = (messageId: string) => {
+    console.log('Thumbs up feedback for message:', messageId)
+    // TODO: Send feedback to analytics/backend
+  }
+
+  const handleThumbsDown = (messageId: string) => {
+    console.log('Thumbs down feedback for message:', messageId)
+    // TODO: Send feedback to analytics/backend
+  }
+
   const handleDeepResearch = async (
     question: string,
     messageId: string,
@@ -364,19 +389,9 @@ const ChatPage: FC = () => {
         finalContent = 'Research completed but no results were returned.'
       }
 
-      // Append sources if available
-      if (runResult.data.sources && runResult.data.sources.length > 0) {
-        finalContent += '\n\n---\n\n## 📚 Sources\n\n'
-        runResult.data.sources.forEach((source, index) => {
-          const confidence = source.confidence === 'high' ? '🟢' : source.confidence === 'medium' ? '🟡' : '🔴'
-          finalContent += `${index + 1}. **${source.source_type}** ${confidence}\n`
-          finalContent += `   - ${source.description}\n`
-          if (source.url) {
-            finalContent += `   - [Link](${source.url})\n`
-          }
-          finalContent += '\n'
-        })
-      }
+      // Append sources if available (show top 3 + count)
+      // Sources are now displayed in the structured Message component, not in markdown
+      const sourcesForMessage = runResult.data.sources || []
 
       setMessages((prev) =>
         prev.map((msg) =>
@@ -384,6 +399,7 @@ const ChatPage: FC = () => {
             ? {
                 ...msg,
                 content: finalContent,
+                sources: sourcesForMessage,
                 isStreaming: false,
                 isResearchPhase: false,
                 researchPhase: undefined,
@@ -549,6 +565,15 @@ const ChatPage: FC = () => {
                 sources={message.sources}
                 hasSufficientInfo={message.hasSufficientInfo}
                 isStreaming={message.isStreaming}
+                onRetry={message.type === 'assistant' && message.originalQuery 
+                  ? () => handleRetryMessage(message.id, message.originalQuery!) 
+                  : undefined}
+                onThumbsUp={message.type === 'assistant' 
+                  ? () => handleThumbsUp(message.id) 
+                  : undefined}
+                onThumbsDown={message.type === 'assistant' 
+                  ? () => handleThumbsDown(message.id) 
+                  : undefined}
               />
             ))}
             <div ref={messagesEndRef} />

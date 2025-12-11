@@ -13,7 +13,9 @@ from fastapi import FastAPI
 
 from app.config import settings
 from app.devui import DevUIServer, start_devui_async
+from app.http_client import close_http_client
 from app.logger import get_logger, setup_logging
+from app.middleware.access_log_middleware import AccessLogMiddleware
 from app.middleware.auth_middleware import AuthMiddleware
 from app.middleware.security_middleware import SecurityMiddleware
 from app.routers import api_router
@@ -125,7 +127,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     embedding_service = get_embedding_service()
     await embedding_service.close()
     cosmos_service = get_cosmos_db_service()
-    cosmos_service.dispose()
+    await cosmos_service.dispose()
+    azure_search_service = get_azure_search_service()
+    await azure_search_service.dispose()
+
+    # Close shared HTTP client
+    await close_http_client()
 
     if devui_server:
         devui_server.stop()
@@ -141,6 +148,11 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+
+    # Access log middleware - logs requests with timing and content length
+    # Note: This must be added first so it wraps all other middleware
+    app.add_middleware(AccessLogMiddleware)
+
     # Security middleware (equivalent to helmet)
     app.add_middleware(SecurityMiddleware)
 
@@ -161,6 +173,11 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health():
+        """Health check endpoint."""
+        return {"status": "healthy", "process": _collect_process_metrics()}
+
+    @app.get("/api/health")
+    async def api_health():
         """Health check endpoint."""
         return {"status": "healthy", "process": _collect_process_metrics()}
 

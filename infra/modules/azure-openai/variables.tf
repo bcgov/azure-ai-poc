@@ -63,3 +63,9 @@ variable "embedding_deployment_capacity" {
   type        = number
   nullable    = false
 }
+
+variable "speech_sku_name" {
+  description = "SKU name for the Azure Speech service"
+  type        = string
+  default     = "S0"
+}

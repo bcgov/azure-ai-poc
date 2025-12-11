@@ -65,7 +65,8 @@ const ChatInterface: FC = () => {
   const shouldAutoScrollOnNewMessage = useRef(true)
 
   // Helper function to get appropriate icon for file type
-  const getFileIcon = (filename: string): string => {
+  const getFileIcon = (filename: string | undefined | null): string => {
+    if (!filename) return 'bi-file-text'
     const extension = filename.toLowerCase().split('.').pop() || ''
     switch (extension) {
       case 'pdf':
@@ -384,11 +385,14 @@ const ChatInterface: FC = () => {
           finalContent = `Research completed but no findings were generated. Status: ${runResult.data.status}`
         }
 
+        // Sources are displayed in the structured Message component
+        const sourcesForMessage = runResult.data.sources || []
+
         // Update the status message with the final report
         setMessages((prev) =>
           prev.map((msg) =>
             msg.id === statusMessage.id
-              ? { ...msg, content: finalContent }
+              ? { ...msg, content: finalContent, sources: sourcesForMessage }
               : msg,
           ),
         )
@@ -956,14 +960,14 @@ const ChatInterface: FC = () => {
                       comprehensive analysis</strong> of complex topics. Unlike regular chat, it:
                     </p>
                     <ul className="mb-2 ps-3">
+                      <li><strong>Searches the web</strong> - Fetches <em>current data</em> from the internet for up-to-date information</li>
                       <li><strong>Creates a research plan</strong> - Breaks down your topic into subtopics and research questions</li>
                       <li><strong>Gathers findings</strong> - Systematically researches each aspect with confidence scoring</li>
-                      <li><strong>Synthesizes a report</strong> - Produces a comprehensive final report with citations</li>
-                      <li><strong>Human-in-the-loop</strong> - You can approve or provide feedback at each stage</li>
+                      <li><strong>Synthesizes a report</strong> - Produces a comprehensive final report with citations & source URLs</li>
                     </ul>
                     <p className="mb-0 text-muted">
-                      <i className="bi bi-clock me-1"></i>
-                      <em>Deep Research takes longer but provides more thorough, verifiable results for complex questions.</em>
+                      <i className="bi bi-globe me-1"></i>
+                      <em>Deep Research goes outbound to the web to fetch current data, ensuring your results are up-to-date.</em>
                     </p>
                   </Alert>
                 </div>
@@ -1133,7 +1137,7 @@ const ChatInterface: FC = () => {
             ></i>
             <h5>Delete Document</h5>
             <p className="text-muted">
-              Are you sure you want to delete "{documentToDelete?.title}"?
+              Are you sure you want to delete "{documentToDelete?.title || 'this document'}"?
             </p>
             <p className="text-warning small">
               <i className="bi bi-exclamation-triangle me-1"></i>

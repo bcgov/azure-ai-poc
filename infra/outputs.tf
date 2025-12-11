@@ -21,7 +21,7 @@ output "azure_openai_embedding_deployment_name" {
 }
 
 # Azure AI Search outputs (module disabled)
-/* output "azure_search_service_name" {
+output "azure_search_service_name" {
   description = "The name of the Azure AI Search service"
   value       = module.azure_ai_search.search_service_name
 }
@@ -29,7 +29,7 @@ output "azure_openai_embedding_deployment_name" {
 output "azure_search_service_url" {
   description = "The URL of the Azure AI Search service"
   value       = module.azure_ai_search.search_service_url
-} */
+}
 
 # Azure Document Intelligence outputs
 output "azure_document_intelligence_endpoint" {
@@ -42,3 +42,11 @@ output "azure_document_intelligence_host" {
   description = "The host portion of the Azure Document Intelligence endpoint"
   value       = module.document_intelligence.host
 }
+
+# Azure Speech Services outputs
+output "azure_speech_endpoint" {
+  description = "The Azure Speech service endpoint"
+  value       = module.azure_openai.speech_endpoint
+  sensitive   = false
+}
+

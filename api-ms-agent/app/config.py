@@ -29,14 +29,14 @@ class Settings(BaseSettings):
     azure_openai_embedding_deployment: str = "text-embedding-3-large"
 
     # LLM Configuration - Low temperature for high confidence responses
-    llm_temperature: float = 0.1  # Low temperature for consistent, high-confidence responses
-    llm_max_output_tokens: int = 900  # Cap responses to control cost/token usage
+    llm_temperature: float = 0.0  # Low temperature for consistent, high-confidence responses
+    llm_max_output_tokens: int = 5000  # Cap responses to control cost/token usage
 
     # Dev UI (Agent Framework DevUI) settings
     devui_enabled: bool = True
     devui_host: str = "localhost"
     devui_port: int = 8000
-    devui_auto_open: bool = True
+    devui_auto_open: bool = False
     devui_mode: str = "developer"  # developer | user
 
     # Cosmos DB settings - for chat history, metadata, and workflow persistence
@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     azure_document_intelligence_endpoint: str = ""
     azure_document_intelligence_key: str = ""  # Optional if using managed identity
 
+    # Azure Speech Services settings (for TTS)
+    azure_speech_key: str = ""
+    azure_speech_region: str = "canadacentral"
+    azure_speech_endpoint: str = ""
     # MCP base URLs for BC APIs (override defaults if needed)
     geocoder_base_url: str = ""
     orgbook_base_url: str = ""

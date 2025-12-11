@@ -71,8 +71,21 @@ class WorkflowStatusResponse(BaseModel):
     pending_approvals: int
 
 
+class SourceInfo(BaseModel):
+    """Source citation information - MANDATORY for traceability."""
+
+    source_type: str = Field(
+        ..., description="Type of source: 'llm_knowledge', 'document', 'web', 'api'"
+    )
+    description: str = Field(..., description="Description of the source")
+    confidence: str = Field(
+        default="medium", description="Confidence level: 'high', 'medium', 'low'"
+    )
+    url: str | None = Field(default=None, description="URL of the source if available")
+
+
 class WorkflowResultResponse(BaseModel):
-    """Response with full workflow results."""
+    """Response with full workflow results - includes mandatory source citations."""
 
     run_id: str
     status: str
@@ -80,6 +93,14 @@ class WorkflowResultResponse(BaseModel):
     plan: dict | None = None
     findings: list[dict] = []
     final_report: str = ""
+    sources: list[SourceInfo] = Field(
+        default_factory=list,
+        description="Sources used in the research (REQUIRED for traceability)",
+    )
+    has_sufficient_info: bool = Field(
+        default=True, description="Whether sufficient information was available"
+    )
+    message: str | None = None
     workflow_state: str | None = None
     error: str | None = None
 
@@ -121,10 +142,8 @@ ResearchServiceDep = Annotated[DeepResearchAgentService, Depends(get_research_se
     summary="Start a new research workflow",
     description="""
     Start a new deep research workflow using the Agent Framework SDK.
-    
     This creates a new workflow run and returns the run_id.
     Use the /run/{run_id} endpoint to execute the workflow.
-    
     If document_id is provided, the research will thoroughly scan the document.
     """,
 )
@@ -135,12 +154,6 @@ async def start_research(
 ) -> WorkflowStartResponse:
     """Start a new research workflow."""
     user_id = current_user.sub if current_user else request.user_id
-    logger.info(
-        "starting_research_workflow",
-        topic=request.topic,
-        user_id=user_id,
-        document_id=request.document_id,
-    )
 
     try:
         result = await service.start_research(

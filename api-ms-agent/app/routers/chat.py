@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from app.auth.dependencies import get_current_user_from_request
 from app.auth.models import KeycloakUser
+from app.logger import get_logger
 from app.services.azure_search_service import (
     AzureSearchService,
     get_azure_search_service,
@@ -16,6 +17,9 @@ from app.services.azure_search_service import (
 from app.services.chat_agent import ChatAgentService, get_chat_agent_service
 from app.services.cosmos_db_service import CosmosDbService, get_cosmos_db_service
 from app.services.embedding_service import EmbeddingService, get_embedding_service
+from app.utils import sort_source_dicts_by_confidence
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 
@@ -94,6 +98,15 @@ async def chat(
     """
     session_id = request.session_id or str(uuid4())
     user_id = current_user.sub
+
+    logger.info(
+        "chat_request_received",
+        user_id=user_id,
+        session_id=session_id,
+        message_preview=request.message[:100],
+        has_history=request.history is not None,
+        document_id=request.document_id,
+    )
 
     # If no history provided but session_id exists, try to load from Cosmos DB
     history = None
@@ -175,6 +188,7 @@ async def chat(
             message=request.message,
             history=history,
             session_id=session_id,
+            user_id=user_id,
             document_context=document_context,
         )
 
@@ -185,7 +199,9 @@ async def chat(
 
         if document_sources:
             # Use document sources from RAG search (more accurate citations)
-            for doc_src in document_sources:
+            # Sort by confidence (highest first)
+            sorted_doc_sources = sort_source_dicts_by_confidence(document_sources)
+            for doc_src in sorted_doc_sources:
                 sources.append(
                     SourceInfoResponse(
                         source_type=doc_src["source_type"],
@@ -196,6 +212,7 @@ async def chat(
                 )
         else:
             # No document context - use agent's LLM knowledge sources
+            # Sources are already sorted in the chat_agent service
             for src in result.sources:
                 sources.append(
                     SourceInfoResponse(
@@ -235,6 +252,14 @@ async def chat(
             sources=all_sources,
         )
 
+        logger.info(
+            "chat_request_completed",
+            user_id=user_id,
+            session_id=session_id,
+            source_count=len(sources),
+            has_sufficient_info=result.has_sufficient_info,
+        )
+
         return ChatResponse(
             response=result.response,
             session_id=session_id,
@@ -243,6 +268,12 @@ async def chat(
         )
 
     except Exception as e:
+        logger.error(
+            "chat_request_failed",
+            user_id=user_id,
+            session_id=session_id,
+            error=str(e),
+        )
         raise HTTPException(status_code=500, detail=f"Chat error: {str(e)}") from e
 
 

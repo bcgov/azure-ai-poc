@@ -1,10 +1,106 @@
 """Structured logging configuration using structlog."""
 
+import inspect
 import logging
+import os
+import socket
 
 import structlog
 
 from app.config import settings
+
+# Cache hostname and PID at module load time (they don't change)
+_HOSTNAME = socket.gethostname()
+_PID = os.getpid()
+
+# Performance setting: caller info adds ~5-10μs overhead per log call
+# Only enable in debug mode or via explicit config
+_ENABLE_CALLER_INFO = settings.debug
+
+
+def _add_caller_info(
+    logger: logging.Logger,
+    method_name: str,
+    event_dict: dict,
+) -> dict:
+    """
+    Add caller information (class, method, line number) to the log event.
+
+    This is a performance-sensitive function that walks the call stack.
+    Only enabled in debug mode to avoid production overhead.
+    """
+    # Skip caller info in production for performance
+    if not _ENABLE_CALLER_INFO:
+        return event_dict
+
+    # Walk up the stack to find the actual caller (skip structlog internals)
+    frame = inspect.currentframe()
+    try:
+        # Skip frames: _add_caller_info -> structlog internals -> actual caller
+        # Typically need to go up 6-8 frames to get past structlog
+        for _ in range(10):
+            if frame is None:
+                break
+            frame = frame.f_back
+            if frame is None:
+                break
+
+            # Skip structlog and logging internals
+            module = frame.f_globals.get("__name__", "")
+            if module.startswith(("structlog", "logging", "app.logger")):
+                continue
+
+            # Found the actual caller
+            func_name = frame.f_code.co_name
+            lineno = frame.f_lineno
+            filename = os.path.basename(frame.f_code.co_filename)
+
+            # Try to get class name if inside a method
+            local_vars = frame.f_locals
+            class_name = None
+            if "self" in local_vars:
+                class_name = type(local_vars["self"]).__name__
+            elif "cls" in local_vars:
+                class_name = local_vars["cls"].__name__
+
+            # Build location string
+            if class_name:
+                event_dict["caller"] = f"{filename}:{class_name}.{func_name}:{lineno}"
+            else:
+                event_dict["caller"] = f"{filename}:{func_name}:{lineno}"
+            break
+    finally:
+        del frame
+
+    return event_dict
+
+
+def _format_log_message(
+    logger: logging.Logger,
+    method_name: str,
+    event_dict: dict,
+) -> str:
+    """
+    Format log messages to match Uvicorn access log style.
+
+    Produces output like: INFO:     [hostname:pid] [file:Class.method:line] event_name key=value
+    """
+    level = event_dict.pop("level", "info").upper()
+    event = event_dict.pop("event", "")
+    caller = event_dict.pop("caller", "")
+
+    # Format remaining context as key=value pairs
+    context_parts = [f"{k}={v}" for k, v in event_dict.items()]
+    context_str = " ".join(context_parts)
+
+    # Build the log line
+    prefix = f"{level}:     [{_HOSTNAME}:{_PID}]"
+    if caller:
+        prefix = f"{prefix} [{caller}]"
+
+    if context_str:
+        return f"{prefix} {event} {context_str}"
+    return f"{prefix} {event}"
 
 
 def setup_logging() -> None:
@@ -14,19 +110,25 @@ def setup_logging() -> None:
     Sets up structured logging with:
     - Context variable merging for request context
     - Log level filtering based on DEBUG setting
-    - ISO timestamp formatting
-    - Pretty console output in development
+    - Clean output matching Uvicorn access log style
     """
     # Set log level based on debug setting
     # 0 = NOTSET (all), 10 = DEBUG, 20 = INFO
     log_level = logging.DEBUG if settings.debug else logging.INFO
 
+    # Disable Uvicorn's default access logs (we use our own middleware)
+    # This must be done here before uvicorn fully initializes
+    uvicorn_access = logging.getLogger("uvicorn.access")
+    uvicorn_access.handlers = []
+    uvicorn_access.propagate = False
+    uvicorn_access.disabled = True
+
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,
             structlog.processors.add_log_level,
-            structlog.processors.TimeStamper(fmt="iso"),
-            structlog.dev.ConsoleRenderer(),
+            _add_caller_info,
+            _format_log_message,
         ],
         wrapper_class=structlog.make_filtering_bound_logger(log_level),
         context_class=dict,
