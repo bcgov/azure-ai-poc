@@ -41,6 +41,12 @@ variable "azure_openai_deployment_name" {
   default     = "gpt-4o-mini"
 }
 
+variable "azure_openai_nano_deployment_name" {
+  description = "Azure OpenAI GPT-4.1 Nano model deployment name"
+  type        = string
+  default     = "gpt-4.1-nano"
+}
+
 variable "azure_openai_embedding_deployment" {
   description = "Azure OpenAI embedding model deployment name"
   type        = string
@@ -153,6 +159,12 @@ variable "openai_sku_name" {
 
 variable "openai_gpt_deployment_capacity" {
   description = "Capacity for the GPT model deployment"
+  type        = number
+  default     = 10000
+}
+
+variable "openai_gpt_nano_deployment_capacity" {
+  description = "Capacity for the GPT-4.1 Nano model deployment"
   type        = number
   default     = 10000
 }
