@@ -95,6 +95,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await _safe_init("cosmos_db", cosmos_service._initialize_client)
     await _safe_init("azure_search", azure_search_service._initialize_client)
 
+    # Initialize Document Intelligence service (eagerly create client)
+    from app.services.document_intelligence_service import (
+        get_document_intelligence_service,
+    )
+
+    doc_intel_service = get_document_intelligence_service()
+    await _safe_init("document_intelligence", doc_intel_service._get_client)
+
     # Warm up centralized OpenAI clients (singleton pattern - initializes once)
     await _safe_init("embedding_client", get_embedding_client)
 
@@ -134,6 +142,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Close embedding service
     await embedding_service.close()
+
+    # Close Document Intelligence service
+    await doc_intel_service.close()
 
     # Close infrastructure services
     await cosmos_service.dispose()
