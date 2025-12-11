@@ -296,7 +296,7 @@ class AzureSearchService:
                 batch = documents[i : i + batch_size]
                 batch_num = (i // batch_size) + 1
 
-                result = await self._search_client.upload_documents(documents=batch)
+                result = await self._search_client.upload_documents(batch)
                 batch_success = sum(1 for r in result if r.succeeded)
                 success_count += batch_success
 
