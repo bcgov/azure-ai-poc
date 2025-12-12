@@ -58,8 +58,13 @@ get_or_create_sp_object_id() {
 
 sanitize_mail_nickname() {
   local s="$1"
-  # NOTE: Azure AD group creation requires a mailNickname. We use a tiny Python snippet
-  # (instead of jq/sed edge cases) to reliably strip non-alphanumerics and cap length.
+  # NOTE: Entra group creation requires a mailNickname.
+  # Example:
+  #   displayName:  azure-ai-poc-dev-ai-poc-participant
+  #   mailNickname: azureaipocdevaipocparticipant
+  # We use a tiny Python snippet (instead of sed/jq edge cases) to:
+  #   - strip non-alphanumerics consistently
+  #   - cap length to a safe maximum
   python - <<PY
 import re
 s = ${s@Q}

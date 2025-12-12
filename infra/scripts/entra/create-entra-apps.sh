@@ -88,12 +88,22 @@ az rest --method GET \
 
 # NOTE: This embedded Python snippet exists because Azure CLI doesn't provide a clean,
 # idempotent way to *merge/update nested JSON* for Entra app configuration (OAuth scopes
-# and appRoles). We:
+# and appRoles).
+#
+# What we do:
 #   1) GET the current application object via Microsoft Graph
 #   2) Use Python to add missing items (scope + roles) while preserving existing ones
 #   3) PATCH only the fields we changed back via Microsoft Graph
 #
-# This avoids brittle bash quoting/jq gymnastics and keeps reruns safe.
+# Why Python here (instead of jq/sed):
+#   - We need to generate UUIDs for new scope/role IDs
+#   - We must preserve existing scopes/roles on reruns (safe/idempotent)
+#   - It's far less brittle than trying to quote/merge deep JSON in bash
+#
+# Multi-environment tip:
+#   - Keep environments isolated by suffixing names in the CLI caller, e.g.
+#       --app-prefix "azure-ai-poc-dev" --api-app-name "azure-ai-poc-dev-api"
+#     so each env gets its own app registration and roles.
 python - "$tmp_in" "$tmp_patch" <<'PY'
 import json
 import sys
