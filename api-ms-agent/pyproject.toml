@@ -17,6 +17,7 @@ dependencies = [
     "openai>=2.8.1",
     "pydantic-settings>=2.12.0",
     "python-dotenv>=1.2.1",
+    "PyJWT>=2.10.1",
     "python-jose[cryptography]>=3.5.0",
     "structlog>=25.5.0",
     "uvicorn>=0.38.0",
@@ -24,6 +25,7 @@ dependencies = [
     "agent-framework-devui>=1.0.0b251120",
     "azure-cognitiveservices-speech>=1.47.0",
 ]
+
 
 [dependency-groups]
 dev = [
