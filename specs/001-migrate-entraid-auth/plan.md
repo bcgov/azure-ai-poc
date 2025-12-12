@@ -218,9 +218,9 @@ infra/
 **Status**: ✅ COMPLETE  
 
 **Deliverables**:
-- [data-model.md](data-model.md): Auth entities (EntraUser, EntraToken, RoleMapping, EntraConfig)
 - [contracts/auth-api.md](contracts/auth-api.md): OpenAPI spec, error responses, contract examples
 - [quickstart.md](quickstart.md): Dev setup, code examples, testing guide
+- **Note**: No data model—Entra ID is source of truth; no database persistence for auth data
 
 ---
 
