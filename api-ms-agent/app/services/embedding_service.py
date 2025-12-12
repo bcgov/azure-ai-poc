@@ -14,9 +14,6 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from azure.identity.aio import DefaultAzureCredential, get_bearer_token_provider
-from openai import AsyncAzureOpenAI
-
 from app.config import settings
 from app.logger import get_logger
 from app.services.azure_search_service import (
@@ -29,8 +26,18 @@ from app.services.cosmos_db_service import (
     CosmosDbService,
     get_cosmos_db_service,
 )
+from app.services.document_intelligence_service import ParagraphWithPage
+from app.services.openai_clients import get_embedding_client
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class ChunkWithPage:
+    """A text chunk with its associated page number."""
+
+    content: str
+    page_number: int
 
 
 @dataclass
@@ -74,36 +81,9 @@ class EmbeddingService:
             search_service: Optional Azure Search service instance for vector operations
             cosmos_service: Optional Cosmos DB service instance for metadata
         """
-        self._client: AsyncAzureOpenAI | None = None
-        self._credential: DefaultAzureCredential | None = None
         self.search = search_service or get_azure_search_service()
         self.cosmos = cosmos_service or get_cosmos_db_service()
         logger.info("EmbeddingService initialized with Azure AI Search backend")
-
-    async def _get_client(self) -> AsyncAzureOpenAI:
-        """Get or create the Azure OpenAI client for embeddings."""
-        if self._client is None:
-            endpoint = settings.azure_openai_embedding_endpoint or settings.azure_openai_endpoint
-
-            if settings.use_managed_identity:
-                self._credential = DefaultAzureCredential()
-                token_provider = get_bearer_token_provider(
-                    self._credential, "https://cognitiveservices.azure.com/.default"
-                )
-                self._client = AsyncAzureOpenAI(
-                    azure_endpoint=endpoint,
-                    azure_ad_token_provider=token_provider,
-                    api_version=settings.azure_openai_api_version,
-                )
-                logger.info("Using managed identity for embeddings")
-            else:
-                self._client = AsyncAzureOpenAI(
-                    azure_endpoint=endpoint,
-                    api_key=settings.azure_openai_api_key,
-                    api_version=settings.azure_openai_api_version,
-                )
-                logger.info("Using API key for embeddings")
-        return self._client
 
     async def generate_embedding(self, text: str) -> list[float]:
         """
@@ -115,7 +95,7 @@ class EmbeddingService:
         Returns:
             The embedding vector
         """
-        client = await self._get_client()
+        client = await get_embedding_client()
 
         try:
             response = await client.embeddings.create(
@@ -156,7 +136,7 @@ class EmbeddingService:
         if not texts:
             return []
 
-        client = await self._get_client()
+        client = await get_embedding_client()
 
         async def process_batch(batch: list[str]) -> list[list[float]]:
             """Process a single batch of texts."""
@@ -241,6 +221,65 @@ class EmbeddingService:
         logger.debug("text_chunked", original_length=len(text), num_chunks=len(chunks))
         return chunks
 
+    def _chunk_paragraphs_with_pages(
+        self,
+        paragraphs: list[ParagraphWithPage],
+        chunk_size: int = DEFAULT_CHUNK_SIZE,
+        overlap: int = DEFAULT_CHUNK_OVERLAP,
+    ) -> list[ChunkWithPage]:
+        """
+        Chunk paragraphs while preserving page numbers.
+
+        Combines paragraphs into chunks up to chunk_size, tracking the page number
+        of the first paragraph in each chunk for citation purposes.
+
+        Args:
+            paragraphs: List of paragraphs with page numbers
+            chunk_size: Maximum size of each chunk
+            overlap: Number of characters to overlap between chunks
+
+        Returns:
+            List of chunks with page numbers
+        """
+        if not paragraphs:
+            return []
+
+        chunks_with_pages: list[ChunkWithPage] = []
+        current_chunk = ""
+        current_page = paragraphs[0].page_number if paragraphs else 1
+
+        for para in paragraphs:
+            # If adding this paragraph exceeds chunk_size, finalize current chunk
+            if current_chunk and len(current_chunk) + len(para.content) + 2 > chunk_size:
+                if current_chunk.strip():
+                    chunks_with_pages.append(
+                        ChunkWithPage(content=current_chunk.strip(), page_number=current_page)
+                    )
+                # Start new chunk with overlap from the end of the current chunk
+                if overlap > 0 and len(current_chunk) > overlap:
+                    current_chunk = current_chunk[-overlap:] + "\n\n" + para.content
+                else:
+                    current_chunk = para.content
+                current_page = para.page_number
+            else:
+                # Append paragraph to current chunk
+                if not current_chunk:
+                    current_page = para.page_number
+                current_chunk = (current_chunk + "\n\n" + para.content).strip()
+
+        # Don't forget the last chunk
+        if current_chunk.strip():
+            chunks_with_pages.append(
+                ChunkWithPage(content=current_chunk.strip(), page_number=current_page)
+            )
+
+        logger.debug(
+            "paragraphs_chunked_with_pages",
+            num_paragraphs=len(paragraphs),
+            num_chunks=len(chunks_with_pages),
+        )
+        return chunks_with_pages
+
     async def index_document(
         self,
         content: str,
@@ -249,6 +288,7 @@ class EmbeddingService:
         metadata: dict[str, Any] | None = None,
         chunk_size: int = DEFAULT_CHUNK_SIZE,
         chunk_overlap: int = DEFAULT_CHUNK_OVERLAP,
+        paragraphs_with_pages: list[ParagraphWithPage] | None = None,
     ) -> Document:
         """
         Index a document by chunking it and storing embeddings in Azure AI Search.
@@ -263,18 +303,29 @@ class EmbeddingService:
             metadata: Optional document metadata
             chunk_size: Size of each chunk
             chunk_overlap: Overlap between chunks
+            paragraphs_with_pages: Optional paragraphs with page numbers for page-aware chunking
 
         Returns:
             The indexed document
         """
         doc_id = document_id or str(uuid.uuid4())
-        chunks = self._chunk_text(content, chunk_size, chunk_overlap)
+
+        # Use page-aware chunking if paragraphs with pages are provided
+        chunks_with_pages: list[ChunkWithPage] | None = None
+        if paragraphs_with_pages:
+            chunks_with_pages = self._chunk_paragraphs_with_pages(
+                paragraphs_with_pages, chunk_size, chunk_overlap
+            )
+            chunks = [c.content for c in chunks_with_pages]
+        else:
+            chunks = self._chunk_text(content, chunk_size, chunk_overlap)
 
         logger.info(
             "indexing_document",
             document_id=doc_id,
             content_length=len(content),
             num_chunks=len(chunks),
+            has_page_info=chunks_with_pages is not None,
         )
 
         # Generate all embeddings in batches (batch_size=2048 for Azure OpenAI)
@@ -283,19 +334,41 @@ class EmbeddingService:
         # Build DocumentChunk objects for bulk upload
         now = datetime.now(UTC)
         chunk_metadata = {**(metadata or {}), "total_chunks": len(chunks)}
-        document_chunks = [
-            DocumentChunk(
-                id=f"{doc_id}_chunk_{i}",
-                document_id=doc_id,
-                user_id=user_id,
-                content=chunk,
-                embedding=embedding,
-                chunk_index=i,
-                metadata=chunk_metadata,
-                created_at=now,
-            )
-            for i, (chunk, embedding) in enumerate(zip(chunks, embeddings, strict=True))
-        ]
+
+        if chunks_with_pages:
+            # Use page numbers from chunking
+            document_chunks = [
+                DocumentChunk(
+                    id=f"{doc_id}_chunk_{i}",
+                    document_id=doc_id,
+                    user_id=user_id,
+                    content=chunk_with_page.content,
+                    embedding=embedding,
+                    chunk_index=i,
+                    page_number=chunk_with_page.page_number,
+                    metadata=chunk_metadata,
+                    created_at=now,
+                )
+                for i, (chunk_with_page, embedding) in enumerate(
+                    zip(chunks_with_pages, embeddings, strict=True)
+                )
+            ]
+        else:
+            # No page info available
+            document_chunks = [
+                DocumentChunk(
+                    id=f"{doc_id}_chunk_{i}",
+                    document_id=doc_id,
+                    user_id=user_id,
+                    content=chunk,
+                    embedding=embedding,
+                    chunk_index=i,
+                    page_number=None,
+                    metadata=chunk_metadata,
+                    created_at=now,
+                )
+                for i, (chunk, embedding) in enumerate(zip(chunks, embeddings, strict=True))
+            ]
 
         # Bulk upload chunks to Azure Search (batched at 1000 per request)
         await self.search.bulk_store_chunks(document_chunks)
@@ -423,11 +496,7 @@ class EmbeddingService:
         return documents
 
     async def close(self) -> None:
-        """Clean up resources."""
-        if self._credential:
-            await self._credential.close()
-        if self._client:
-            await self._client.close()
+        """Clean up resources. Clients are managed by openai_clients module."""
         logger.info("EmbeddingService closed")
 
 

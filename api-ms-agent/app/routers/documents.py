@@ -177,6 +177,7 @@ async def upload_document(
             },
             chunk_size=1000,
             chunk_overlap=200,
+            paragraphs_with_pages=result.paragraphs_with_pages,
         )
 
         logger.info(

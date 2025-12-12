@@ -39,6 +39,25 @@ resource "azurerm_cognitive_deployment" "gpt4o_mini" {
   depends_on = [azurerm_cognitive_account.openai]
 }
 
+# GPT-4.1 Nano model deployment
+resource "azurerm_cognitive_deployment" "gpt41_nano" {
+  name                 = var.gpt_nano_deployment_name
+  cognitive_account_id = azurerm_cognitive_account.openai.id
+
+  model {
+    format  = "OpenAI"
+    name    = "gpt-4.1-nano"
+    version = "2025-04-14"
+  }
+
+  sku {
+    name     = "GlobalStandard"
+    capacity = var.gpt_nano_deployment_capacity
+  }
+
+  depends_on = [azurerm_cognitive_account.openai, azurerm_cognitive_deployment.gpt4o_mini]
+}
+
 # Text embedding model deployment (large)
 resource "azurerm_cognitive_deployment" "text_embedding_large" {
   name                 = var.embedding_deployment_name

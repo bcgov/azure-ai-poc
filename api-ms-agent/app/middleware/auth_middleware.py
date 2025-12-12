@@ -30,7 +30,7 @@ EXCLUDED_ROUTES: set[str] = {
 }
 
 # Route prefixes that don't require authentication
-EXCLUDED_PREFIXES: tuple[str, ...] = ("/docs", "/redoc", "/", "/health", "/api/health")
+EXCLUDED_PREFIXES: tuple[str, ...] = ("/docs", "/redoc", "/health", "/api/health")
 
 
 class AuthMiddleware(BaseHTTPMiddleware):

@@ -1,6 +1,9 @@
 import type { FC } from 'react'
 import { useRef, useEffect, useState } from 'react'
 import { speechRecognitionService } from '@/services/speechService'
+import { fetchModels, type ModelInfo } from '@/services/modelsService'
+
+type ModelId = string
 
 interface InputProps {
   value: string
@@ -10,8 +13,12 @@ interface InputProps {
   placeholder?: string
   onUploadClick?: () => void
   selectedDocument?: string | null
+  selectedDocumentName?: string | null
+  onClearDocument?: () => void
   deepResearchEnabled?: boolean
   onDeepResearchChange?: (enabled: boolean) => void
+  selectedModel?: ModelId
+  onModelChange?: (model: ModelId) => void
 }
 
 const Input: FC<InputProps> = ({
@@ -22,19 +29,52 @@ const Input: FC<InputProps> = ({
   placeholder = 'Ask anything',
   onUploadClick,
   selectedDocument,
+  selectedDocumentName,
+  onClearDocument,
   deepResearchEnabled = false,
   onDeepResearchChange,
+  selectedModel = 'gpt-4o-mini',
+  onModelChange,
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [showResearchInfo, setShowResearchInfo] = useState(false)
   const [isListening, setIsListening] = useState(false)
   const [speechSupported, setSpeechSupported] = useState(false)
   const [useAzureSpeech, setUseAzureSpeech] = useState(false)
+  const [showModelDropdown, setShowModelDropdown] = useState(false)
+  const [models, setModels] = useState<ModelInfo[]>([])
+
+  // Fetch available models from API on mount
+  useEffect(() => {
+    fetchModels()
+      .then(setModels)
+      .catch((err) => {
+        console.error('Failed to fetch models:', err)
+        // Fallback to hardcoded defaults if API fails
+        setModels([
+          { id: 'gpt-4o-mini', deployment: 'gpt-4o-mini', display_name: 'GPT-4o mini', description: '', is_default: true },
+          { id: 'gpt-41-nano', deployment: 'gpt-4.1-nano', display_name: 'GPT-4.1 Nano', description: '', is_default: false },
+        ])
+      })
+  }, [])
 
   useEffect(() => {
     // Check if speech recognition is supported
     setSpeechSupported(speechRecognitionService.isSupported())
   }, [])
+
+  // Handle escape key to close modal
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && showResearchInfo) {
+        setShowResearchInfo(false)
+      }
+    }
+    if (showResearchInfo) {
+      document.addEventListener('keydown', handleEscape)
+    }
+    return () => document.removeEventListener('keydown', handleEscape)
+  }, [showResearchInfo])
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -99,57 +139,78 @@ const Input: FC<InputProps> = ({
 
   return (
     <div className="copilot-input-area">
-      {/* Deep Research Info Panel */}
+      {/* Deep Research Info Modal */}
       {showResearchInfo && (
         <div 
+          onClick={() => setShowResearchInfo(false)}
           style={{
-            background: 'linear-gradient(135deg, #003366 0%, #1a5a96 100%)',
-            borderRadius: '0.75rem',
-            padding: '1rem 1.25rem',
-            marginBottom: '0.75rem',
-            color: 'white',
-            fontSize: '0.875rem',
-            boxShadow: '0 4px 15px rgba(0, 51, 102, 0.3)',
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
           }}
         >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <div style={{ fontWeight: 600, marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <i className="bi bi-search-heart"></i>
-                About Deep Research
-              </div>
-              <p style={{ margin: '0 0 0.75rem 0', opacity: 0.95, lineHeight: 1.5 }}>
-                Deep Research uses an AI-powered multi-phase workflow for comprehensive analysis:
-              </p>
-              <ul style={{ margin: 0, paddingLeft: '1.25rem', opacity: 0.9, lineHeight: 1.6 }}>
-                <li><strong>Web Search:</strong> Fetches <em>current data</em> from the internet for up-to-date information</li>
-                <li><strong>Planning:</strong> Creates a research plan with questions and methodology</li>
-                <li><strong>Research:</strong> Gathers findings on each subtopic with confidence levels</li>
-                <li><strong>Synthesis:</strong> Produces a comprehensive report with citations & source URLs</li>
-              </ul>
-              <p style={{ margin: '0.75rem 0 0 0', opacity: 0.85, fontSize: '0.8rem' }}>
-                <i className="bi bi-globe me-1"></i>
-                Goes outbound to the web for current data, ensuring results are up-to-date.
-              </p>
-            </div>
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'linear-gradient(135deg, #003366 0%, #1a5a96 100%)',
+              borderRadius: '1rem',
+              padding: '1.5rem 2rem',
+              color: 'white',
+              fontSize: '0.9rem',
+              boxShadow: '0 8px 32px rgba(0, 51, 102, 0.4)',
+              maxWidth: '500px',
+              width: '90%',
+              position: 'relative',
+            }}
+          >
             <button
               onClick={() => setShowResearchInfo(false)}
               style={{
+                position: 'absolute',
+                top: '1rem',
+                right: '1rem',
                 background: 'rgba(255,255,255,0.2)',
                 border: 'none',
                 borderRadius: '50%',
-                width: '24px',
-                height: '24px',
+                width: '28px',
+                height: '28px',
                 color: 'white',
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                flexShrink: 0,
               }}
+              title="Close (Esc)"
             >
-              <i className="bi bi-x"></i>
+              <i className="bi bi-x-lg"></i>
             </button>
+            <div style={{ fontWeight: 600, marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1.1rem' }}>
+              <i className="bi bi-search-heart"></i>
+              About Deep Research
+            </div>
+            <p style={{ margin: '0 0 1rem 0', opacity: 0.95, lineHeight: 1.6 }}>
+              Deep Research uses an AI-powered multi-phase workflow for comprehensive analysis:
+            </p>
+            <ul style={{ margin: 0, paddingLeft: '1.25rem', opacity: 0.9, lineHeight: 1.8 }}>
+              <li><strong>Web Search:</strong> Fetches <em>current data</em> from the internet for up-to-date information</li>
+              <li><strong>Planning:</strong> Creates a research plan with questions and methodology</li>
+              <li><strong>Research:</strong> Gathers findings on each subtopic with confidence levels</li>
+              <li><strong>Synthesis:</strong> Produces a comprehensive report with citations & source URLs</li>
+            </ul>
+            <p style={{ margin: '1rem 0 0 0', opacity: 0.85, fontSize: '0.8rem' }}>
+              <i className="bi bi-globe me-1"></i>
+              Goes outbound to the web for current data, ensuring results are up-to-date.
+            </p>
+            <p style={{ margin: '0.75rem 0 0 0', opacity: 0.6, fontSize: '0.75rem', textAlign: 'center' }}>
+              Press <kbd style={{ background: 'rgba(255,255,255,0.2)', padding: '0.125rem 0.375rem', borderRadius: '0.25rem' }}>Esc</kbd> to close
+            </p>
           </div>
         </div>
       )}
@@ -215,10 +276,49 @@ const Input: FC<InputProps> = ({
                 Add files
               </button>
             )}
-            {selectedDocument && (
-              <span className="copilot-attachment">
-                <i className="bi bi-file-text"></i>
-                Document selected
+            {selectedDocument && selectedDocumentName && (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.375rem',
+                padding: '0.35rem 0.75rem',
+                background: 'linear-gradient(135deg, #003366 0%, #1a5a96 100%)',
+                border: 'none',
+                borderRadius: '1rem',
+                fontSize: '0.8rem',
+                color: 'white',
+                fontWeight: 500,
+                maxWidth: '200px',
+              }}>
+                <i className="bi bi-file-text" style={{ flexShrink: 0 }}></i>
+                <span style={{ 
+                  overflow: 'hidden', 
+                  textOverflow: 'ellipsis', 
+                  whiteSpace: 'nowrap' 
+                }}>
+                  {selectedDocumentName}
+                </span>
+                {onClearDocument && (
+                  <button
+                    type="button"
+                    onClick={onClearDocument}
+                    title="Clear document selection"
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      padding: '0.125rem',
+                      cursor: 'pointer',
+                      color: 'white',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: '50%',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <i className="bi bi-x-lg" style={{ fontSize: '0.625rem' }}></i>
+                  </button>
+                )}
               </span>
             )}
             {onDeepResearchChange && (
@@ -258,6 +358,7 @@ const Input: FC<InputProps> = ({
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
+                    outline: 'none',
                   }}
                   title="Learn about Deep Research"
                 >
@@ -297,9 +398,60 @@ const Input: FC<InputProps> = ({
                 ></i>
               </button>
             )}
-            <div className="copilot-model-select">
-              GPT-4o mini
+            <div 
+              className="copilot-model-select"
+              onClick={() => setShowModelDropdown(!showModelDropdown)}
+              style={{ position: 'relative', cursor: 'pointer' }}
+            >
+              {models.find((m) => m.id === selectedModel)?.display_name || 'GPT-4o mini'}
               <i className="bi bi-chevron-down"></i>
+              {showModelDropdown && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    bottom: '100%',
+                    right: 0,
+                    marginBottom: '0.5rem',
+                    background: 'white',
+                    borderRadius: '0.5rem',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                    overflow: 'hidden',
+                    minWidth: '140px',
+                    zIndex: 1000,
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {models.map((model) => (
+                    <div
+                      key={model.id}
+                      onClick={() => {
+                        onModelChange?.(model.id)
+                        setShowModelDropdown(false)
+                      }}
+                      style={{
+                        padding: '0.5rem 0.75rem',
+                        cursor: 'pointer',
+                        background: selectedModel === model.id ? '#f0f4ff' : 'transparent',
+                        color: selectedModel === model.id ? '#003366' : '#333',
+                        fontWeight: selectedModel === model.id ? 600 : 400,
+                        fontSize: '0.85rem',
+                        transition: 'background 0.15s ease',
+                      }}
+                      onMouseEnter={(e) => {
+                        if (selectedModel !== model.id) {
+                          e.currentTarget.style.background = '#f5f5f5'
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background =
+                          selectedModel === model.id ? '#f0f4ff' : 'transparent'
+                      }}
+                    >
+                      {model.display_name}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <button
               type="button"

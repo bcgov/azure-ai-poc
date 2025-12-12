@@ -19,6 +19,7 @@ export interface ApiResponse<T> {
 export interface StartResearchRequest {
   topic: string
   user_id?: string
+  model?: string
 }
 
 export interface StartResearchResponse {
@@ -83,6 +84,7 @@ export interface StartWorkflowResearchRequest {
   topic: string
   require_approval?: boolean
   user_id?: string
+  model?: string
 }
 
 export interface StartWorkflowResearchResponse {
@@ -173,10 +175,11 @@ class ResearchAgentService {
   async startResearch(
     topic: string,
     userId?: string,
+    model?: string,
   ): Promise<ApiResponse<StartResearchResponse>> {
     try {
       await this.getAuthHeaders()
-      const resp = await httpClient.post(`${this.researchBaseUrl}/start`, { topic, user_id: userId })
+      const resp = await httpClient.post(`${this.researchBaseUrl}/start`, { topic, user_id: userId, model })
       const data = resp.data as StartResearchResponse
       return { success: true, data }
     } catch (error) {
@@ -257,10 +260,11 @@ class ResearchAgentService {
     topic: string,
     requireApproval?: boolean,
     userId?: string,
+    model?: string,
   ): Promise<ApiResponse<StartWorkflowResearchResponse>> {
     try {
       await this.getAuthHeaders()
-      const request: StartWorkflowResearchRequest = { topic, require_approval: requireApproval, user_id: userId }
+      const request: StartWorkflowResearchRequest = { topic, require_approval: requireApproval, user_id: userId, model }
       const resp = await httpClient.post(`${this.workflowBaseUrl}/start`, request)
       const data = resp.data as StartWorkflowResearchResponse
       return { success: true, data }

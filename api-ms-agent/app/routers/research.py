@@ -40,6 +40,10 @@ class StartResearchRequest(BaseModel):
     document_id: str | None = Field(
         None, description="Optional document ID for document-based research"
     )
+    model: str | None = Field(
+        default=None,
+        description="Model to use: 'gpt-4o-mini' (default) or 'gpt-41-nano'",
+    )
 
 
 class ApprovalRequest(BaseModel):
@@ -160,6 +164,7 @@ async def start_research(
             topic=request.topic,
             user_id=user_id,
             document_id=request.document_id,
+            model=request.model,
         )
         return WorkflowStartResponse(**result)
     except Exception as e:

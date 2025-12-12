@@ -46,6 +46,7 @@ const ChatPage: FC = () => {
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(false)
   const [deepResearchRunId, setDeepResearchRunId] = useState<string | null>(null)
   const [isLoadingDocuments, setIsLoadingDocuments] = useState(false)
+  const [selectedModel, setSelectedModel] = useState<string>('gpt-4o-mini')
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -261,6 +262,7 @@ const ChatPage: FC = () => {
           onChunk,
           onError,
           selectedDocument || undefined, // Pass document ID for RAG
+          selectedModel, // Pass selected model
         )
 
         // Update message with sources after streaming completes
@@ -343,6 +345,7 @@ const ChatPage: FC = () => {
         question,
         undefined, // userId handled by backend auth
         selectedDocument || undefined, // Pass document ID for document-based research
+        selectedModel, // Pass selected model
       )
       
       if (!startResult.success || !startResult.data?.run_id) {
@@ -472,25 +475,6 @@ const ChatPage: FC = () => {
       />
       <div className="chat-main">
         <div className="copilot-chat-container">
-          {/* Selected Document Indicator */}
-          {selectedDocument && (
-            <div className="selected-document-banner">
-              <i className="bi bi-file-earmark-text me-2"></i>
-              <span>
-                Asking about: <strong>
-                  {documents.find(d => d.id === selectedDocument)?.title || 'Selected document'}
-                </strong>
-              </span>
-              <button 
-                onClick={() => setSelectedDocument(null)}
-                className="clear-doc-btn"
-                title="Clear document selection"
-              >
-                <i className="bi bi-x-lg"></i>
-              </button>
-            </div>
-          )}
-
           {/* Error */}
           {error && (
             <div style={{ padding: '0.5rem 2rem' }}>
@@ -590,8 +574,12 @@ const ChatPage: FC = () => {
         placeholder={selectedDocument ? "Ask about the selected document..." : "Ask anything"}
         onUploadClick={() => setShowUploadModal(true)}
         selectedDocument={selectedDocument}
+        selectedDocumentName={selectedDocument ? documents.find(d => d.id === selectedDocument)?.title : null}
+        onClearDocument={() => setSelectedDocument(null)}
         deepResearchEnabled={deepResearchEnabled}
         onDeepResearchChange={setDeepResearchEnabled}
+        selectedModel={selectedModel}
+        onModelChange={setSelectedModel}
       />
 
       {/* Upload Modal */}
