@@ -1,34 +1,35 @@
-# Feature Specification: Migrate to MS Entra ID for Authentication
+# Feature Specification: Add MS Entra ID Authentication alongside Keycloak
 
 **Feature Branch**: `001-migrate-entraid-auth`  
 **Created**: 2025-12-11  
 **Status**: Draft  
-**Input**: User description: "Update the application to use MS Entra ID instead of Keycloak for authentication and authorization"
+**Input**: User description: "Add MS Entra ID for authentication along with Keycloak side-by-side"
 
 ## User Scenarios & Testing *(mandatory)*
 
-### User Story 1 - Admin configures Entra ID and migrates environment (Priority: P1)
+### User Story 1 - Admin enables Entra ID alongside Keycloak (Priority: P1)
 
-An administrator configures the application to accept tokens issued by MS Entra ID, updates infrastructure variables, and verifies the backend validates Entra ID JWTs.
+An administrator configures the application to accept tokens issued by MS Entra ID while continuing to accept Keycloak tokens during a transition period.
 
-**Why this priority**: This is required to enable authentication with MS Entra ID and to secure the app before switching live traffic away from Keycloak.
+**Why this priority**: This enables a safe migration path without locking out existing users and integrations.
 
-**Independent Test**: Configure Entra ID values in environment, restart the service, and verify token validation succeeds for valid tokens and rejects invalid tokens.
+**Independent Test**: Configure Entra ID values in environment, restart the service, and verify token validation succeeds for valid Entra tokens and valid Keycloak tokens, and rejects invalid tokens.
 
 **Acceptance Scenarios**:
 
-1. **Given** an Entra ID tenant and client credentials configured in environment, **When** the backend validates a signed token, **Then** the request is accepted when token is valid and proper claims are present.
-2. **Given** an invalid token or wrong issuer/audience, **When** the backend receives a request, **Then** it responds with an HTTP 401/403 as appropriate.
+1. **Given** Entra ID configuration is present, **When** the backend receives a valid Entra-issued token, **Then** the request is accepted when token is valid and required claims are present.
+2. **Given** Keycloak configuration is present, **When** the backend receives a valid Keycloak-issued token, **Then** the request is accepted when token is valid and required claims are present.
+3. **Given** an invalid token or wrong issuer/audience, **When** the backend receives a request, **Then** it responds with an HTTP 401/403 as appropriate.
 
 ---
 
-### User Story 2 - Users authenticate using Entra ID SSO (Priority: P2)
+### User Story 2 - Users authenticate via Entra SSO or existing Keycloak (Priority: P2)
 
-Application users sign in via MS Entra ID SSO (web or service tokens) and can access application features based on role/claim mappings.
+Application users sign in via MS Entra ID SSO or continue using Keycloak during migration and can access application features based on role/claim mappings.
 
 **Why this priority**: This provides users with a single sign-on experience and keeps authorization consistent across services.
 
-**Independent Test**: Complete an authentication flow in the frontend (or directly obtain a bearer token) and call a protected API to verify access based on roles and claims.
+**Independent Test**: Obtain a bearer token from Entra and a bearer token from Keycloak and call the same protected API endpoint to verify access based on roles and claims.
 
 **Acceptance Scenarios**:
 
@@ -37,9 +38,9 @@ Application users sign in via MS Entra ID SSO (web or service tokens) and can ac
 
 ---
 
-### User Story 3 - Rollback and coexistence testing (Priority: P3)
+### User Story 3 - Cutover and rollback control (Priority: P3)
 
-Maintain the ability to rollback to Keycloak or coexist during migration where both authentication providers are supported for a transition period.
+Maintain the ability to control cutover and rollback (including keeping both providers enabled), so migration can be phased without downtime.
 
 **Why this priority**: To minimize downtime and provide a safe migration path while ensuring users are not locked out.
 
@@ -47,14 +48,15 @@ Maintain the ability to rollback to Keycloak or coexist during migration where b
 
 **Acceptance Scenarios**:
 
-1. **Given** both Keycloak and Entra ID are configured, **When** the user authenticates with either provider, **Then** the app accepts valid tokens from the configured provider.
-2. **Given** the migration is incomplete, **When** a request contains a Keycloak token and Entra ID token becomes enforced, **Then** the request should still be accepted until a migration completion flag is set and verified by admin.
+1. **Given** both Keycloak and Entra ID are configured and enabled, **When** the user authenticates with either provider, **Then** the app accepts valid tokens from either provider.
+2. **Given** an admin disables Keycloak acceptance (cutover), **When** a request contains a Keycloak token, **Then** the request is rejected with HTTP 401/403.
+3. **Given** an admin re-enables Keycloak acceptance (rollback), **When** a request contains a Keycloak token, **Then** the request is accepted if valid.
 
 ---
 
 ### Edge Cases
 
-- Transition period: users with old Keycloak tokens may need to re-authenticate; ensure token revocation and refresh flows are documented.
+- Transition period: users with old Keycloak tokens may need to re-authenticate; ensure token refresh expectations are documented.
 - Claim name mismatches: name and role claim formats may differ between Keycloak and Entra; map and verify expected claim keys.
 - Invalid or missing claims: if roles are missing, ensure default deny policy and provide clear error message.
 - Token clock skew: support small clock-skew allowance when validating token times to avoid false rejections.
@@ -64,18 +66,18 @@ Maintain the ability to rollback to Keycloak or coexist during migration where b
 
 ### Functional Requirements
 
-- **FR-001**: System MUST validate and accept JWTs issued by MS Entra ID (Azure AD) for authentication.
-- **FR-002**: System MUST validate token signatures using Entra ID JWKS/issued keys and enforce issuer/audience claims.
-- **FR-003**: System MUST support role/claim-based authorization using configurable mapping between Entra claims and application roles.
-- **FR-004**: System MUST provide configuration options (environment variables and infra variables) for Entra ID tenant ID, client ID, and authority endpoints.
-- **FR-005**: System MUST include logging and audit events for successful and failed authentication and authorization checks.
-- **FR-006**: System MUST provide a migration path that allows coexistence with Keycloak during transition, controlled by a feature flag or configuration.
+- **FR-001**: System MUST validate and accept JWTs issued by MS Entra ID (Azure AD) and Keycloak during a transition period.
+- **FR-002**: System MUST validate token signatures using each provider’s published signing keys and enforce issuer/audience claims per provider configuration.
+- **FR-003**: System MUST support role/claim-based authorization using a consistent application role model across providers.
+- **FR-004**: System MUST provide configuration options for Entra ID settings (tenant, audience/client IDs, authority/issuer) without removing existing Keycloak settings.
+- **FR-005**: System MUST include logging and audit events for successful and failed authentication and authorization checks and include which provider was used.
+- **FR-006**: System MUST allow an administrator to enable/disable acceptance of Entra tokens and Keycloak tokens independently (to support coexistence, cutover, and rollback).
 
-*Clarifications Required (max 3)*
+### Decisions (captured)
 
-- **NEEDS CLARIFICATION: Migration strategy** - Should we support a coexistence period (Keycloak + Entra ID) or cut over immediately? Options: A) Coexistence for verifiable transition, B) Immediate cutover, C) Phased migration with canary users.
-- **NEEDS CLARIFICATION: Roles/claims mapping** - Should roles be mapped to Entra app roles, groups, or custom claims? Options: A) App roles, B) Groups mapping, C) Custom claims with administrative mapping.
-- **NEEDS CLARIFICATION: User provisioning and sync** - How should user accounts be provisioned or synchronized? Options: A) Identity provider-managed only (no sync), B) Periodic sync to local DB, C) Just-in-time provisioning.
+- **Migration strategy**: Coexistence (Keycloak + Entra ID side-by-side) until an admin-controlled cutover.
+- **Roles/claims mapping**: Use Entra **app roles**, assigned to **groups** for users; applications use application roles for client-credentials flows.
+- **User provisioning and sync**: Identity-provider managed only; no user sync to a local database.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -96,141 +98,27 @@ Maintain the ability to rollback to Keycloak or coexist during migration where b
 ## Assumptions
 
 - An Entra ID tenant and required admin permissions are available to register an application and issue client credentials.
-- Roles used by the application are available or can be configured within Entra ID (app roles or group claims).
+- Roles used by the application are available or can be configured within Entra ID (app roles / group assignments).
 - Secrets (client id/secret) can be stored in one of the supported secrets stores and set as environment variables during deploy.
-- Existing Keycloak tokens will remain valid until the migration cutoff, and a plan exists for revoking them when migration completes.
+- Existing Keycloak tokens will remain accepted during the coexistence period until an admin-controlled cutover.
 
 ## Non-functional Considerations
 
 - Security: Token validation must use strong cryptography; use short expiry and log failure reasons for auditing.
 - Operational: Provide clear rollout plan, with testing and canary rollout, and rollback procedure.
-- Documentation: Update README and infra variable docs to remove Keycloak references and document Entra settings.
+- Documentation: Update README and infra variable docs to document Entra settings and clearly describe coexistence/cutover behavior.
 
 ## Deliverables
 
-- Backend: Token validation and role/claim mapping support for Entra ID.
-- Frontend: Update any Keycloak-specific flows or configuration to support Entra ID SSO tokens.
+- Backend: Token validation and role/claim mapping support for Entra ID and Keycloak side-by-side.
+- Frontend: Add Entra SSO support without breaking existing Keycloak flows during migration.
 - Infra: Terraform updates to set Entra ID variables and secrets for applications and frontends.
 - Tests: Integration tests for token validation, claims mapping, and protected endpoint access with Entra tokens.
 
 ## Next Steps
 
-1. Confirm clarifications (Migration strategy, Roles mapping, Provisioning approach).
-2. Create design/implementation task cards to update backend auth service, frontend config, and infra.
-3. Implement and test coexistence strategy if chosen.
-4. Update docs and run integration tests to validate success criteria.
-# Feature Specification: [FEATURE NAME]
-
-**Feature Branch**: `[###-feature-name]`  
-**Created**: [DATE]  
-**Status**: Draft  
-**Input**: User description: "$ARGUMENTS"
-
-## User Scenarios & Testing *(mandatory)*
-
-<!--
-  IMPORTANT: User stories should be PRIORITIZED as user journeys ordered by importance.
-  Each user story/journey must be INDEPENDENTLY TESTABLE - meaning if you implement just ONE of them,
-  you should still have a viable MVP (Minimum Viable Product) that delivers value.
-  
-  Assign priorities (P1, P2, P3, etc.) to each story, where P1 is the most critical.
-  Think of each story as a standalone slice of functionality that can be:
-  - Developed independently
-  - Tested independently
-  - Deployed independently
-  - Demonstrated to users independently
--->
-
-### User Story 1 - [Brief Title] (Priority: P1)
-
-[Describe this user journey in plain language]
-
-**Why this priority**: [Explain the value and why it has this priority level]
-
-**Independent Test**: [Describe how this can be tested independently - e.g., "Can be fully tested by [specific action] and delivers [specific value]"]
-
-**Acceptance Scenarios**:
-
-1. **Given** [initial state], **When** [action], **Then** [expected outcome]
-2. **Given** [initial state], **When** [action], **Then** [expected outcome]
-
----
-
-### User Story 2 - [Brief Title] (Priority: P2)
-
-[Describe this user journey in plain language]
-
-**Why this priority**: [Explain the value and why it has this priority level]
-
-**Independent Test**: [Describe how this can be tested independently]
-
-**Acceptance Scenarios**:
-
-1. **Given** [initial state], **When** [action], **Then** [expected outcome]
-
----
-
-### User Story 3 - [Brief Title] (Priority: P3)
-
-[Describe this user journey in plain language]
-
-**Why this priority**: [Explain the value and why it has this priority level]
-
-**Independent Test**: [Describe how this can be tested independently]
-
-**Acceptance Scenarios**:
-
-1. **Given** [initial state], **When** [action], **Then** [expected outcome]
-
----
-
-[Add more user stories as needed, each with an assigned priority]
-
-### Edge Cases
-
-<!--
-  ACTION REQUIRED: The content in this section represents placeholders.
-  Fill them out with the right edge cases.
--->
-
-- What happens when [boundary condition]?
-- How does system handle [error scenario]?
-
-## Requirements *(mandatory)*
-
-<!--
-  ACTION REQUIRED: The content in this section represents placeholders.
-  Fill them out with the right functional requirements.
--->
-
-### Functional Requirements
-
-- **FR-001**: System MUST [specific capability, e.g., "allow users to create accounts"]
-- **FR-002**: System MUST [specific capability, e.g., "validate email addresses"]  
-- **FR-003**: Users MUST be able to [key interaction, e.g., "reset their password"]
-- **FR-004**: System MUST [data requirement, e.g., "persist user preferences"]
-- **FR-005**: System MUST [behavior, e.g., "log all security events"]
-
-*Example of marking unclear requirements:*
-
-- **FR-006**: System MUST authenticate users via [NEEDS CLARIFICATION: auth method not specified - email/password, SSO, OAuth?]
-- **FR-007**: System MUST retain user data for [NEEDS CLARIFICATION: retention period not specified]
-
-### Key Entities *(include if feature involves data)*
-
-- **[Entity 1]**: [What it represents, key attributes without implementation]
-- **[Entity 2]**: [What it represents, relationships to other entities]
-
-## Success Criteria *(mandatory)*
-
-<!--
-  ACTION REQUIRED: Define measurable success criteria.
-  These must be technology-agnostic and measurable.
--->
-
-### Measurable Outcomes
-
-- **SC-001**: [Measurable metric, e.g., "Users can complete account creation in under 2 minutes"]
-- **SC-002**: [Measurable metric, e.g., "System handles 1000 concurrent users without degradation"]
-- **SC-003**: [User satisfaction metric, e.g., "90% of users successfully complete primary task on first attempt"]
-- **SC-004**: [Business metric, e.g., "Reduce support tickets related to [X] by 50%"]
+1. Confirm and document the coexistence configuration strategy per environment.
+2. Update backend authentication to validate both issuers and enforce consistent authorization.
+3. Add Entra SSO support in the frontend while keeping Keycloak working.
+4. Define a cutover procedure and rollback procedure.
+5. Update docs and run integration tests to validate success criteria.
