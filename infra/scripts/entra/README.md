@@ -114,3 +114,74 @@ These scripts do not assume any defaults. All required parameters must be provid
 Tip:
 - If you want “defaults”, implement them in your wrapper (Makefile, PowerShell script, CI pipeline),
   not inside these scripts.
+
+## Manual setup (Azure portal)
+
+If you prefer (or need) to manage roles/groups manually, here’s the portal flow that matches what
+these scripts automate.
+
+### 1) Create/update App Roles on the API app registration
+
+App Roles live on the **API app registration** (the “resource” app).
+
+1. Go to **Microsoft Entra admin center** → **Identity** → **Applications** → **App registrations**.
+2. Open your **API app registration** (example: `azure-ai-poc-dev-api`).
+3. Go to **App roles** → **Create app role**.
+4. Create roles that match your authorization model.
+
+Recommended examples (aligned with the scripts):
+- User role:
+	- **Display name**: `AI POC Participant`
+	- **Value**: `ai-poc-participant`
+	- **Allowed member types**: `Users/Groups`
+- Application role (client credentials):
+	- **Display name**: `API Access (Client Credentials)`
+	- **Value**: `api.access`
+	- **Allowed member types**: `Applications`
+
+Save the roles.
+
+### 2) (Optional) Expose an API scope for SPA delegated access
+
+If your SPA will call the API “on behalf of the signed-in user”, you typically add an API scope.
+
+1. In the same **API app registration**, go to **Expose an API**.
+2. Set an **Application ID URI** (commonly `api://<api-client-id>`).
+3. Add a scope such as:
+	 - **Scope name**: `access_as_user`
+	 - Enable it, and provide user/admin consent descriptions.
+
+### 3) Create security groups for your roles
+
+1. Go to **Microsoft Entra admin center** → **Identity** → **Groups** → **All groups**.
+2. **New group** → **Security**.
+3. Create groups that map to your role values (recommended naming):
+	 - `<app-prefix>-ai-poc-participant`
+	 - `<app-prefix>-api.access` (only if you intend to assign roles to groups for app access patterns)
+
+### 4) Assign groups/users to the app role (Enterprise application)
+
+The assignment happens on the **Enterprise application** (service principal), not on App registrations.
+
+1. Go to **Microsoft Entra admin center** → **Identity** → **Applications** → **Enterprise applications**.
+2. Find and open the Enterprise application for your **API app** (same display name usually, e.g. `azure-ai-poc-dev-api`).
+3. Go to **Users and groups** → **Add user/group**.
+4. Select the **Group** (or User), then select the **Role** (the App Role value you created).
+5. Save.
+
+Result:
+- Members of that group will receive the role in the token (typically in the `roles` claim for app roles).
+
+### 5) Add users to groups
+
+1. **Groups** → open the group (e.g., `<app-prefix>-ai-poc-participant`).
+2. **Members** → **Add members**.
+3. Select users and save.
+
+### Notes / troubleshooting
+
+- If you don’t see “Roles” when assigning a group/user to the Enterprise application, confirm:
+	- The App Role exists on the **API App registration**.
+	- The role is **Enabled**.
+	- “Allowed member types” includes the thing you’re assigning (Users/Groups vs Applications).
+- Group membership changes can take a short time to propagate into tokens.
