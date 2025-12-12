@@ -47,6 +47,10 @@ class StartResearchRequest(BaseModel):
         description="Explicitly require approval. If None, auto-detected from topic.",
     )
     user_id: str | None = Field(default=None, description="Optional user ID for tracking")
+    model: str | None = Field(
+        default=None,
+        description="Model to use: 'gpt-4o-mini' (default) or 'gpt-41-nano'",
+    )
 
 
 class StartResearchResponse(BaseModel):
@@ -159,6 +163,7 @@ async def start_research(
             topic=request.topic,
             require_approval=request.require_approval,
             user_id=user_id,
+            model=request.model,
         )
         logger.info(
             "workflow_research_started",

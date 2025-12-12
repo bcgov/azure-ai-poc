@@ -52,6 +52,18 @@ variable "gpt_deployment_capacity" {
   nullable    = false
 }
 
+variable "gpt_nano_deployment_name" {
+  description = "Name for the GPT-4.1 Nano model deployment"
+  type        = string
+  default     = "gpt-4.1-nano"
+}
+
+variable "gpt_nano_deployment_capacity" {
+  description = "Capacity for the GPT-4.1 Nano model deployment"
+  type        = number
+  nullable    = false
+}
+
 variable "embedding_deployment_name" {
   description = "Name for the embedding model deployment"
   type        = string

@@ -25,6 +25,7 @@ from app.services import (
     get_cosmos_db_service,
     get_embedding_service,
 )
+from app.services.openai_clients import get_embedding_client, shutdown_clients
 from app.services.orchestrator_agent import get_orchestrator_agent, shutdown_orchestrator
 from app.services.research_agent import get_deep_research_service
 from app.services.workflow_research_agent import get_workflow_research_service
@@ -87,22 +88,37 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         except Exception as exc:  # noqa: BLE001 - we want to catch all during startup warmup
             logger.warning("service_init_failed", service=name, error=str(exc))
 
-    # Startup: initialize services and warm key clients/agents
-    chat_service = get_chat_agent_service()
-    orchestrator_service = get_orchestrator_agent()
-    research_service = get_deep_research_service()
-    workflow_research_service = get_workflow_research_service()
-    embedding_service = get_embedding_service()
+    # Startup: initialize core infrastructure services
     cosmos_service = get_cosmos_db_service()
     azure_search_service = get_azure_search_service()
 
     await _safe_init("cosmos_db", cosmos_service._initialize_client)
     await _safe_init("azure_search", azure_search_service._initialize_client)
-    await _safe_init("embedding_client", embedding_service._get_client)
+
+    # Initialize Document Intelligence service (eagerly create client)
+    from app.services.document_intelligence_service import (
+        get_document_intelligence_service,
+    )
+
+    doc_intel_service = get_document_intelligence_service()
+    await _safe_init("document_intelligence", doc_intel_service._get_client)
+
+    # Warm up centralized OpenAI clients (singleton pattern - initializes once)
+    await _safe_init("embedding_client", get_embedding_client)
+
+    # Initialize agent services (they use centralized clients internally)
+    chat_service = get_chat_agent_service()
+    orchestrator_service = get_orchestrator_agent()
+
     await _safe_init("chat_agent", chat_service._get_agent)
     await _safe_init("orchestrator_agent", orchestrator_service._get_agent)
-    await _safe_init("deep_research_client", research_service._get_client)
-    await _safe_init("workflow_research_client", workflow_research_service._get_client)
+
+    # Initialize research services (they share centralized OpenAI clients)
+    research_service = get_deep_research_service()
+    workflow_research_service = get_workflow_research_service()
+    embedding_service = get_embedding_service()
+
+    logger.info("All services initialized successfully")
 
     if settings.devui_enabled:
         devui_server = start_devui_async(
@@ -115,27 +131,35 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     yield
 
-    # Shutdown: cleanup
+    # Shutdown: cleanup in reverse order of initialization
     logger.info("Shutting down API MS Agent")
-    chat_service = get_chat_agent_service()
+
+    # Close agent services first
     await chat_service.close()
-    research_service = get_deep_research_service()
     await research_service.close()
-    workflow_research_service = get_workflow_research_service()
     await workflow_research_service.close()
     await shutdown_orchestrator()
-    embedding_service = get_embedding_service()
+
+    # Close embedding service
     await embedding_service.close()
-    cosmos_service = get_cosmos_db_service()
+
+    # Close Document Intelligence service
+    await doc_intel_service.close()
+
+    # Close infrastructure services
     await cosmos_service.dispose()
-    azure_search_service = get_azure_search_service()
     await azure_search_service.dispose()
 
     # Close shared HTTP client
     await close_http_client()
 
+    # Close all centralized Azure OpenAI clients
+    await shutdown_clients()
+
     if devui_server:
         devui_server.stop()
+
+    logger.info("API MS Agent shutdown complete")
 
 
 def create_app() -> FastAPI:

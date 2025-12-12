@@ -45,6 +45,10 @@ class ChatRequest(BaseModel):
     document_id: str | None = Field(
         default=None, description="Optional document ID for RAG context"
     )
+    model: str | None = Field(
+        default=None,
+        description="Model to use: 'gpt-4o-mini' (default) or 'gpt-41-nano'",
+    )
 
 
 class SourceInfoResponse(BaseModel):
@@ -156,12 +160,20 @@ async def chat(
                             confidence = "medium"
                         else:
                             confidence = "low"
+
+                        # Use page number if available, otherwise fall back to chunk index
+                        page_num = result.get("page_number", 0)
+                        if page_num and page_num > 0:
+                            location_info = f"(page {page_num})"
+                        else:
+                            location_info = f"(chunk {result.get('chunk_index', 0) + 1})"
+
                         document_sources.append(
                             {
                                 "source_type": "document",
                                 "description": (
                                     f"From document: {result['metadata'].get('title', 'Unknown')} "
-                                    f"(chunk {result.get('chunk_index', 0) + 1})"
+                                    f"{location_info}"
                                 ),
                                 "confidence": confidence,
                                 "url": None,
@@ -190,6 +202,7 @@ async def chat(
             session_id=session_id,
             user_id=user_id,
             document_context=document_context,
+            model=request.model,
         )
 
         # Convert sources to response format

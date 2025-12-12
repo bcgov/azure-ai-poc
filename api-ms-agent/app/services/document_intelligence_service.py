@@ -48,6 +48,14 @@ SUPPORTED_EXTENSIONS = {
 
 
 @dataclass
+class ParagraphWithPage:
+    """A paragraph with its page number."""
+
+    content: str
+    page_number: int  # 1-based page number
+
+
+@dataclass
 class DocumentAnalysisResult:
     """Result from document analysis."""
 
@@ -55,6 +63,7 @@ class DocumentAnalysisResult:
     pages: int
     tables: list[dict[str, Any]] = field(default_factory=list)
     paragraphs: list[str] = field(default_factory=list)
+    paragraphs_with_pages: list[ParagraphWithPage] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -150,7 +159,7 @@ class DocumentIntelligenceService:
             )
         logger.info("DocumentIntelligenceService initialized")
 
-    def _get_client(self):
+    async def _get_client(self):
         """Get or create the Document Intelligence client."""
         if self._use_fallback:
             raise ValueError(
@@ -159,14 +168,14 @@ class DocumentIntelligenceService:
             )
 
         if self._client is None:
-            # Lazy import Azure SDK only when needed
-            from azure.ai.documentintelligence import DocumentIntelligenceClient
+            # Lazy import Azure SDK only when needed - use async client
+            from azure.ai.documentintelligence.aio import DocumentIntelligenceClient
             from azure.ai.documentintelligence.models import (
                 AnalyzeResult,
                 DocumentAnalysisFeature,
             )
             from azure.core.credentials import AzureKeyCredential
-            from azure.identity import DefaultAzureCredential
+            from azure.identity.aio import DefaultAzureCredential
 
             # Store references for use in analyze_document
             self._AnalyzeResult = AnalyzeResult
@@ -290,7 +299,7 @@ class DocumentIntelligenceService:
             endpoint=settings.azure_document_intelligence_endpoint,
         )
 
-        client = self._get_client()
+        client = await self._get_client()
 
         try:
             logger.debug(
@@ -311,7 +320,7 @@ class DocumentIntelligenceService:
                     proxy_endpoint=endpoint,
                 )
                 polling_method = _create_proxy_polling_method(endpoint)
-                poller = client.begin_analyze_document(
+                poller = await client.begin_analyze_document(
                     model_id="prebuilt-layout",
                     body=BytesIO(content),
                     content_type=resolved_content_type,
@@ -319,7 +328,7 @@ class DocumentIntelligenceService:
                 )
             else:
                 # Use default polling for direct Azure endpoint
-                poller = client.begin_analyze_document(
+                poller = await client.begin_analyze_document(
                     model_id="prebuilt-layout",
                     body=BytesIO(content),
                     content_type=resolved_content_type,
@@ -331,7 +340,7 @@ class DocumentIntelligenceService:
                 status=str(poller.status()) if hasattr(poller, "status") else "unknown",
             )
 
-            result = poller.result()
+            result = await poller.result()
 
             logger.debug(
                 "document_intelligence_result_received",
@@ -346,10 +355,21 @@ class DocumentIntelligenceService:
             # Extract full text content
             full_content = result.content or ""
 
-            # Extract paragraphs for structured access
+            # Extract paragraphs for structured access (legacy: just content)
             paragraphs = []
+            # Extract paragraphs with page numbers for citations
+            paragraphs_with_pages = []
             if result.paragraphs:
-                paragraphs = [p.content for p in result.paragraphs if p.content]
+                for p in result.paragraphs:
+                    if p.content:
+                        paragraphs.append(p.content)
+                        # Get page number from bounding_regions (1-based)
+                        page_num = 1  # Default to page 1
+                        if p.bounding_regions and len(p.bounding_regions) > 0:
+                            page_num = p.bounding_regions[0].page_number
+                        paragraphs_with_pages.append(
+                            ParagraphWithPage(content=p.content, page_number=page_num)
+                        )
 
             # Extract tables as structured data
             tables = []
@@ -388,6 +408,7 @@ class DocumentIntelligenceService:
                 pages=page_count,
                 tables=tables,
                 paragraphs=paragraphs,
+                paragraphs_with_pages=paragraphs_with_pages,
                 metadata={
                     "source": "azure_document_intelligence",
                     "model": "prebuilt-layout",
@@ -457,7 +478,7 @@ class DocumentIntelligenceService:
     async def close(self) -> None:
         """Close the client and release resources."""
         if self._client:
-            self._client.close()
+            await self._client.close()
             self._client = None
         if self._credential:
             await self._credential.close()
