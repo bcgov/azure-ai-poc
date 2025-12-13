@@ -383,3 +383,4 @@ sensitive/**
 coverage.json
 **.env
 **/.env*
+test.http
