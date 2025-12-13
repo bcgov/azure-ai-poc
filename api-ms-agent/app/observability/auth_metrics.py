@@ -175,8 +175,8 @@ class AuthMetrics:
                 cumulative = 0
                 for bound in hist.buckets_ms:
                     cumulative += hist.bucket_counts.get(bound, 0)
-                            labels = f'provider="{provider_label}",le="{bound}"'
-                            lines.append(f'auth_validation_duration_ms_bucket{{{labels}}} {cumulative}')
+                    labels = f'provider="{provider_label}",le="{bound}"'
+                    lines.append(f'auth_validation_duration_ms_bucket{{{labels}}} {cumulative}')
                 # +Inf bucket
                 labels_inf = f'provider="{provider_label}",le="+Inf"'
                 lines.append(f'auth_validation_duration_ms_bucket{{{labels_inf}}} {hist.count}')
