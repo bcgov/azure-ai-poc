@@ -1,5 +1,6 @@
 """FastAPI dependencies for authentication and authorization."""
 
+import time
 from typing import Annotated
 
 from fastapi import Depends, Request, status
@@ -8,6 +9,7 @@ from app.auth.errors import AuthError
 from app.auth.models import AuthenticatedUser
 from app.auth.service import get_auth_service
 from app.logger import get_logger
+from app.observability.auth_metrics import get_auth_metrics
 
 logger = get_logger(__name__)
 
@@ -68,13 +70,43 @@ def require_roles(*required_roles: str):
     async def checker(
         current_user: Annotated[AuthenticatedUser, Depends(get_current_user_from_request)],
     ) -> AuthenticatedUser:
+        start = time.perf_counter()
         user_roles = current_user.roles or []
         if not user_roles or not any(r in user_roles for r in roles):
+            # Authorization denial (token is valid but required role missing)
+            metrics = get_auth_metrics()
+            required_roles_label = "|".join(sorted(roles))
+            provider = getattr(current_user, "provider", None) or "unknown"
+
+            metrics.inc_role_denied(role=required_roles_label)
+            metrics.observe_authorization_duration_ms(
+                provider=str(provider),
+                outcome="denied",
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+
+            logger.warning(
+                "auth_role_denied",
+                provider=provider,
+                subject=getattr(current_user, "sub", None),
+                token_issuer=getattr(current_user, "iss", None),
+                required_roles=list(roles),
+                user_roles=user_roles,
+            )
             raise AuthError(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Access denied. Required roles: {', '.join(roles)}",
                 code="auth.missing_role",
             )
+
+        # Allowed
+        metrics = get_auth_metrics()
+        provider = getattr(current_user, "provider", None) or "unknown"
+        metrics.observe_authorization_duration_ms(
+            provider=str(provider),
+            outcome="allowed",
+            duration_ms=(time.perf_counter() - start) * 1000,
+        )
         return current_user
 
     return checker

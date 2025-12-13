@@ -91,6 +91,11 @@ resource "azurerm_linux_web_app" "backend" {
     KEYCLOAK_URL          = var.keycloak_url
     KEYCLOAK_REALM        = "standard"
     KEYCLOAK_CLIENT_ID    = "azure-poc-6086"
+
+    # Auth provider feature flags (coexistence / cutover / rollback)
+    KEYCLOAK_ENABLED = tostring(var.keycloak_enabled)
+    ENTRA_ENABLED    = tostring(var.entra_enabled)
+
     AZURE_SPEECH_ENDPOINT = var.azure_speech_endpoint
     AZURE_SPEECH_KEY      = var.azure_speech_key
   }

@@ -16,7 +16,8 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
     Access log middleware that logs HTTP requests with timing and content length.
 
     Produces logs like:
-    INFO:     [hostname:pid] 169.254.129.4:33194 - "GET /api/v1/chat/sessions HTTP/1.1" 200 1234B 45.2ms
+    INFO:     [hostname:pid] 169.254.129.4:33194 - "GET /api/v1/chat/sessions HTTP/1.1"
+              200 1234B 45.2ms
     """
 
     async def dispatch(self, request: Request, call_next) -> Response:
@@ -41,6 +42,11 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
         # Process request
         response: Response = await call_next(request)
 
+        # Best-effort request correlation: AuthMiddleware sets request.state.request_id
+        request_id = getattr(request.state, "request_id", None)
+        if request_id and "X-Request-ID" not in response.headers:
+            response.headers["X-Request-ID"] = str(request_id)
+
         # Calculate timing
         duration_ms = (time.perf_counter() - start_time) * 1000
 
@@ -52,6 +58,7 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
         # Log in Uvicorn-like format with timing and size
         logger.info(
             "http_request",
+            request_id=request_id,
             client=f"{client_host}:{client_port}",
             request=f'"{method} {full_path} HTTP/{http_version}"',
             status=response.status_code,

@@ -231,6 +231,29 @@ variable "keycloak_url" {
   nullable    = false
   default     = "https://dev.loginproxy.gov.bc.ca/auth"
 }
+
+variable "entra_enabled" {
+  description = "Whether the backend accepts Microsoft Entra ID-issued JWTs (ENTRA_ENABLED)."
+  type        = bool
+  default     = false
+
+  validation {
+    condition     = var.entra_enabled || var.keycloak_enabled
+    error_message = "At least one auth provider must be enabled: set entra_enabled=true and/or keycloak_enabled=true."
+  }
+}
+
+variable "keycloak_enabled" {
+  description = "Whether the backend accepts Keycloak-issued JWTs (KEYCLOAK_ENABLED)."
+  type        = bool
+  default     = true
+
+  validation {
+    condition     = var.entra_enabled || var.keycloak_enabled
+    error_message = "At least one auth provider must be enabled: set entra_enabled=true and/or keycloak_enabled=true."
+  }
+}
+
 variable "proxy_image" {
   description = "The image for the Frontend proxy container"
   type        = string
