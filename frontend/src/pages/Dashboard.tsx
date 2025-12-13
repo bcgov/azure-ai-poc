@@ -1,5 +1,5 @@
 import { EmptyState } from '@/components/common'
-import { useAuth } from '@/stores'
+import { useAuth } from '@/components/AuthProvider'
 import type { FC } from 'react'
 import { useState } from 'react'
 import { Button, Col, Container, Row } from 'react-bootstrap'
@@ -8,9 +8,9 @@ import TenantManagementPage from '@/pages/TenantManagementPage'
 
 const Dashboard: FC = () => {
   const [activeView, setActiveView] = useState<'chat' | 'tenants'>('chat')
-  const { hasRole } = useAuth()
+  const { roles } = useAuth()
 
-  const canManageTenants = hasRole(['TENANT_ADMIN'])
+  const canManageTenants = roles.includes('TENANT_ADMIN')
 
   return (
     <Container fluid className="p-0">

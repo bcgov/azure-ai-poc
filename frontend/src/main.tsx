@@ -11,7 +11,8 @@ import '@/styles/chat.css'
 
 // Import the generated route tree
 import { routeTree } from './routeTree.gen'
-import { useAuthStore } from './stores'
+import { AuthProvider } from '@/components/AuthProvider'
+import { initializeMsal } from '@/service/auth-service'
 
 // Create a new router instance
 const router = createRouter({ routeTree })
@@ -26,13 +27,18 @@ declare module '@tanstack/react-router' {
 const renderApp = () => {
   ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
     <StrictMode>
-      <RouterProvider router={router} />
+      <AuthProvider>
+        <RouterProvider router={router} />
+      </AuthProvider>
     </StrictMode>,
   )
 }
 
-// Initialize authentication
-const authStore = useAuthStore.getState()
-authStore.initKeycloak().then(() => {
-  renderApp()
-})
+// Initialize MSAL before rendering routes (avoids redirect race conditions)
+initializeMsal()
+  .catch((err) => {
+    console.error('Failed to initialize MSAL:', err)
+  })
+  .finally(() => {
+    renderApp()
+  })

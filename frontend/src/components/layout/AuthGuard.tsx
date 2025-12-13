@@ -1,5 +1,5 @@
 import React, { type FC } from 'react'
-import { useAuth, useAuthInit } from '@/stores'
+import { useAuth } from '@/components/AuthProvider'
 
 type Props = {
   children: React.ReactNode
@@ -12,8 +12,8 @@ const AuthGuard: FC<Props> = ({
   requiredRoles,
   fallback = <div>Loading...</div>,
 }) => {
-  const { isInitialized, isLoading, error } = useAuthInit()
-  const { isLoggedIn, hasRole, login } = useAuth()
+  const { isInitialized, isLoading, error, isAuthenticated, roles, login } =
+    useAuth()
 
   // Show loading state while initializing
   if (!isInitialized || isLoading) {
@@ -37,7 +37,7 @@ const AuthGuard: FC<Props> = ({
   }
 
   // If not logged in, show login prompt
-  if (!isLoggedIn) {
+  if (!isAuthenticated) {
     return (
       <div className="text-center">
         <h3>Authentication Required</h3>
@@ -50,13 +50,20 @@ const AuthGuard: FC<Props> = ({
   }
 
   // Check role-based access if required
-  if (requiredRoles && !hasRole(requiredRoles)) {
-    return (
-      <div className="alert alert-warning" role="alert">
-        <h4 className="alert-heading">Access Denied</h4>
-        <p>You don't have the required permissions to access this page.</p>
-      </div>
-    )
+  if (requiredRoles) {
+    const required = Array.isArray(requiredRoles)
+      ? requiredRoles
+      : [requiredRoles]
+
+    const hasAllRequired = required.every((role) => roles.includes(role))
+    if (!hasAllRequired) {
+      return (
+        <div className="alert alert-warning" role="alert">
+          <h4 className="alert-heading">Access Denied</h4>
+          <p>You don't have the required permissions to access this page.</p>
+        </div>
+      )
+    }
   }
 
   // All checks passed, render children

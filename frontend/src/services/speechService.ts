@@ -3,7 +3,7 @@
  */
 
 import httpClient from '@/services/httpClient'
-import { useAuthStore } from '@/stores'
+import { acquireToken } from '@/service/auth-service'
 
 // Available TTS voices
 export const TTS_VOICES = {
@@ -35,19 +35,13 @@ async function getAuthHeaders(): Promise<HeadersInit> {
     'Content-Type': 'application/json',
   }
 
-  const authStore = useAuthStore.getState()
-  if (authStore.isLoggedIn()) {
-    // Try to refresh token if it's close to expiring (within 30 seconds)
-    try {
-      await authStore.updateToken(30)
-    } catch (error) {
-      console.warn('Token refresh failed in fetch request:', error)
-    }
+  const token = await acquireToken().catch((err) => {
+    console.warn('Token acquisition failed in fetch request:', err)
+    return undefined
+  })
 
-    const token = authStore.getToken()
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`
-    }
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
   }
 
   return headers

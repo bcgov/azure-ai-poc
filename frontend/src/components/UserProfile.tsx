@@ -1,21 +1,13 @@
 import React from 'react'
-import { useAuth } from '../stores'
+import { useAuth } from '@/components/AuthProvider'
 
 /**
  * Example component showing how to use the auth store
  */
 const UserProfile: React.FC = () => {
-  const {
-    isLoggedIn,
-    username,
-    userInfo,
-    userRoles,
-    hasRole,
-    logout,
-    isLoading,
-  } = useAuth()
+  const { isAuthenticated, user, roles, logout, isLoading } = useAuth()
 
-  if (!isLoggedIn) {
+  if (!isAuthenticated) {
     return <div>Please log in to view your profile.</div>
   }
 
@@ -30,37 +22,25 @@ const UserProfile: React.FC = () => {
       </div>
       <div className="card-body">
         <p>
-          <strong>Username:</strong> {username}
+          <strong>Username:</strong> {user?.username}
         </p>
         <p>
-          <strong>Display Name:</strong> {userInfo.displayName}
+          <strong>Display Name:</strong> {user?.name}
         </p>
         <p>
-          <strong>Email:</strong> {userInfo.email}
+          <strong>Email:</strong> {user?.username}
         </p>
 
-        {userRoles.length > 0 && (
+        {roles.length > 0 && (
           <div>
             <strong>Roles:</strong>
             <ul>
-              {userRoles.map((role) => (
+              {roles.map((role) => (
                 <li key={role}>{role}</li>
               ))}
             </ul>
           </div>
         )}
-
-        <div className="mt-3">
-          <p>
-            <strong>Role Checks:</strong>
-          </p>
-          <p>Has admin role: {hasRole('admin') ? 'Yes' : 'No'}</p>
-          <p>Has user role: {hasRole('user') ? 'Yes' : 'No'}</p>
-          <p>
-            Has any of [admin, moderator]:{' '}
-            {hasRole(['admin', 'moderator']) ? 'Yes' : 'No'}
-          </p>
-        </div>
 
         <button className="btn btn-danger mt-3" onClick={() => logout()}>
           Logout

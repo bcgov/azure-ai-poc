@@ -218,6 +218,17 @@ The MAF backend supports **Keycloak + Microsoft Entra ID** JWT validation (coexi
 - Entra authorization uses the access token `roles` claim (app roles). Protected endpoints typically require `ai-poc-participant`.
 - OpenTelemetry security monitoring
 
+### Frontend Authentication (Entra SSO)
+
+The React SPA (`/frontend`) uses MSAL.js to authenticate users with Microsoft Entra ID and acquire access tokens for API calls.
+
+- Configure Entra values in `frontend/.env` (see `frontend/.env.example`)
+- Required variables: `VITE_ENTRA_TENANT_ID`, `VITE_ENTRA_CLIENT_ID`, `VITE_ENTRA_AUTHORITY`, `VITE_API_SCOPES`
+- Tokens are cached in `sessionStorage` and injected into API requests as `Authorization: Bearer <token>`
+- User name and roles (from the token `roles` claim) are displayed in the header after login
+
+Setup guide: [frontend/ENTRA_ID_SETUP.md](frontend/ENTRA_ID_SETUP.md)
+
 - Rate limiting and audit logging
 - JWT-based authentication
 - OpenTelemetry security monitoring

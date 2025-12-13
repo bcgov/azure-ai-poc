@@ -1,20 +1,18 @@
 import '@testing-library/jest-dom'
-import { vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
+
+import { useAuth } from '@/components/AuthProvider'
 import Dashboard from '@/components/Dashboard'
 
-vi.mock('@tanstack/react-router', () => ({
-  useNavigate: vi.fn(),
+vi.mock('@/components/AuthProvider', () => ({
+  useAuth: vi.fn(),
 }))
 
 describe('Dashboard', () => {
-  test('renders a heading with the correct text', () => {
-    const navigate = vi.fn()
-    const useNavigateMock = vi.fn(() => navigate)
-    vi.doMock('@tanstack/react-router', () => ({
-      useNavigate: useNavigateMock,
-    }))
+  it('renders the AI Chat button', () => {
+    vi.mocked(useAuth).mockReturnValue({ roles: [] } as any)
     render(<Dashboard />)
-    expect(screen.getByText(/AI Document Assistant/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /AI Chat/i })).toBeInTheDocument()
   })
 })

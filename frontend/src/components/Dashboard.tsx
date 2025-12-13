@@ -3,14 +3,14 @@ import { useState } from 'react'
 import { Button, Container, Row, Col } from 'react-bootstrap'
 import ChatInterfaceWithDocuments from './ChatInterfaceWithDocuments'
 import TenantManagement from './TenantManagement'
-import { useAuth } from '../stores'
+import { useAuth } from '@/components/AuthProvider'
 
 const Dashboard: FC = () => {
   const [activeView, setActiveView] = useState<'chat' | 'tenants'>('chat')
-  const { hasRole } = useAuth()
+  const { roles } = useAuth()
 
   // Check if user has admin roles for tenant management
-  const canManageTenants = hasRole(['azure-ai-poc-super-admin', 'TENANT_ADMIN'])
+  const canManageTenants = roles.includes('azure-ai-poc-super-admin') || roles.includes('TENANT_ADMIN')
 
   return (
     <Container fluid>
