@@ -1,209 +1,371 @@
-"""Authentication service for JWT validation with Keycloak."""
+"""Authentication service for JWT validation (Keycloak + Entra ID)."""
+
+from __future__ import annotations
 
 import time
 from typing import Any
 
-from fastapi import HTTPException, status
+from fastapi import status
 from jose import JWTError, jwt
 
-from app.auth.models import KeycloakUser
+from app.auth.errors import AuthError
+from app.auth.models import AuthenticatedUser, EntraUser, KeycloakUser
+from app.auth.role_mapping import normalize_entra_roles, normalize_keycloak_roles
 from app.config import settings
 from app.http_client import get_http_client
 from app.logger import get_logger
 
 logger = get_logger(__name__)
 
-# JWKS cache TTL in seconds (10 minutes - balances key rotation detection with performance)
-_JWKS_CACHE_TTL_SECONDS = 600
 
-
-class AuthService:
-    """JWT authentication service for Keycloak integration."""
+class JWTAuthService:
+    """JWT authentication service supporting multiple issuers."""
 
     def __init__(self):
-        """Initialize the auth service."""
-        self.keycloak_url = getattr(
-            settings, "KEYCLOAK_URL", "https://dev.loginproxy.gov.bc.ca/auth"
+        self.keycloak_enabled = settings.keycloak_enabled
+        self.keycloak_url = settings.keycloak_url
+        self.keycloak_realm = settings.keycloak_realm
+        self.keycloak_client_id = settings.keycloak_client_id
+
+        self.entra_enabled = settings.entra_enabled
+        self.entra_tenant_id = settings.entra_tenant_id
+        self.entra_client_id = settings.entra_client_id
+        self.entra_issuer = settings.entra_issuer
+        self.entra_jwks_uri = settings.entra_jwks_uri
+
+        self.jwks_cache_ttl_seconds = settings.jwks_cache_ttl_seconds
+
+        self.keycloak_issuer = (
+            f"{self.keycloak_url}/realms/{self.keycloak_realm}"
+            if self.keycloak_url and self.keycloak_realm
+            else ""
         )
-        self.keycloak_realm = getattr(settings, "KEYCLOAK_REALM", "standard")
-        self.keycloak_client_id = getattr(settings, "KEYCLOAK_CLIENT_ID", "azure-poc-6086")
-
-        if not self.keycloak_url or not self.keycloak_realm:
-            raise ValueError("KEYCLOAK_URL and KEYCLOAK_REALM must be configured")
-
-        self.jwks_uri = (
-            f"{self.keycloak_url}/realms/{self.keycloak_realm}/protocol/openid-connect/certs"
+        self.keycloak_jwks_uri = (
+            f"{self.keycloak_issuer}/protocol/openid-connect/certs" if self.keycloak_issuer else ""
         )
-        self._jwks_cache: dict[str, Any] | None = None
-        self._jwks_cache_time: float = 0.0
 
-    async def validate_token(self, token: str) -> KeycloakUser:
-        """Validate JWT token and return user information."""
+        if not self.entra_issuer and self.entra_tenant_id:
+            self.entra_issuer = f"https://login.microsoftonline.com/{self.entra_tenant_id}/v2.0"
+        if not self.entra_jwks_uri and self.entra_tenant_id:
+            self.entra_jwks_uri = (
+                f"https://login.microsoftonline.com/{self.entra_tenant_id}/discovery/v2.0/keys"
+            )
+
+        # jwks_uri -> {"jwks": <dict>, "fetched_at": <epoch_seconds>}
+        self._jwks_cache: dict[str, dict[str, Any]] = {}
+
+    def _get_unverified_claims_for_logging(self, token: str) -> dict[str, Any]:
         try:
-            # Decode token header to get the key ID
-            try:
-                unverified_header = jwt.get_unverified_header(token)
-            except JWTError as e:
-                logger.error("Invalid token format", error=str(e))
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Invalid token format",
-                ) from e
+            return dict(jwt.get_unverified_claims(token))
+        except Exception:
+            return {}
 
-            if "kid" not in unverified_header:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Token missing key ID",
-                )
+    async def validate_token(self, token: str) -> AuthenticatedUser:
+        """Validate JWT token and return normalized user information."""
+        unverified = self._get_unverified_claims_for_logging(token)
+        issuer = str(unverified.get("iss") or "")
+        subject = str(unverified.get("oid") or unverified.get("sub") or "")
+        exp = unverified.get("exp")
 
-            # Get the signing key from Keycloak
-            kid = str(unverified_header["kid"])  # Ensure kid is a string
-            public_key = await self._get_signing_key(kid)
+        try:
+            if not issuer:
+                issuer = self._get_unverified_issuer(token)
 
-            # Verify and decode the token
-            try:
-                payload = jwt.decode(
-                    token,
-                    public_key,
-                    algorithms=["RS256"],
-                    audience=self.keycloak_client_id,
-                    options={"verify_exp": True},
-                )
-            except JWTError as e:
-                logger.error("JWT verification failed", error=str(e))
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Invalid or expired token",
-                ) from e
+            if issuer and self.entra_enabled and self.entra_issuer and issuer == self.entra_issuer:
+                return await self._validate_entra_token(token)
 
-            # Validate audience claim
-            await self._validate_audience(payload)
+            if (
+                issuer
+                and self.keycloak_enabled
+                and self.keycloak_issuer
+                and issuer == self.keycloak_issuer
+            ):
+                return await self._validate_keycloak_token(token)
 
-            # Validate that user has client roles
-            if not payload.get("client_roles"):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Token missing client roles",
-                )
+            # Deny-by-default for unknown issuers or disabled providers
+            logger.warning(
+                "auth_unknown_or_disabled_issuer",
+                issuer=issuer,
+                entra_enabled=self.entra_enabled,
+                keycloak_enabled=self.keycloak_enabled,
+            )
+            raise AuthError(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token issuer is not accepted",
+                code="auth.issuer_not_accepted",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
-            # Create user object
-            user = KeycloakUser(**payload)
-            return user
-
-        except HTTPException:
+        except AuthError as exc:
+            logger.warning(
+                "auth_failed",
+                code=exc.code,
+                issuer=issuer,
+                subject=subject or None,
+                exp=exp,
+                status_code=exc.status_code,
+            )
             raise
-        except Exception as e:
-            logger.error("Token validation error", error=str(e))
-            raise HTTPException(
+        except Exception as exc:
+            logger.error("token_validation_error", error=str(exc))
+            logger.warning(
+                "auth_failed",
+                code="auth.validation_failed",
+                issuer=issuer,
+                subject=subject or None,
+                exp=exp,
+            )
+            raise AuthError(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token validation failed",
-            ) from e
+                code="auth.validation_failed",
+                headers={"WWW-Authenticate": "Bearer"},
+            ) from exc
 
-    async def _get_signing_key(self, kid: str) -> str:
-        """Get the signing key from Keycloak JWKS endpoint with TTL-based caching."""
+    async def _validate_entra_token(self, token: str) -> EntraUser:
+        if not self.entra_enabled:
+            raise AuthError(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Entra auth disabled",
+                code="auth.provider_disabled",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        if not self.entra_jwks_uri or not self.entra_client_id or not self.entra_issuer:
+            raise AuthError(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Entra auth is enabled but not configured",
+                code="auth.provider_misconfigured",
+            )
+
+        payload = await self._verify_and_decode(
+            token=token,
+            jwks_uri=self.entra_jwks_uri,
+            expected_issuer=self.entra_issuer,
+            expected_audience=self.entra_client_id,
+        )
+
+        roles = normalize_entra_roles(payload)
+
+        # Prefer oid (stable object id) for user identity when present
+        sub = str(payload.get("oid") or payload.get("sub") or "")
+        if not sub:
+            raise AuthError(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token missing subject",
+                code="auth.missing_subject",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        email = payload.get("preferred_username") or payload.get("upn") or payload.get("email")
+        user = EntraUser(
+            sub=sub,
+            oid=payload.get("oid"),
+            email=email,
+            preferred_username=payload.get("preferred_username") or payload.get("upn"),
+            name=payload.get("name"),
+            roles=roles,
+            aud=payload.get("aud"),
+            iss=payload.get("iss"),
+        )
+
+        logger.info(
+            "auth_success",
+            provider="entra",
+            issuer=self.entra_issuer,
+            subject=sub,
+            roles_count=len(roles),
+        )
+        return user
+
+    async def _validate_keycloak_token(self, token: str) -> KeycloakUser:
+        if not self.keycloak_enabled:
+            raise AuthError(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Keycloak auth disabled",
+                code="auth.provider_disabled",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        if not self.keycloak_jwks_uri or not self.keycloak_client_id or not self.keycloak_issuer:
+            raise AuthError(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Keycloak auth is enabled but not configured",
+                code="auth.provider_misconfigured",
+            )
+
+        payload = await self._verify_and_decode(
+            token=token,
+            jwks_uri=self.keycloak_jwks_uri,
+            expected_issuer=self.keycloak_issuer,
+            expected_audience=self.keycloak_client_id,
+        )
+
+        roles = normalize_keycloak_roles(payload, client_id=self.keycloak_client_id)
+        sub = str(payload.get("sub") or "")
+        if not sub:
+            raise AuthError(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token missing subject",
+                code="auth.missing_subject",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        user = KeycloakUser(
+            sub=sub,
+            email=payload.get("email"),
+            preferred_username=payload.get("preferred_username"),
+            given_name=payload.get("given_name"),
+            family_name=payload.get("family_name"),
+            client_roles=payload.get("client_roles"),
+            roles=roles,
+            aud=payload.get("aud"),
+            iss=payload.get("iss"),
+        )
+
+        logger.info(
+            "auth_success",
+            provider="keycloak",
+            issuer=self.keycloak_issuer,
+            subject=sub,
+            roles_count=len(roles),
+        )
+        return user
+
+    def has_role(self, user: AuthenticatedUser, role: str) -> bool:
+        """Check if user has the specified role."""
+        return role in (user.roles or [])
+
+    def _get_unverified_issuer(self, token: str) -> str:
         try:
-            # Check if cache is expired or empty
-            cache_age = time.time() - self._jwks_cache_time
-            cache_expired = cache_age > _JWKS_CACHE_TTL_SECONDS
+            claims = jwt.get_unverified_claims(token)
+        except JWTError as exc:
+            raise AuthError(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token format",
+                code="auth.invalid_format",
+                headers={"WWW-Authenticate": "Bearer"},
+            ) from exc
+        return str(claims.get("iss") or "")
 
-            if not self._jwks_cache or cache_expired:
-                client = await get_http_client()
-                response = await client.get(self.jwks_uri)
-                response.raise_for_status()
-                self._jwks_cache = response.json()
-                self._jwks_cache_time = time.time()
-                logger.debug(
-                    "jwks_cache_refreshed",
-                    cache_was_expired=cache_expired,
-                    keys_count=len(self._jwks_cache.get("keys", [])),
-                )
+    async def _verify_and_decode(
+        self,
+        *,
+        token: str,
+        jwks_uri: str,
+        expected_issuer: str,
+        expected_audience: str,
+    ) -> dict[str, Any]:
+        try:
+            unverified_header = jwt.get_unverified_header(token)
+        except JWTError as exc:
+            raise AuthError(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token format",
+                code="auth.invalid_format",
+                headers={"WWW-Authenticate": "Bearer"},
+            ) from exc
 
-            # Find the key with matching kid
-            for key_data in self._jwks_cache.get("keys", []):
+        kid = unverified_header.get("kid")
+        if not kid:
+            raise AuthError(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token missing key ID",
+                code="auth.missing_kid",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        public_key = await self._get_signing_key(jwks_uri=jwks_uri, kid=str(kid))
+
+        try:
+            payload = jwt.decode(
+                token,
+                public_key,
+                algorithms=["RS256"],
+                audience=expected_audience,
+                issuer=expected_issuer,
+                options={"verify_exp": True},
+            )
+        except JWTError as exc:
+            raise AuthError(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired token",
+                code="auth.invalid_or_expired",
+                headers={"WWW-Authenticate": "Bearer"},
+            ) from exc
+
+        return payload
+
+    async def _get_signing_key(self, *, jwks_uri: str, kid: str) -> str:
+        try:
+            jwks = await self._get_jwks(jwks_uri)
+            for key_data in jwks.get("keys", []):
                 if key_data.get("kid") == kid:
-                    try:
-                        # Use jose library's built-in JWK to PEM conversion
-                        from jose.backends import RSAKey
+                    from jose.backends import RSAKey
 
-                        # Convert JWK to RSA key object and get PEM
-                        rsa_key = RSAKey(key_data, algorithm="RS256")
-                        pem = rsa_key.to_pem()
+                    rsa_key = RSAKey(key_data, algorithm="RS256")
+                    pem = rsa_key.to_pem()
+                    return pem.decode("utf-8") if isinstance(pem, bytes) else pem
 
-                        # Ensure we return a string
-                        if isinstance(pem, bytes):
-                            return pem.decode("utf-8")
-                        return pem
+            # Key not found - force refresh once in case of rotation
+            logger.info("jwks_key_not_found_refreshing", jwks_uri=jwks_uri, kid=kid)
+            self._jwks_cache.pop(jwks_uri, None)
+            jwks = await self._get_jwks(jwks_uri)
+            for key_data in jwks.get("keys", []):
+                if key_data.get("kid") == kid:
+                    from jose.backends import RSAKey
 
-                    except Exception as decode_error:
-                        logger.error(
-                            "Error converting JWK to PEM",
-                            error=str(decode_error),
-                            kid=str(kid),
-                        )
-                        raise
+                    rsa_key = RSAKey(key_data, algorithm="RS256")
+                    pem = rsa_key.to_pem()
+                    return pem.decode("utf-8") if isinstance(pem, bytes) else pem
 
-            # Key not found - force refresh cache once in case of key rotation
-            if not cache_expired:
-                logger.info("jwks_key_not_found_refreshing", kid=kid)
-                self._jwks_cache = None  # Force refresh on next call
-                return await self._get_signing_key(kid)  # Retry with fresh cache
-
-            raise HTTPException(
+            raise AuthError(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Unable to find signing key",
+                code="auth.signing_key_not_found",
+                headers={"WWW-Authenticate": "Bearer"},
             )
 
-        except HTTPException:
+        except AuthError:
             raise
-        except Exception as e:
-            logger.error("Error getting signing key", error=str(e), kid=str(kid))
-            raise HTTPException(
+        except Exception as exc:
+            logger.error("error_getting_signing_key", jwks_uri=jwks_uri, kid=kid, error=str(exc))
+            raise AuthError(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Unable to verify token signature",
-            ) from e
+                code="auth.signature_verification_failed",
+                headers={"WWW-Authenticate": "Bearer"},
+            ) from exc
 
-    async def _validate_audience(self, payload: dict[str, Any]) -> None:
-        """Validate the audience claim in the token."""
-        if not self.keycloak_client_id:
-            raise ValueError("KEYCLOAK_CLIENT_ID must be configured")
+    async def _get_jwks(self, jwks_uri: str) -> dict[str, Any]:
+        now = time.time()
+        cached = self._jwks_cache.get(jwks_uri)
+        if cached:
+            fetched_at = float(cached.get("fetched_at") or 0)
+            if now - fetched_at <= self.jwks_cache_ttl_seconds:
+                return cached["jwks"]
 
-        aud = payload.get("aud")
-        if not aud:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token missing audience claim",
-            )
+        client = await get_http_client()
+        response = await client.get(jwks_uri)
+        response.raise_for_status()
+        jwks = response.json()
 
-        # Handle both string and array audience values
-        audiences = [aud] if isinstance(aud, str) else aud
+        self._jwks_cache[jwks_uri] = {"jwks": jwks, "fetched_at": now}
+        logger.debug(
+            "jwks_cache_refreshed",
+            jwks_uri=jwks_uri,
+            keys_count=len(jwks.get("keys", [])),
+            ttl_seconds=self.jwks_cache_ttl_seconds,
+        )
 
-        if self.keycloak_client_id not in audiences:
-            logger.error(
-                "Audience validation failed",
-                expected=self.keycloak_client_id,
-                received=audiences,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token audience does not match expected client",
-            )
-
-    def has_role(self, user: KeycloakUser, role: str) -> bool:
-        """Check if user has the specified role."""
-        if not user.client_roles:
-            logger.info("User has no client roles", sub=user.sub)
-            return False
-
-        return role in user.client_roles
+        return jwks
 
 
 # Global auth service instance
-_auth_service: AuthService | None = None
+_auth_service: JWTAuthService | None = None
 
 
-def get_auth_service() -> AuthService:
+def get_auth_service() -> JWTAuthService:
     """Get the global auth service instance."""
     global _auth_service
     if _auth_service is None:
-        _auth_service = AuthService()
+        _auth_service = JWTAuthService()
     return _auth_service

@@ -15,11 +15,11 @@ Endpoints:
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.auth.dependencies import get_current_user_from_request
-from app.auth.models import KeycloakUser
+from app.auth.models import AuthenticatedUser
 from app.logger import get_logger
 from app.services.workflow_research_agent import (
     WorkflowResearchAgentService,
@@ -40,7 +40,10 @@ class StartResearchRequest(BaseModel):
     topic: str = Field(
         ...,
         min_length=5,
-        description="The topic to research. Include 'approval' or 'review' in the message to require human approval before finalizing.",
+        description=(
+            "The topic to research. Include 'approval' or 'review' in the message to require "
+            "human approval before finalizing."
+        ),
     )
     require_approval: bool | None = Field(
         default=None,
@@ -134,7 +137,7 @@ def get_research_service() -> WorkflowResearchAgentService:
 async def start_research(
     request: StartResearchRequest,
     service: Annotated[WorkflowResearchAgentService, Depends(get_research_service)],
-    current_user: Annotated[KeycloakUser, Depends(get_current_user_from_request)],
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user_from_request)],
 ) -> StartResearchResponse:
     """
     Start a new research workflow.
@@ -179,14 +182,14 @@ async def start_research(
             user_id=user_id,
             topic=request.topic,
         )
-        raise HTTPException(status_code=500, detail=f"Failed to start research: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to start research: {e}") from e
 
 
 @router.post("/run/{run_id}", response_model=WorkflowResultResponse)
 async def run_workflow(
     run_id: str,
     service: Annotated[WorkflowResearchAgentService, Depends(get_research_service)],
-    current_user: Annotated[KeycloakUser, Depends(get_current_user_from_request)],
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user_from_request)],
 ) -> WorkflowResultResponse:
     """
     Execute the research workflow.
@@ -214,17 +217,17 @@ async def run_workflow(
         return WorkflowResultResponse(**result)
     except ValueError as e:
         logger.warning("workflow_run_not_found", run_id=run_id, user_id=user_id, error=str(e))
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
         logger.error("workflow_run_failed", run_id=run_id, user_id=user_id, error=str(e))
-        raise HTTPException(status_code=500, detail=f"Failed to run workflow: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to run workflow: {e}") from e
 
 
 @router.get("/run/{run_id}/status", response_model=RunStatusResponse)
 async def get_run_status(
     run_id: str,
     service: Annotated[WorkflowResearchAgentService, Depends(get_research_service)],
-    current_user: Annotated[KeycloakUser, Depends(get_current_user_from_request)],
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user_from_request)],
 ) -> RunStatusResponse:
     """Get the current status of a workflow run."""
     user_id = current_user.sub if current_user else None
@@ -234,7 +237,7 @@ async def get_run_status(
         result = service.get_run_status(run_id)
         return RunStatusResponse(**result)
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
 
 @router.post("/run/{run_id}/approve", response_model=ApprovalResponse)
@@ -242,7 +245,7 @@ async def send_approval(
     run_id: str,
     request: ApprovalRequest,
     service: Annotated[WorkflowResearchAgentService, Depends(get_research_service)],
-    current_user: Annotated[KeycloakUser, Depends(get_current_user_from_request)],
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user_from_request)],
 ) -> ApprovalResponse:
     """
     Send approval for a research report awaiting approval.
@@ -280,7 +283,7 @@ async def send_approval(
             user_id=user_id,
             error=str(e),
         )
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error(
             "workflow_approval_failed",
@@ -288,7 +291,7 @@ async def send_approval(
             user_id=user_id,
             error=str(e),
         )
-        raise HTTPException(status_code=500, detail=f"Failed to send approval: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to send approval: {e}") from e
 
 
 @router.get("/health", response_model=HealthResponse)

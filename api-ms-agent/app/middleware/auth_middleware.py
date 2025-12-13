@@ -6,6 +6,7 @@ from fastapi import Request, Response, status
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from app.auth.errors import AuthError, auth_error_payload
 from app.auth.service import get_auth_service
 from app.logger import get_logger
 
@@ -36,6 +37,13 @@ EXCLUDED_PREFIXES: tuple[str, ...] = ("/docs", "/redoc", "/health", "/api/health
 class AuthMiddleware(BaseHTTPMiddleware):
     """Authentication middleware that validates JWT tokens for all routes except excluded ones."""
 
+    def _unauthorized(self, *, detail: str, code: str) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content=auth_error_payload(detail=detail, code=code),
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     def _is_excluded_route(self, path: str) -> bool:
         """Check if the request path should skip authentication."""
         # Check exact matches
@@ -61,20 +69,18 @@ class AuthMiddleware(BaseHTTPMiddleware):
         auth_header = request.headers.get("Authorization")
         if not auth_header:
             logger.warning("auth_failed", path=path, reason="missing_authorization_header")
-            return JSONResponse(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                content={"detail": "Missing Authorization header"},
-                headers={"WWW-Authenticate": "Bearer"},
+            return self._unauthorized(
+                detail="Missing Authorization header",
+                code="auth.missing_authorization_header",
             )
 
         # Validate bearer token format
         parts = auth_header.split()
         if len(parts) != 2 or parts[0].lower() != "bearer":
             logger.warning("auth_failed", path=path, reason="invalid_authorization_format")
-            return JSONResponse(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                content={"detail": "Invalid Authorization header format. Expected: Bearer <token>"},
-                headers={"WWW-Authenticate": "Bearer"},
+            return self._unauthorized(
+                detail="Invalid Authorization header format. Expected: Bearer <token>",
+                code="auth.invalid_authorization_format",
             )
 
         token = parts[1]
@@ -89,22 +95,38 @@ class AuthMiddleware(BaseHTTPMiddleware):
             logger.debug(
                 "auth_success",
                 path=path,
-                user_id=user.sub,
-                username=user.preferred_username,
+                provider=getattr(user, "provider", None),
+                subject=getattr(user, "sub", None),
+                username=getattr(user, "preferred_username", None),
             )
 
-        except Exception as e:
+        except AuthError as exc:
+            logger.warning(
+                "auth_failed",
+                path=path,
+                reason="token_validation_failed",
+                code=exc.code,
+                error=str(exc.detail),
+            )
+            headers = exc.headers or {"WWW-Authenticate": "Bearer"}
+            return JSONResponse(
+                status_code=exc.status_code,
+                content=exc.to_payload(),
+                headers=headers,
+            )
+
+        except Exception as exc:
             # Log the error but return generic 401 to avoid leaking info
             logger.warning(
                 "auth_failed",
                 path=path,
                 reason="token_validation_failed",
-                error=str(e),
+                code="auth.invalid_or_expired",
+                error=str(exc),
             )
-            return JSONResponse(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                content={"detail": "Invalid or expired token"},
-                headers={"WWW-Authenticate": "Bearer"},
+            return self._unauthorized(
+                detail="Invalid or expired token",
+                code="auth.invalid_or_expired",
             )
 
         return await call_next(request)

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.auth.dependencies import get_current_user_from_request
-from app.auth.models import KeycloakUser
+from app.auth.models import AuthenticatedUser
 from app.logger import get_logger
 from app.services.azure_search_service import (
     AzureSearchService,
@@ -84,7 +84,7 @@ async def chat(
     cosmos: Annotated[CosmosDbService, Depends(get_cosmos_db_service)],
     search: Annotated[AzureSearchService, Depends(get_azure_search_service)],
     embedding_service: Annotated[EmbeddingService, Depends(get_embedding_service)],
-    current_user: Annotated[KeycloakUser, Depends(get_current_user_from_request)],
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user_from_request)],
 ) -> ChatResponse:
     """
     Send a message to the chat agent and receive a response with source attribution.
@@ -306,7 +306,7 @@ class SessionListResponse(BaseModel):
 @router.post("/sessions", response_model=SessionResponse)
 async def create_session(
     cosmos: Annotated[CosmosDbService, Depends(get_cosmos_db_service)],
-    current_user: Annotated[KeycloakUser, Depends(get_current_user_from_request)],
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user_from_request)],
     title: str | None = None,
 ) -> SessionResponse:
     """Create a new chat session."""
@@ -318,7 +318,7 @@ async def create_session(
 @router.get("/sessions", response_model=SessionListResponse)
 async def list_sessions(
     cosmos: Annotated[CosmosDbService, Depends(get_cosmos_db_service)],
-    current_user: Annotated[KeycloakUser, Depends(get_current_user_from_request)],
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user_from_request)],
     limit: int = 20,
 ) -> SessionListResponse:
     """List user's chat sessions."""
@@ -342,7 +342,7 @@ async def list_sessions(
 async def get_session_history(
     session_id: str,
     cosmos: Annotated[CosmosDbService, Depends(get_cosmos_db_service)],
-    current_user: Annotated[KeycloakUser, Depends(get_current_user_from_request)],
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user_from_request)],
     limit: int = 50,
 ) -> dict:
     """Get chat history for a session."""
@@ -367,7 +367,7 @@ async def get_session_history(
 async def delete_session(
     session_id: str,
     cosmos: Annotated[CosmosDbService, Depends(get_cosmos_db_service)],
-    current_user: Annotated[KeycloakUser, Depends(get_current_user_from_request)],
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user_from_request)],
 ) -> dict:
     """Delete a chat session and all its messages."""
     user_id = current_user.sub

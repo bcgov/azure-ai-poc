@@ -10,8 +10,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from app.auth.dependencies import get_current_user
-from app.auth.models import KeycloakUser as User
+from app.auth.dependencies import get_current_user_from_request
+from app.auth.models import AuthenticatedUser
 from app.logger import get_logger
 from app.services.orchestrator_agent import get_orchestrator_agent
 
@@ -67,7 +67,7 @@ class OrchestratorQueryResponse(BaseModel):
 @router.post("/query", response_model=OrchestratorQueryResponse)
 async def query_orchestrator(
     request: OrchestratorQueryRequest,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user_from_request)],
 ) -> OrchestratorQueryResponse:
     """
     Query the orchestrator agent to get information about BC businesses and locations.

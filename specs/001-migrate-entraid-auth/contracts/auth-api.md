@@ -1,4 +1,4 @@
-# API Contracts: Entra ID Authentication
+# API Contracts: Entra ID + Keycloak Authentication
 
 **Date**: 2025-12-11  
 **Status**: Complete  
@@ -8,7 +8,8 @@
 
 ## Overview
 
-Authentication changes are internal to the backend auth service; no new public API endpoints are added. All existing endpoints remain available; their behavior changes only in that they now accept Entra ID tokens in addition to (during coexistence) Keycloak tokens.
+Authentication changes are internal to the backend auth service; no new public API endpoints are added.
+All existing endpoints remain available; their behavior changes only in that they now accept Entra ID tokens in addition to (during coexistence) Keycloak tokens.
 
 This document specifies:
 1. **Token Format**: JWT structure expected by all protected endpoints
@@ -35,7 +36,7 @@ components:
         - sub: Subject (user object ID)
         - aud: Audience (must match API client ID)
         - exp: Expiration (must be in future)
-        - groups: Security groups (for role-based access control)
+        - roles: Application roles used for role-based access control
 
 security:
   - BearerToken: []
@@ -108,8 +109,7 @@ paths:
 
 **Possible reasons**:
 - User authenticated but not assigned required role
-- User groups not mapped to any role
-- Entra groups claim missing or empty
+- Token does not contain the required application role
 
 ---
 
@@ -120,17 +120,17 @@ paths:
 **Response Body**:
 ```json
 {
-  "detail": "Token validation failed: missing 'groups' claim",
+  "detail": "Token validation failed: missing 'roles' claim",
   "code": "auth.missing_claim",
-  "missing_claim": "groups",
+  "missing_claim": "roles",
   "timestamp": "2025-12-11T15:30:45.123Z"
 }
 ```
 
 **Possible reasons**:
-- Entra token missing `groups` claim (optional claims not configured in app registration)
-- Issuer (`iss`) claim doesn't match configured Entra tenant
-- Audience (`aud`) doesn't match API client ID
+- Token missing required authorization claims (e.g., missing `roles` when a role is required)
+- Issuer (`iss`) claim doesn't match a configured provider
+- Audience (`aud`) doesn't match configured API audience
 
 ---
 
@@ -155,7 +155,7 @@ Accept: application/json
   "exp": 1702401600,
   "iat": 1702398000,
   "email": "user@bcgov.ca",
-  "groups": ["11111111-1111-1111-1111-111111111111"],
+  "roles": ["ai-poc-participant"],
   "scp": "api://read"
 }
 ```
@@ -202,7 +202,7 @@ Authorization: Bearer eyJhbGc...
 **Token Contents**:
 ```json
 {
-  "groups": ["22222222-2222-2222-2222-222222222222"],  // Mapped to "guest" role
+  "roles": ["ai-poc-participant"],
   "scp": "api://read"
 }
 ```
@@ -252,9 +252,8 @@ For reference, the backend implements this algorithm:
    - `iss` matches configured issuer
    - `aud` matches API client ID
    - `sub` is non-empty UUID
-7. **Extract groups**: From `groups` claim
-8. **Map roles**: Each group ID → application role (via RoleMapping)
-9. **Return user object**: With roles for downstream authorization checks
+7. **Extract roles**: From the token’s application roles claim (and normalize per provider)
+8. **Return user object**: With roles for downstream authorization checks
 
 ---
 

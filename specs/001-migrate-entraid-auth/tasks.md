@@ -1,7 +1,7 @@
-# Implementation Tasks: Migrate to MS Entra ID for Authentication
+# Implementation Tasks: Add MS Entra ID Authentication alongside Keycloak
 
-**Branch**: `001-migrate-entraid-auth` | **Date**: 2025-12-11  
-**Feature**: Migrate from Keycloak to MS Entra ID for authentication and authorization  
+**Branch**: `001-migrate-entraid-auth` | **Date**: 2025-12-12  
+**Feature**: Add MS Entra ID alongside Keycloak for authentication and authorization (coexistence + cutover/rollback)  
 **Spec**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md) | **Research**: [research.md](research.md)
 
 ---
@@ -24,20 +24,22 @@ This document outlines all implementation tasks organized by user story and prio
 
 ### Infrastructure & Entra ID Setup
 
-- [ ] T001 Create Entra ID app registrations (SPA + API) via Azure CLI script `infra/scripts/create-entra-apps.sh`
-- [ ] T002 [P] Create Entra ID security groups for roles `infra/scripts/create-entra-groups.sh`
-- [ ] T003 [P] Add test users to Entra groups `infra/scripts/add-users-to-groups.sh`
-- [ ] T004 Configure app registration optional claims (groups) in Azure Portal or script
-- [ ] T005 Create `.env.example` for both backend and frontend with Entra configuration variables
+- [x] T001 Implement Entra app automation (SPA + API + service-to-service) via `infra/scripts/entra/create-entra-apps.sh`
+- [x] T002 [P] Implement Entra group automation for role values via `infra/scripts/entra/create-entra-groups.sh`
+- [x] T003 [P] Implement app-role assignment automation via `infra/scripts/entra/assign-entra-app-roles-to-groups.sh`
+- [x] T004 [P] Implement user-to-group automation via `infra/scripts/entra/add-users-to-groups.sh`
+- [x] T005 Create `.env.example` for both backend and frontend with Entra configuration variables
+
+Note: Running these scripts is an operator step (per environment) and is documented in `infra/scripts/entra/README.md`.
 
 ### Backend Dependencies
 
-- [ ] T006 [P] Add `PyJWT` to `api-ms-agent/pyproject.toml` (already has `python-jose`)
-- [ ] T007 [P] Run `uv sync` in `api-ms-agent/` to install dependencies
+- [x] T006 [P] Add `PyJWT` to `api-ms-agent/pyproject.toml` (already has `python-jose`)
+- [x] T007 [P] Run `uv sync` in `api-ms-agent/` to install dependencies
 
 ### Frontend Dependencies
 
-- [ ] T008 [P] Install MSAL.js libraries: `npm install @azure/msal-browser @azure/msal-react` in `frontend/`
+- [x] T008 [P] Install MSAL.js libraries: `npm install @azure/msal-browser @azure/msal-react` in `frontend/`
 
 ---
 
@@ -50,51 +52,51 @@ This document outlines all implementation tasks organized by user story and prio
 
 ### Backend Auth Service Refactoring
 
-- [ ] T009 Refactor `api-ms-agent/app/auth/service.py` to support multiple token issuers
+- [x] T009 Refactor `api-ms-agent/app/auth/service.py` to support multiple token issuers
   - Rename `KeycloakAuthService` → `JWTAuthService`
   - Add `_validate_entra_token()` and `_validate_keycloak_token()` methods
   - Implement issuer detection from JWT `iss` claim
   - Add JWKS caching with 24-hour TTL
 
-- [ ] T010 Create role mapping configuration in `api-ms-agent/app/auth/role_mapping.py`
-  - Define `ROLE_MAPPING: Dict[str, str]` mapping Entra group IDs to app roles
-  - Implement `map_groups_to_roles(groups: List[str]) -> List[str]` function
-  - Set defaults: missing role mapping → "guest" role
+- [x] T010 Create role mapping configuration in `api-ms-agent/app/auth/role_mapping.py`
+  - Normalize provider-specific role claims into a single internal role list
+  - Entra: rely on `roles` claim (app roles)
+  - Keycloak: map existing Keycloak role claims to the same internal role names (if needed)
 
-- [ ] T011 Update `api-ms-agent/app/auth/models.py` to support Entra token claims
-  - Ensure `EntraUser` model exists with fields: object_id, email, display_name, groups, roles
+- [x] T011 Update `api-ms-agent/app/auth/models.py` to support Entra token claims
+  - Ensure `EntraUser` model exists with fields: object_id, email, display_name, roles
   - Add Pydantic validation for UUID and email formats
 
-- [ ] T012 Update `api-ms-agent/app/auth/dependencies.py` with multi-issuer support
+- [x] T012 Update `api-ms-agent/app/auth/dependencies.py` with multi-issuer support
   - Update `get_current_user()` to call refactored `JWTAuthService`
   - Update error handling to distinguish between missing token, invalid signature, expired token
   - Ensure structured logging captures token validation success/failure
 
-- [ ] T013 Add configuration in `api-ms-agent/app/config.py` for Entra ID settings
-  - `ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID`, `ENTRA_AUTHORITY`, `ENTRA_JWKS_URI`
-  - `KEYCLOAK_ENABLED`, `ENTRA_ID_ENABLED` (feature flags)
+- [x] T013 Add configuration in `api-ms-agent/app/config.py` for Entra ID settings
+  - `ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID`, `ENTRA_ISSUER`, `ENTRA_JWKS_URI`
+  - `KEYCLOAK_ENABLED`, `ENTRA_ENABLED` (feature flags)
   - Update validation: at least one auth provider must be enabled
 
 ### Backend Integration Tests (Token Validation)
 
-- [ ] T014 [P] Create `api-ms-agent/tests/test_auth_entra_token_validation.py`
+- [x] T014 [P] Create `api-ms-agent/tests/test_auth_entra_token_validation.py`
   - Test valid Entra token acceptance with correct issuer, audience, claims
   - Test invalid signature rejection
   - Test expired token rejection
   - Test missing mandatory claims rejection
   - Test JWKS caching behavior
 
-- [ ] T015 [P] Create `api-ms-agent/tests/test_auth_keycloak_token_validation.py`
+- [x] T015 [P] Create `api-ms-agent/tests/test_auth_keycloak_token_validation.py`
   - Mirror tests for Keycloak tokens to ensure backward compatibility
 
-- [ ] T016 [P] Create `api-ms-agent/tests/test_auth_coexistence.py`
+- [x] T016 [P] Create `api-ms-agent/tests/test_auth_coexistence.py`
   - Test both providers enabled: valid tokens from both accepted
   - Test one provider disabled: tokens from disabled provider rejected
   - Test feature flag toggle: disable/enable Entra ID via config
 
 ### Frontend Configuration
 
-- [ ] T017 [P] Create `frontend/src/env.ts` with Entra configuration
+- [x] T017 [P] Create `frontend/src/env.ts` with Entra configuration
   - Export `VITE_ENTRA_TENANT_ID`, `VITE_ENTRA_CLIENT_ID`, `VITE_ENTRA_AUTHORITY`
   - Export `VITE_API_SCOPES`, `VITE_REDIRECT_URI`
   - Support .env file loading via Vite
@@ -114,39 +116,39 @@ This document outlines all implementation tasks organized by user story and prio
 
 ### Implementation Tasks
 
-- [ ] T018 [US1] Add Entra-specific error messages to `api-ms-agent/app/auth/service.py`
+- [x] T018 [US1] Add Entra-specific error messages to `api-ms-agent/app/auth/service.py`
   - Return structured error responses with `detail`, `code`, `timestamp`
   - Log token validation failures with issuer, subject, expiry for audit
 
-- [ ] T019 [US1] Implement role-based access control decorator in `api-ms-agent/app/auth/dependencies.py`
+- [x] T019 [US1] Implement role-based access control decorator in `api-ms-agent/app/auth/dependencies.py`
   - Create `require_role(role: str)` dependency for use in endpoints
   - Validate user has required role; return 403 if not
 
-- [ ] T020 [US1] Update at least 2 existing protected endpoints to use new auth
+- [x] T020 [US1] Update at least 2 existing protected endpoints to use new auth
   - Example: `api-ms-agent/app/routers/documents.py` or equivalent
   - Apply `@require_role()` decorator where appropriate
   - Ensure backward compatibility with Keycloak tokens during coexistence
 
 ### Testing Tasks (US1)
 
-- [ ] T021 [P] [US1] Create integration test `api-ms-agent/tests/test_protected_endpoint_entra.py`
+- [x] T021 [P] [US1] Create integration test `api-ms-agent/tests/test_protected_endpoint_entra.py`
   - Test protected endpoint with valid Entra token → 200 OK
   - Test protected endpoint with invalid token → 401 Unauthorized
   - Test protected endpoint with missing role → 403 Forbidden
-  - Test role mapping: group ID → role → endpoint access
+  - Test role enforcement: required role present/absent in the `roles` claim
 
-- [ ] T022 [P] [US1] Create manual test guide in `specs/001-migrate-entraid-auth/testing-guide-us1.md`
+- [x] T022 [P] [US1] Create manual test guide in `specs/001-migrate-entraid-auth/testing-guide-us1.md`
   - Steps to generate Entra test token (jq + curl)
   - Steps to call protected endpoint with token
   - Expected success/failure responses
 
 ### Documentation Tasks (US1)
 
-- [ ] T023 [US1] Update `README.md`: Document Entra ID configuration steps for admins
+- [x] T023 [US1] Update `README.md`: Document Entra ID configuration steps for admins
   - Required environment variables: `ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID`, etc.
-  - Feature flags: `ENTRA_ID_ENABLED`, `KEYCLOAK_ENABLED`
+  - Feature flags: `ENTRA_ENABLED`, `KEYCLOAK_ENABLED`
 
-- [ ] T024 [US1] Update `api-ms-agent/README.md` with Entra token validation details
+- [x] T024 [US1] Update `api-ms-agent/README.md` with Entra token validation details
   - Supported token issuers
   - JWKS refresh strategy
   - Role mapping location
@@ -227,7 +229,7 @@ This document outlines all implementation tasks organized by user story and prio
 - [ ] T035 [US2] Create `frontend/ENTRA_ID_SETUP.md`
   - Step-by-step: Create Entra app registration (SPA)
   - Configure redirect URIs
-  - Request optional claims (groups)
+  - Define app roles on the API app registration and assign them (user/group assignment)
 
 ---
 
@@ -244,7 +246,7 @@ This document outlines all implementation tasks organized by user story and prio
 
 ### Implementation Tasks
 
-- [ ] T036 [US3] Ensure feature flags `KEYCLOAK_ENABLED` and `ENTRA_ID_ENABLED` control token validation
+- [ ] T036 [US3] Ensure feature flags `KEYCLOAK_ENABLED` and `ENTRA_ENABLED` control token validation
   - Update `api-ms-agent/app/auth/service.py` to check flags before accepting token
   - Return 401 if both disabled
   - Return 401 if issuer's flag is disabled
@@ -273,7 +275,7 @@ This document outlines all implementation tasks organized by user story and prio
 ### Infrastructure Tasks (US3)
 
 - [ ] T041 [US3] Update `infra/modules/backend/main.tf` to pass feature flags as env vars
-  - Add `KEYCLOAK_ENABLED`, `ENTRA_ID_ENABLED` to Container App/App Service config
+  - Add `KEYCLOAK_ENABLED`, `ENTRA_ENABLED` to Container App/App Service config
   - Document default values (both enabled during transition)
 
 - [ ] T042 [P] [US3] Create migration runbook in `infra/MIGRATION_RUNBOOK.md`
@@ -311,14 +313,14 @@ This document outlines all implementation tasks organized by user story and prio
 ### Final Documentation
 
 - [ ] T046 Update main `README.md` with new auth architecture overview
-  - Remove Keycloak references or mark as deprecated
+  - Document Keycloak + Entra coexistence and cutover/rollback flags
   - Add Entra ID authentication section
   - Link to ENTRA_ID_SETUP.md in both README files
 
 - [ ] T047 [P] Create troubleshooting guide in `docs/ENTRA_ID_TROUBLESHOOTING.md`
   - "Token validation fails" → check issuer, audience, expiry, JWKS
-  - "User locked out" → check Entra group assignments, role mapping
-  - "Groups claim missing" → check optional claims config in app registration
+  - "User locked out" → check Entra app role assignment (often via group assignment)
+  - "Roles claim missing" → verify the user/group is assigned an app role on the API enterprise application
 
 ---
 
@@ -403,14 +405,14 @@ Phase 6 (Polish)
 
 **Backend**: api-ms-agent/
 - [ ] app/auth/service.py (refactored, multi-issuer)
-- [ ] app/auth/models.py (EntraUser with groups/roles)
+- [ ] app/auth/models.py (EntraUser with roles)
 - [ ] app/auth/dependencies.py (updated for Entra)
-- [ ] app/auth/role_mapping.py (new, group→role mapping)
+- [ ] app/auth/role_mapping.py (new, provider role normalization)
 - [ ] app/config.py (Entra config + feature flags)
 - [ ] app/middleware/auth_middleware.py (logging)
 - [ ] app/routers/metrics.py (new, auth metrics)
 - [ ] tests/test_auth_*.py (3 test files)
-- [ ] pyproject.toml (PyJWT added)
+- [x] pyproject.toml (PyJWT added)
 - [ ] README.md (updated with Entra section)
 
 **Frontend**: frontend/
@@ -423,15 +425,14 @@ Phase 6 (Polish)
 - [ ] src/main.tsx (updated with AuthProvider)
 - [ ] src/__tests__/auth.test.ts (new)
 - [ ] e2e/auth.spec.ts (new, Playwright)
-- [ ] package.json (MSAL libs added)
+- [x] package.json (MSAL libs added)
 - [ ] ENTRA_ID_SETUP.md (new)
 
 **Infrastructure**: infra/
-- [ ] scripts/create-entra-apps.sh (new)
-- [ ] scripts/create-entra-groups.sh (new)
-- [ ] scripts/add-users-to-groups.sh (new)
-- [ ] modules/backend/main.tf (updated)
-- [ ] modules/frontend/main.tf (updated)
+- [x] scripts/entra/create-entra-apps.sh (complete)
+- [x] scripts/entra/create-entra-groups.sh (complete)
+- [x] scripts/entra/assign-entra-app-roles-to-groups.sh (complete)
+- [x] scripts/entra/add-users-to-groups.sh (complete)
 - [ ] MIGRATION_CHECKLIST.md (new)
 - [ ] ROLLBACK.md (new)
 - [ ] MIGRATION_RUNBOOK.md (new)

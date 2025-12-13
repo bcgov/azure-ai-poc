@@ -16,11 +16,10 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.auth.dependencies import get_current_user_from_request
-from app.auth.models import KeycloakUser
+from app.auth.models import AuthenticatedUser
 from app.logger import get_logger
 from app.services.research_agent import (
     DeepResearchAgentService,
-    ResearchPhase,
     get_deep_research_service,
 )
 
@@ -154,7 +153,7 @@ ResearchServiceDep = Annotated[DeepResearchAgentService, Depends(get_research_se
 async def start_research(
     request: StartResearchRequest,
     service: ResearchServiceDep,
-    current_user: Annotated[KeycloakUser, Depends(get_current_user_from_request)],
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user_from_request)],
 ) -> WorkflowStartResponse:
     """Start a new research workflow."""
     user_id = current_user.sub if current_user else request.user_id
@@ -172,7 +171,7 @@ async def start_research(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to start research: {str(e)}",
-        )
+        ) from e
 
 
 @router.post(
@@ -181,12 +180,12 @@ async def start_research(
     summary="Execute the research workflow",
     description="""
     Execute the research workflow.
-    
+
     The workflow will run through all phases:
     1. Planning - Creates research plan with approval checkpoint
     2. Researching - Gathers findings with approval checkpoint
     3. Synthesizing - Creates final report with approval checkpoint
-    
+
     Each phase uses ai_function(approval_mode="always_require") for human-in-the-loop.
     """,
 )
@@ -201,13 +200,13 @@ async def run_workflow(
         result = await service.run_workflow(run_id)
         return WorkflowResultResponse(**result)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
     except Exception as e:
         logger.error("run_workflow_failed", run_id=run_id, error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to run workflow: {str(e)}",
-        )
+        ) from e
 
 
 @router.get(
@@ -215,7 +214,7 @@ async def run_workflow(
     summary="Execute workflow with streaming events",
     description="""
     Execute the research workflow and stream events as they occur.
-    
+
     Returns Server-Sent Events (SSE) with workflow progress,
     including approval requests that pause the workflow.
     """,
@@ -262,7 +261,7 @@ async def get_run_status(
         result = service.get_run_status(run_id)
         return WorkflowStatusResponse(**result)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
 
 
 @router.post(
@@ -271,7 +270,7 @@ async def get_run_status(
     summary="Send approval for a pending checkpoint",
     description="""
     Send an approval response for a pending human-in-the-loop checkpoint.
-    
+
     When the workflow pauses at an approval checkpoint, use this endpoint
     to approve or reject and resume the workflow.
     """,
@@ -298,13 +297,13 @@ async def send_approval(
         )
         return ApprovalResponse(**result)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     except Exception as e:
         logger.error("send_approval_failed", run_id=run_id, error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to send approval: {str(e)}",
-        )
+        ) from e
 
 
 @router.get(

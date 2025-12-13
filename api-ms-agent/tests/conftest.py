@@ -18,6 +18,7 @@ MOCK_USER = KeycloakUser(
     given_name="Test",
     family_name="User",
     client_roles=["ai-poc-participant"],
+    roles=["ai-poc-participant"],
     aud="azure-poc-6086",
 )
 

@@ -1,8 +1,12 @@
 """Models router for exposing available AI models."""
 
-from fastapi import APIRouter
+from typing import Annotated
+
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
+from app.auth.dependencies import require_role
+from app.auth.models import AuthenticatedUser
 from app.config import settings
 
 router = APIRouter()
@@ -25,7 +29,9 @@ class ModelsResponse(BaseModel):
 
 
 @router.get("/", response_model=ModelsResponse)
-async def list_models() -> ModelsResponse:
+async def list_models(
+    _current_user: Annotated[AuthenticatedUser, Depends(require_role("ai-poc-participant"))],
+) -> ModelsResponse:
     """
     List available AI models.
 
@@ -37,7 +43,10 @@ async def list_models() -> ModelsResponse:
 
 
 @router.get("/{model_id}", response_model=ModelInfo)
-async def get_model(model_id: str) -> ModelInfo:
+async def get_model(
+    model_id: str,
+    _current_user: Annotated[AuthenticatedUser, Depends(require_role("ai-poc-participant"))],
+) -> ModelInfo:
     """
     Get details for a specific model.
 

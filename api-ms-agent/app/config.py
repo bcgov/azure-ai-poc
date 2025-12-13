@@ -54,6 +54,24 @@ class Settings(BaseSettings):
     devui_auto_open: bool = False
     devui_mode: str = "developer"  # developer | user
 
+    # Authentication (Keycloak + Entra)
+    # Defaults preserve existing Keycloak behavior; Entra is opt-in.
+    keycloak_enabled: bool = True
+    keycloak_url: str = "https://dev.loginproxy.gov.bc.ca/auth"
+    keycloak_realm: str = "standard"
+    keycloak_client_id: str = "azure-poc-6086"
+
+    entra_enabled: bool = False
+    entra_tenant_id: str = ""
+    # API application (audience) for access tokens.
+    entra_client_id: str = ""
+    # Optional overrides; if empty and tenant is provided, derived automatically.
+    entra_issuer: str = ""
+    entra_jwks_uri: str = ""
+
+    # JWKS caching
+    jwks_cache_ttl_seconds: int = 86400
+
     # Cosmos DB settings - for chat history, metadata, and workflow persistence
     cosmos_db_endpoint: str = ""
     cosmos_db_key: str = ""  # Optional if using managed identity

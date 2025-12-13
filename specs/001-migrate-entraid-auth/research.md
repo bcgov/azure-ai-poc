@@ -1,4 +1,4 @@
-# Research: MS Entra ID Migration
+# Research: Entra ID + Keycloak Coexistence
 
 **Date**: 2025-12-11  
 **Status**: Complete  
@@ -10,7 +10,7 @@
 
 **Clarification from spec**: Should we support coexistence (Keycloak + Entra ID) or cut over immediately?
 
-**Decision**: **A - Coexistence with feature flag** (phased migration)
+**Decision**: **Coexistence (side-by-side) with admin-controlled cutover/rollback**
 
 **Rationale**: 
 - Minimizes risk of downtime; allows rollback if issues emerge
@@ -24,10 +24,9 @@
 - **C - Phased canary**: More complex; requires user routing logic; consider post-Phase 1 if needed
 
 **Implementation impact**:
-- Auth middleware will accept tokens from both Keycloak and Entra ID during coexistence
-- Feature flag `ENTRA_ID_ENABLED` controls whether Entra tokens are accepted
-- Default: Keycloak → Entra → Disabled; Admin can switch via config
-- Token source detected by `iss` claim in JWT
+- Backend accepts tokens from both Keycloak and Entra while both are enabled
+- Each provider can be enabled/disabled independently (coexistence, cutover, rollback)
+- Token source detected primarily by `iss` claim in JWT
 
 ---
 
@@ -35,23 +34,21 @@
 
 **Clarification from spec**: Where should roles be sourced from in Entra?
 
-**Decision**: **B - Groups mapping** (preferred) + **A - App roles** (fallback)
+**Decision**: **Entra App Roles assigned to Groups** (users get roles via group assignment)
 
 **Rationale**:
-- Groups mapping aligns with typical Azure AD organizational practices (users assigned to security groups)
-- Groups are easier to manage in Azure Portal than custom claims
-- Fallback to app roles for fine-grained permissions if groups insufficient
-- Supports claim transformation in token (optional, via optional claims in app registration)
+- App roles provide a stable, explicit authorization model for the application
+- Assigning app roles to groups keeps day-to-day user management group-based
+- Tokens can carry app roles consistently (e.g., `roles` claim), minimizing custom mapping logic
 
 **Alternatives considered**:
 - **A - App roles only**: Less flexible for organizational role management; app roles are typically predefined
 - **C - Custom claims mapping**: Requires custom provisioning logic; more admin overhead
 
 **Implementation impact**:
-- Token will include `groups` claim (security group IDs from Azure AD)
-- Custom role mapping config: map group IDs to application roles (e.g., `"group-id-xxx"` → `"admin"`)
-- Optional: Add app roles for fine-grained permissions (e.g., `"document-reviewer"`)
-- Middleware validates `groups` claim and maps to internal roles for @require_role() decorator
+- Entra tokens should include application roles (typically in the `roles` claim)
+- Authorization checks should use a consistent internal role model across providers
+- Keycloak roles/claims should be mapped to the same internal role names during coexistence
 
 ---
 
@@ -59,24 +56,20 @@
 
 **Clarification from spec**: Which user provisioning approach should we use?
 
-**Decision**: **C - Just-in-time (JIT) provisioning** + optional sync for audit
+**Decision**: **Identity-provider managed only** (no user sync / no local persistence)
 
 **Rationale**:
-- Simplest approach; no need for scheduled sync jobs
-- Users are auto-provisioned on first successful Entra login
-- Reduces operational overhead (no cron jobs, no sync failures)
-- Audit trail: logs capture user first login via Entra
-- Optional: Can add periodic sync for user attribute updates if needed later
+- Avoids introducing a local user database or synchronization workflow
+- Keeps Entra/Keycloak as the source of truth for identity and group/role assignment
+- Reduces operational and security surface area
 
 **Alternatives considered**:
 - **A - IdP-managed only**: May lose user context; harder to audit who has logged in
 - **B - Periodic sync**: More complex; requires sync job, handles conflicts, slower to propagate changes
 
 **Implementation impact**:
-- On successful Entra token validation: create local user record if not exists (idempotent)
-- Store mapping: Entra object_id ↔ local user_id
-- Log user creation and group assignments for audit
-- Optional future: Add sync job for user attribute updates (email, display_name changes)
+- No persistence required for authentication/authorization
+- Logging provides audit visibility without storing identities
 
 ---
 
@@ -119,15 +112,13 @@
 
 ---
 
-### Infrastructure Automation: Terraform + Bash
+### Infrastructure Automation: Azure CLI + Graph (scripts)
 
-**Decision**: **Terraform for app registrations + Bash for groups/user assignments**
+**Decision**: Use the repo’s Entra scripts under `infra/scripts/entra/`
 
 **Rationale**:
-- Terraform `azurerm_` provider has full support for app registrations (desired state)
-- Bash scripts (`az` CLI) more flexible for groups and user assignments (imperative steps)
-- Terraform state management ensures idempotent infra changes
-- Bash scripts can be run post-apply or embedded in cloud-init
+- Scripts are explicit, repeatable, and keep parameters provided at runtime (no hidden defaults)
+- Scripts handle nested Graph application configuration in an idempotent way
 
 **Alternatives considered**:
 - Pure Bash: No state management; harder to track what's deployed
@@ -135,10 +126,10 @@
 - Azure Bicep: Less familiar to team; Terraform already in use
 
 **Implementation**:
-- `infra/modules/entra-id/main.tf`: App registrations (SPA + API), API scopes, redirect URIs
-- `infra/scripts/create-entra-groups.sh`: Create security groups, assign roles
-- `infra/scripts/add-users-to-groups.sh`: Bulk user assignments
-- `infra/scripts/cleanup-keycloak.sh`: Post-migration: revoke Keycloak tokens, disable realm
+- `infra/scripts/entra/create-entra-apps.sh`: App registrations (SPA + API + S2S), scopes, app roles
+- `infra/scripts/entra/create-entra-groups.sh`: Security groups for role values
+- `infra/scripts/entra/assign-entra-app-roles-to-groups.sh`: Assign app roles to groups
+- `infra/scripts/entra/add-users-to-groups.sh`: Add users to groups
 
 ---
 
@@ -228,14 +219,15 @@ class JWKSCache:
 
 ### Unit Tests
 - Token validation with valid/expired/invalid signatures
-- Claims mapping: groups → roles
+- Role extraction/normalization across providers (Entra `roles` claim; Keycloak role claims)
 - Coexistence: both Keycloak and Entra tokens accepted
+- Provider enable/disable feature flags (cutover/rollback)
 - Error handling: missing claims, wrong issuer, etc.
 
 ### Integration Tests
 - End-to-end auth flow with Entra test app
 - Protected endpoint access with Entra token
-- Role-based access control: allowed/denied based on groups
+- Role-based access control: allowed/denied based on application roles (assigned to users via groups)
 
 ### Manual Testing
 - Dev: MSAL.js token acquisition and API calls
@@ -248,12 +240,10 @@ class JWKSCache:
 
 | Item | Owner | Status |
 |------|-------|--------|
-| `data-model.md` | Design Phase 1 | TBD |
-| `contracts/auth-api.yaml` | Design Phase 1 | TBD |
-| `quickstart.md` | Design Phase 1 | TBD |
-| `infra/modules/entra-id/main.tf` | Implementation | TBD |
-| `infra/scripts/create-entra-groups.sh` | Implementation | TBD |
-| `infra/scripts/add-users-to-groups.sh` | Implementation | TBD |
+| `data-model.md` | Design Phase 1 | Complete |
+| `contracts/auth-api.md` | Design Phase 1 | Complete |
+| `quickstart.md` | Design Phase 1 | Complete |
+| `infra/scripts/entra/*` | Implementation | Complete |
 | `api-ms-agent/app/auth/service.py` (refactor) | Implementation | TBD |
 | `frontend/src/service/auth-service.ts` (new) | Implementation | TBD |
 | Integration tests | Implementation | TBD |
@@ -268,6 +258,6 @@ class JWKSCache:
 | Entra token validation fails in production | Feature flag allows quick disable; rollback to Keycloak only |
 | Users locked out during transition | Coexistence period; both providers active until cutover |
 | JWKS caching stale keys | Background refresh + manual override capability |
-| Groups not mapped correctly | Pre-production testing with test users in all groups |
+| App role assignments misconfigured | Pre-production testing with test users across all role groups; verify `roles` claim in access token |
 | Token clock skew issues | Support ±5s clock skew in validation |
 
