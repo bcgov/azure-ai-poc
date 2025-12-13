@@ -153,8 +153,7 @@ class AuthMetrics:
                 reason_label = _sanitize_label_value(reason)
                 code_label = _sanitize_label_value(code)
                 lines.append(
-                    "auth_failure_total"
-                    f'{{reason="{reason_label}",code="{code_label}"}} {count}'
+                    f'auth_failure_total{{reason="{reason_label}",code="{code_label}"}} {count}'
                 )
 
             # auth_role_denied_total
@@ -176,13 +175,13 @@ class AuthMetrics:
                 for bound in hist.buckets_ms:
                     cumulative += hist.bucket_counts.get(bound, 0)
                     labels = f'provider="{provider_label}",le="{bound}"'
-                    lines.append(f'auth_validation_duration_ms_bucket{{{labels}}} {cumulative}')
+                    lines.append(f"auth_validation_duration_ms_bucket{{{labels}}} {cumulative}")
                 # +Inf bucket
                 labels_inf = f'provider="{provider_label}",le="+Inf"'
-                lines.append(f'auth_validation_duration_ms_bucket{{{labels_inf}}} {hist.count}')
+                lines.append(f"auth_validation_duration_ms_bucket{{{labels_inf}}} {hist.count}")
                 labels_no_le = f'provider="{provider_label}"'
-                lines.append(f'auth_validation_duration_ms_sum{{{labels_no_le}}} {hist.sum_ms}')
-                lines.append(f'auth_validation_duration_ms_count{{{labels_no_le}}} {hist.count}')
+                lines.append(f"auth_validation_duration_ms_sum{{{labels_no_le}}} {hist.sum_ms}")
+                lines.append(f"auth_validation_duration_ms_count{{{labels_no_le}}} {hist.count}")
 
             # auth_authorization_duration_ms
             lines.append("# HELP auth_authorization_duration_ms Authorization duration (ms)")
@@ -194,12 +193,12 @@ class AuthMetrics:
                 for bound in hist.buckets_ms:
                     cumulative += hist.bucket_counts.get(bound, 0)
                     labels = f'provider="{provider_label}",outcome="{outcome_label}",le="{bound}"'
-                    lines.append(f'auth_authorization_duration_ms_bucket{{{labels}}} {cumulative}')
+                    lines.append(f"auth_authorization_duration_ms_bucket{{{labels}}} {cumulative}")
                 labels_inf = f'provider="{provider_label}",outcome="{outcome_label}",le="+Inf"'
-                lines.append(f'auth_authorization_duration_ms_bucket{{{labels_inf}}} {hist.count}')
+                lines.append(f"auth_authorization_duration_ms_bucket{{{labels_inf}}} {hist.count}")
                 labels_no_le = f'provider="{provider_label}",outcome="{outcome_label}"'
-                lines.append(f'auth_authorization_duration_ms_sum{{{labels_no_le}}} {hist.sum_ms}')
-                lines.append(f'auth_authorization_duration_ms_count{{{labels_no_le}}} {hist.count}')
+                lines.append(f"auth_authorization_duration_ms_sum{{{labels_no_le}}} {hist.sum_ms}")
+                lines.append(f"auth_authorization_duration_ms_count{{{labels_no_le}}} {hist.count}")
 
         return "\n".join(lines) + "\n"
 

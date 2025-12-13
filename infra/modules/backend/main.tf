@@ -88,9 +88,9 @@ resource "azurerm_linux_web_app" "backend" {
     AZURE_COSMOSDB_DIAGNOSTICS_LEVEL = "info"
     AZURE_LOG_LEVEL                  = "error"
     #Keycloak Configuration
-    KEYCLOAK_URL          = var.keycloak_url
-    KEYCLOAK_REALM        = "standard"
-    KEYCLOAK_CLIENT_ID    = "azure-poc-6086"
+    KEYCLOAK_URL       = var.keycloak_url
+    KEYCLOAK_REALM     = "standard"
+    KEYCLOAK_CLIENT_ID = "azure-poc-6086"
 
     # Auth provider feature flags (coexistence / cutover / rollback)
     KEYCLOAK_ENABLED = tostring(var.keycloak_enabled)
