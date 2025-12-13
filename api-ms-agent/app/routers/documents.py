@@ -1,20 +1,26 @@
 """Documents router - API endpoints for document indexing and vector search."""
 
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 
-from app.auth.dependencies import get_current_user_from_request
-from app.auth.models import KeycloakUser
+from app.auth.dependencies import get_current_user_from_request, require_role
+from app.auth.models import AuthenticatedUser
 from app.logger import get_logger
-from app.services.azure_search_service import AzureSearchService, get_azure_search_service
-from app.services.cosmos_db_service import CosmosDbService, get_cosmos_db_service
+from app.services.azure_search_service import (
+    AzureSearchService,
+    get_azure_search_service,
+)
+from app.services.cosmos_db_service import (
+    CosmosDbService,
+    get_cosmos_db_service,
+)
 from app.services.document_intelligence_service import (
+    SUPPORTED_EXTENSIONS,
     DocumentIntelligenceService,
     get_document_intelligence_service,
-    SUPPORTED_EXTENSIONS,
 )
 from app.services.embedding_service import EmbeddingService, get_embedding_service
 
@@ -109,7 +115,7 @@ async def upload_document(
     doc_intelligence: Annotated[
         DocumentIntelligenceService, Depends(get_document_intelligence_service)
     ],
-    current_user: Annotated[KeycloakUser, Depends(get_current_user_from_request)],
+    current_user: Annotated[AuthenticatedUser, Depends(require_role("ai-poc-participant"))],
 ) -> UploadDocumentResponse:
     """
     Upload and process a document for indexing.
@@ -123,9 +129,6 @@ async def upload_document(
     """
     if not file:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No file uploaded")
-
-    # Validate file type
-    file_extension = f".{file.filename.lower().split('.')[-1]}" if file.filename else ""
 
     if not doc_intelligence.is_supported_format(file.filename or ""):
         supported = ", ".join(sorted(SUPPORTED_EXTENSIONS.keys()))
@@ -245,7 +248,7 @@ async def get_supported_formats() -> dict:
 @router.get("/", response_model=DocumentListResponse)
 async def list_documents(
     embedding_service: Annotated[EmbeddingService, Depends(get_embedding_service)],
-    current_user: Annotated[KeycloakUser, Depends(get_current_user_from_request)],
+    current_user: Annotated[AuthenticatedUser, Depends(require_role("ai-poc-participant"))],
     limit: int = 50,
 ) -> DocumentListResponse:
     """List all indexed documents for the current user."""
@@ -276,7 +279,7 @@ async def list_documents(
 async def index_document(
     request: IndexDocumentRequest,
     embedding_service: Annotated[EmbeddingService, Depends(get_embedding_service)],
-    current_user: Annotated[KeycloakUser, Depends(get_current_user_from_request)],
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user_from_request)],
 ) -> IndexDocumentResponse:
     """
     Index a document for vector search.
@@ -327,7 +330,7 @@ async def index_document(
 async def search_documents(
     request: SearchRequest,
     embedding_service: Annotated[EmbeddingService, Depends(get_embedding_service)],
-    current_user: Annotated[KeycloakUser, Depends(get_current_user_from_request)],
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user_from_request)],
 ) -> SearchResponse:
     """
     Perform vector similarity search across indexed documents.
@@ -380,7 +383,7 @@ async def search_documents(
 async def delete_document(
     document_id: str,
     embedding_service: Annotated[EmbeddingService, Depends(get_embedding_service)],
-    current_user: Annotated[KeycloakUser, Depends(get_current_user_from_request)],
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user_from_request)],
 ) -> dict:
     """Delete a document and all its chunks."""
     user_id = current_user.sub

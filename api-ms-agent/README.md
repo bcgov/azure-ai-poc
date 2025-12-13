@@ -149,6 +149,53 @@ ENVIRONMENT=local
 - **Insufficient Information Handling**: AI explicitly states when it lacks sufficient data
 - **Managed Identity Support**: Automatic credential management in cloud environments
 
+## 🛡️ Authentication (Keycloak + Microsoft Entra ID)
+
+This API supports validating JWT access tokens from **either** Keycloak or Microsoft Entra ID.
+
+### Role requirement
+
+Protected endpoints expect the caller to have the `ai-poc-participant` role.
+
+- **Keycloak**: role can come from common Keycloak role claim layouts (normalized server-side).
+- **Entra ID**: role comes from the access token `roles` claim (app roles).
+
+### Configuration
+
+Use [api-ms-agent/.env.example](.env.example) as the source-of-truth for variable names.
+
+Common auth variables:
+
+```bash
+# Enable/disable providers
+KEYCLOAK_ENABLED=true
+ENTRA_ENABLED=true
+
+# Keycloak settings
+KEYCLOAK_URL=https://<keycloak-host>
+KEYCLOAK_REALM=<realm>
+KEYCLOAK_CLIENT_ID=<client-id>
+
+# Entra settings
+ENTRA_TENANT_ID=<tenant-guid>
+ENTRA_CLIENT_ID=<api-app-client-id>
+
+# Optional overrides (defaults derived from tenant id)
+ENTRA_ISSUER=https://login.microsoftonline.com/<tenant-guid>/v2.0
+ENTRA_JWKS_URI=https://login.microsoftonline.com/<tenant-guid>/discovery/v2.0/keys
+
+# JWKS caching
+JWKS_CACHE_TTL_SECONDS=86400
+```
+
+### Structured auth errors
+
+Auth failures return JSON with stable keys:
+
+```json
+{ "detail": "...", "code": "auth.*", "timestamp": "..." }
+```
+
 ## 🏛️ Architecture Patterns (MAF MANDATORY)
 
 ### 1. Use Built-in ChatAgent (NOT Custom ReAct Loops)

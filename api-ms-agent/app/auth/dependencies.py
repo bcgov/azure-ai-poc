@@ -2,56 +2,52 @@
 
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, Request, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import Depends, Request, status
 
-from app.auth.models import KeycloakUser
+from app.auth.errors import AuthError
+from app.auth.models import AuthenticatedUser
 from app.auth.service import get_auth_service
 from app.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Security scheme for bearer token
-security = HTTPBearer()
 
-
-async def get_token(
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
-) -> str:
-    """Extract bearer token from Authorization header."""
-    return credentials.credentials
-
-
-async def get_current_user(token: Annotated[str, Depends(get_token)]) -> KeycloakUser:
-    """Get current authenticated user from JWT token."""
-    auth_service = get_auth_service()
-    return await auth_service.validate_token(token)
-
-
-async def get_current_user_from_request(request: Request) -> KeycloakUser:
+async def get_current_user_from_request(request: Request) -> AuthenticatedUser:
     """Get current user from request state (set by AuthMiddleware).
 
     Use this dependency when AuthMiddleware is enabled to avoid re-validating the token.
-    Falls back to token validation if user not in request state.
+
+        Fallback behavior:
+        - In the normal application runtime, `AuthMiddleware` should set
+            `request.state.current_user`.
+        - If middleware is bypassed (e.g., certain unit tests or alternate app wiring),
+            this dependency will parse and validate the bearer token exactly once.
     """
     # Try to get user from request state (set by AuthMiddleware)
     if hasattr(request.state, "current_user"):
         return request.state.current_user
 
+    logger.debug(
+        "auth_user_missing_from_request_state_falling_back_to_header_validation",
+        path=str(getattr(request, "url", "")),
+    )
+
     # Fallback: validate token directly (for cases where middleware is bypassed)
     auth_header = request.headers.get("Authorization")
     if not auth_header:
-        raise HTTPException(
+        raise AuthError(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing Authorization header",
+            code="auth.missing_authorization_header",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
     parts = auth_header.split()
     if len(parts) != 2 or parts[0].lower() != "bearer":
-        raise HTTPException(
+        raise AuthError(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid Authorization header format",
+            code="auth.invalid_authorization_format",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -70,19 +66,27 @@ def require_roles(*required_roles: str):
     roles = tuple(required_roles)
 
     async def checker(
-        current_user: Annotated[KeycloakUser, Depends(get_current_user)],
-    ) -> KeycloakUser:
-        user_roles = current_user.client_roles or []
+        current_user: Annotated[AuthenticatedUser, Depends(get_current_user_from_request)],
+    ) -> AuthenticatedUser:
+        user_roles = current_user.roles or []
         if not user_roles or not any(r in user_roles for r in roles):
-            raise HTTPException(
+            raise AuthError(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Access denied. Required roles: {', '.join(roles)}",
+                code="auth.missing_role",
             )
         return current_user
 
     return checker
 
 
-# Common role dependencies
-RequireAuth = Depends(get_current_user)
-RequireParticipant = Depends(require_roles("ai-poc-participant"))
+def require_role(role: str):
+    """Dependency factory enforcing a single required role.
+
+    Usage: Depends(require_role("ai-poc-participant"))
+    """
+
+    if not role:
+        raise ValueError("require_role() requires a non-empty role")
+
+    return require_roles(role)

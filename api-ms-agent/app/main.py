@@ -9,8 +9,10 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import psutil
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
+from app.auth.errors import AuthError
 from app.config import settings
 from app.devui import DevUIServer, start_devui_async
 from app.http_client import close_http_client
@@ -172,6 +174,14 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+
+    @app.exception_handler(AuthError)
+    async def _auth_error_handler(_request: Request, exc: AuthError):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=exc.to_payload(),
+            headers=exc.headers,
+        )
 
     # Access log middleware - logs requests with timing and content length
     # Note: This must be added first so it wraps all other middleware

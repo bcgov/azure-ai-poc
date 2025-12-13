@@ -1,54 +1,46 @@
-# Implementation Plan: Migrate to MS Entra ID for Authentication
+# Implementation Plan: Add MS Entra ID Authentication alongside Keycloak
 
-**Branch**: `001-migrate-entraid-auth` | **Date**: 2025-12-11 | **Spec**: [spec.md](spec.md)  
-**Input**: Feature specification from `/specs/001-migrate-entraid-auth/spec.md`
+**Branch**: `001-migrate-entraid-auth` | **Date**: 2025-12-12 | **Spec**: [spec.md](spec.md)
+**Input**: Feature specification in [spec.md](spec.md)
 
 ## Summary
 
-Migrate the azure-ai-poc application from Keycloak-based JWT authentication to MS Entra ID (Azure AD) for both the API backend (`api-ms-agent`) and frontend SPA. The migration includes:
-
-1. **Backend (api-ms-agent)**: Update auth service to validate tokens issued by Entra ID with configurable claims/role mapping
-2. **Infrastructure**: Create Entra ID app registrations (SPA client + API/service-to-service client) via Terraform and bash automation scripts
-3. **RBAC/Groups**: Automate creation of Entra ID security groups, role assignments, and user provisioning via Azure CLI
-4. **Frontend**: Update SPA configuration to acquire tokens from Entra ID via MSAL.js
-5. **Coexistence**: Support both Keycloak and Entra ID during transition (feature-flag controlled)
+Add Microsoft Entra ID as an additional authentication/authorization provider while keeping Keycloak working during a transition period.
+The backend must accept and validate JWTs from both issuers, with admin-controlled enable/disable flags for safe cutover and rollback.
+Authorization must remain consistent across providers by using a single application role model (Entra app roles assigned to groups; Keycloak roles mapped to the same app roles).
 
 ## Technical Context
 
-**Language/Version**: Python 3.11 (backend), TypeScript 5.x (frontend)  
-**Primary Dependencies**: FastAPI, Pydantic, python-jose/PyJWT, httpx, azure-identity, msal (frontend)  
-**Storage**: Cosmos DB, Azure Search (no auth layer changes needed)  
-**Testing**: pytest (backend), vitest (frontend), integration tests with token validation  
-**Target Platform**: Linux (Azure Container Apps/App Service)  
-**Project Type**: Web application (FastAPI backend + React frontend)  
-**Performance Goals**: JWT validation < 10ms, token caching with TTL, JWKS refresh every 24h  
-**Constraints**: No downtime during migration, backward-compat with Keycloak tokens during coexistence phase  
-**Scale/Scope**: Multi-tenant, 100+ users, 50+ API endpoints, role-based access control with custom claims
+**Language/Version**: Python 3.13 (backend), TypeScript 5.x (frontend)
+**Primary Dependencies**:
+- Backend: FastAPI, httpx, python-jose, PyJWT (already added)
+- Frontend: React (Vite), existing Keycloak client, MSAL (already added)
+**Storage**: N/A for auth (no persistence of auth data; identity providers remain source-of-truth)
+**Testing**:
+- Backend: pytest (+ pytest-asyncio)
+- Frontend: vitest + Playwright (existing)
+**Target Platform**: Containerized web app deployed to Azure
+**Project Type**: Web application (backend + frontend)
+**Performance Goals**:
+- API p95 response time ≤ 500ms for standard requests; p99 ≤ 2s
+**Constraints**:
+- No auth persistence layer (no local user DB for auth); configuration-driven only
+- No secrets committed; secrets provided via secure deployment mechanisms
+- Must support coexistence, cutover, and rollback without downtime
+**Scale/Scope**:
+- Supports existing users/integrations on Keycloak while enabling Entra SSO users
 
 ## Constitution Check
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-### Code Quality
-✅ **PASS**: Python backend uses ruff + mypy; Frontend uses ESLint + TypeScript strict mode.  
-✅ **PASS**: Type annotations required for all auth/security modules.
+- Code Quality: ruff / ESLint pass for touched code
+- Type Safety: align with strict typing expectations where configured (avoid adding untyped core modules)
+- Test-First: add/extend tests for new auth behavior (multi-issuer validation; cutover flags)
+- Security: JWT validation must enforce issuer/audience/signature and deny-by-default on authorization
+- Observability: log auth success/failure with provider identifier (no PII beyond necessary)
 
-### Test-First Development
-✅ **PASS**: Auth changes require token validation tests, role mapping tests, integration tests with both Keycloak and Entra.  
-⚠️ **NOTE**: Backend auth module currently has 45% coverage; post-migration must reach 75%+ for core auth module.
-
-### Type Safety & Static Analysis
-✅ **PASS**: Pydantic models for all Entra token claims; python-jose for token validation.
-
-### User Experience & Security
-✅ **PASS**: No user-facing UX changes; auth is transparent to users.  
-✅ **PASS**: Azure security best practices: managed identities, private endpoints, secret management via Azure Key Vault.
-
-### Performance & Observability
-✅ **PASS**: Structured logging for token validation/claims; OpenTelemetry tracing for auth flows.  
-✅ **PASS**: Target: JWT validation < 10ms (no external calls if JWKS cached).
-
-**GATE RESULT**: ✅ **PASS** - No constitution violations.
+No constitution violations are required for this feature.
 
 ## Project Structure
 
@@ -56,183 +48,79 @@ Migrate the azure-ai-poc application from Keycloak-based JWT authentication to M
 
 ```text
 specs/001-migrate-entraid-auth/
-├── plan.md              # This file
-├── research.md          # Phase 0 output (TBD)
-├── data-model.md        # Phase 1 output (TBD)
-├── quickstart.md        # Phase 1 output (TBD)
-├── contracts/           # Phase 1 output (TBD)
-├── checklists/
-│   └── requirements.md
-└── spec.md
+├── plan.md
+├── research.md
+├── data-model.md
+├── quickstart.md
+├── contracts/
+│   └── auth-api.md
+└── tasks.md
 ```
 
-### Source Code
-
-#### Backend (api-ms-agent)
+### Source Code (repository root)
 
 ```text
 api-ms-agent/
 ├── app/
 │   ├── auth/
-│   │   ├── __init__.py
-│   │   ├── service.py             # ← JWT validation, claims mapping
-│   │   ├── models.py              # ← EntraUser, TokenClaims
-│   │   └── dependencies.py        # ← FastAPI dependency injection
+│   ├── core/
 │   ├── middleware/
-│   │   └── auth_middleware.py     # ← Token validation middleware
-│   ├── config.py                  # ← Entra config (env vars)
-│   └── main.py
-├── tests/
-│   ├── test_auth_entra.py         # ← Token validation tests
-│   ├── test_role_mapping.py       # ← Claims mapping tests
-│   └── test_auth_coexistence.py   # ← Keycloak + Entra tests
-└── pyproject.toml
-```
+│   └── routers/
+└── tests/
 
-#### Frontend
-
-```text
 frontend/
 ├── src/
 │   ├── service/
-│   │   └── auth-service.ts        # ← MSAL.js integration
-│   ├── components/
-│   │   └── AuthProvider.tsx       # ← Auth context provider
-│   └── env.ts                     # ← Entra config (env vars)
-├── index.html
-└── vite.config.ts
-```
+│   └── ...
+└── e2e/
 
-#### Infrastructure
-
-```text
 infra/
-├── modules/
-│   ├── entra-id/
-│   │   ├── main.tf                # ← App registrations (SPA + API)
-│   │   ├── variables.tf           # ← Tenant, client IDs
-│   │   └── outputs.tf             # ← JWKS URI, scopes
-│   ├── backend/
-│   │   └── main.tf                # ← Updated with ENTRA_* vars
-│   └── frontend/
-│       └── main.tf                # ← Updated with Entra config
-├── scripts/
-│   ├── create-entra-resources.sh  # ← Create apps, groups, roles
-│   ├── add-users-to-groups.sh     # ← User provisioning
-│   └── cleanup-keycloak.sh        # ← Post-migration cleanup
-├── main.tf
-└── terraform.tfvars
+└── scripts/
+   └── entra/
 ```
 
-**Structure Decision**: Web application with existing FastAPI backend + React frontend. Changes are localized to auth services and infrastructure configuration. No new microservices; coexistence layer added via feature flag in auth middleware.
+**Structure Decision**: Web app with FastAPI backend in `api-ms-agent/` and Vite/React frontend in `frontend/`.
 
-## Complexity Tracking
+## Phase 0: Outline & Research (Complete)
 
-> No Constitution Check violations; no complexity exceptions needed.
+Research is captured in [research.md](research.md) and aligns to the updated spec:
+- Migration strategy: coexistence with admin-controlled cutover/rollback
+- Roles mapping: Entra app roles (assigned to groups) and a consistent internal role model
+- Provisioning: IdP-managed only (no sync to local DB)
 
----
+## Phase 1: Design & Contracts (Complete)
 
-## Phase 0: Research (COMPLETE)
+Artifacts updated/maintained under `specs/001-migrate-entraid-auth/`:
+- [data-model.md](data-model.md): conceptual entities for multi-issuer auth and role model
+- [contracts/auth-api.md](contracts/auth-api.md): bearer token contract + error semantics
+- [quickstart.md](quickstart.md): developer/operator setup for coexistence
 
-**Status**: ✅ COMPLETE  
+**Agent context update**:
+- Run the agent context update script after Phase 1 doc updates to keep `.github/copilot-instructions.md` in sync.
 
-**Output**: [research.md](research.md)
+## Phase 2: Implementation Planning (Stop point for /speckit.plan)
 
-**Key Decisions Made**:
+High-level delivery sequence (detailed tasks tracked in [tasks.md](tasks.md)):
 
-1. **Migration strategy clarification** (from spec)
-   - Decision: [Awaiting user input - A/B/C]
-   - Rationale: [TBD]
-   - Impact on design: [TBD]
+1. **Backend multi-issuer validation (P1)**
+  - Detect issuer from unverified claims
+  - Validate token against the configured provider (Keycloak or Entra)
+  - Enforce issuer/audience/signature and expiry
+  - Gate acceptance with independent feature flags for each provider
 
-2. **Roles/claims mapping approach** (from spec)
-   - Decision: [Awaiting user input - A/B/C]
-   - Rationale: [TBD]
-   - Impact on design: [TBD]
+2. **Authorization consistency (P1)**
+  - Define a single internal role model
+  - Entra: rely on `roles` claim (app roles) for user flows; support application roles for client-credentials flows
+  - Keycloak: map existing Keycloak roles/claims into the same internal role model
 
-3. **User provisioning strategy** (from spec)
-   - Decision: [Awaiting user input - A/B/C]
-   - Rationale: [TBD]
-   - Impact on design: [TBD]
+3. **Frontend coexistence (P2)**
+  - Add Entra SSO via MSAL without breaking existing Keycloak login during migration
+  - Ensure API calls include the correct bearer token
 
-4. **Terraform vs Bash for Entra automation**
-   - Decision: [TBD]
-   - Best practice for azurerm provider app registrations
-   - Alternatives: Azure CLI scripts, Azure Bicep
+4. **Cutover + rollback procedure (P3)**
+  - Document configuration steps to disable Keycloak acceptance
+  - Keep rollback path by re-enabling Keycloak acceptance
 
-5. **Token caching and JWKS refresh strategy**
-   - Decision: [TBD]
-   - Redis vs in-memory caching
-   - TTL and refresh patterns
-
-6. **Coexistence middleware design**
-   - Decision: [TBD]
-   - Token source detection (iss claim)
-   - Fallback order (Entra → Keycloak during transition)
-
-**Output**: research.md with all decisions and rationale
-
----
-
-## Phase 0: Research (COMPLETE)
-
-**Status**: ✅ COMPLETE  
-
-**Output**: [research.md](research.md)
-
-**Key Decisions Made**:
-
-1. **Migration strategy**: A - Coexistence with feature flag (phased migration)
-   - Minimizes risk; allows rollback
-   - Both Keycloak and Entra accepted during transition
-   - Feature flag controls cutover
-
-2. **Roles/claims mapping**: B - Groups mapping + A - App roles
-   - Entra security groups mapped to app roles
-   - Fallback to app roles for fine-grained permissions
-
-3. **User provisioning**: C - Just-in-time (JIT) provisioning
-   - Users auto-provisioned on first Entra login
-   - No scheduled sync; reduces operational overhead
-
-4. **Infrastructure automation**: Terraform + Bash
-   - Terraform for app registrations (desired state)
-   - Bash scripts for groups/user assignments (imperative)
-
-5. **Token validation**: PyJWT + python-jose
-   - Detect issuer from `iss` claim
-   - Route to appropriate validator (Keycloak vs Entra)
-
-6. **Coexistence middleware**: Token source detection
-   - Check `iss` claim to identify issuer
-   - Gracefully handle both providers
-
-7. **JWKS caching**: In-memory LRU with 24h TTL
-   - Prevents token validation latency
-   - Background refresh prevents expiry
-
----
-
-## Phase 1: Design & Contracts (COMPLETE)
-
-**Status**: ✅ COMPLETE  
-
-**Deliverables**:
-- [contracts/auth-api.md](contracts/auth-api.md): OpenAPI spec, error responses, contract examples
-- [quickstart.md](quickstart.md): Dev setup, code examples, testing guide
-- **Note**: No data model—Entra ID is source of truth; no database persistence for auth data
-
----
-
-## Next Steps
-
-1. **User input required**: Respond with clarification choices (Q1, Q2, Q3 from spec) to proceed to Phase 0 research
-2. **Phase 0**: Resolve research tasks in research.md
-3. **Phase 1**: Generate design artifacts (data-model, contracts, quickstart, agent context)
-4. **Phase 2** (by `/speckit.tasks`): Generate implementation tasks for:
-   - Backend auth service updates
-   - Frontend MSAL.js integration
-   - Terraform + bash automation scripts
-   - Integration tests
-   - Migration runbook (Keycloak → Entra cutover)
-
+5. **Testing + observability (all phases)**
+  - Add tests for both issuers + toggles
+  - Add structured logging for auth outcomes with provider identifier

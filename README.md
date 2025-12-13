@@ -208,6 +208,14 @@ azure-ai-poc/
 - Per-tenant cost tracking and limits
 - Rate limiting and audit logging
 - JWT-based authentication
+
+### MAF Platform (`/api-ms-agent`) Authentication
+
+The MAF backend supports **Keycloak + Microsoft Entra ID** JWT validation (coexistence).
+
+- Configure auth via `api-ms-agent/.env` using [api-ms-agent/.env.example](api-ms-agent/.env.example)
+- Toggle providers with `KEYCLOAK_ENABLED` and `ENTRA_ENABLED`
+- Entra authorization uses the access token `roles` claim (app roles). Protected endpoints typically require `ai-poc-participant`.
 - OpenTelemetry security monitoring
 
 - Rate limiting and audit logging
