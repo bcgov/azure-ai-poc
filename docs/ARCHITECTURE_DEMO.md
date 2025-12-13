@@ -1,6 +1,6 @@
-# Azure AI POC – Architecture Demo (Keycloak Main Branch)
+# Azure AI POC – Architecture Demo
 
-This document describes the current product architecture on **`main`**: **Keycloak authn/authz** is active and the deprecated `api/` service is intentionally excluded.
+This document describes the current product architecture on `main`. The deprecated `api/` (LangChain/LangGraph) service is intentionally excluded.
 
 ---
 
@@ -10,7 +10,7 @@ This document describes the current product architecture on **`main`**: **Keyclo
 - A **React frontend** for user interaction
 - A **FastAPI backend** (`api-ms-agent`) built on **Microsoft Agent Framework (MAF)**
 - **RAG + document ingestion** using Azure AI Search + Cosmos DB + Document Intelligence
-- A dedicated **Caddy proxy** service for Azure endpoints (OpenAI/Search/Cosmos/DI/Speech), access Azure Paas from local machine without vm and bastion.
+- A **dev-only Caddy proxy** service to enable local development access to Azure PaaS endpoints (private endpoints; no public access outside the VNet)
 - **Keycloak-based authentication and role-based authorization**
 
 Primary outcomes:
@@ -35,7 +35,7 @@ flowchart LR
     A["FastAPI<br/>api-ms-agent"]
   end
 
-  subgraph PX["Proxy App Service<br/>(container)"]
+  subgraph PX["Proxy App Service<br/>(container, dev only)"]
     P["Caddy<br/>Azure service proxy"]
   end
 
@@ -54,7 +54,7 @@ flowchart LR
   F -->|"OIDC login"| KC
   F -->|"/api/*"| A
 
-  A -->|"Azure calls"| P
+  A -->|"Azure calls (dev only)"| P
   P --> OAI
   P --> AIS
   P --> COS
@@ -68,16 +68,20 @@ flowchart LR
 
 Key behaviors:
 - Frontend Caddy serves the SPA and proxies `/api/*` to the backend.
-- Proxy Caddy centralizes outbound calls from local machine to Azure PaaS services behind private endpoints and strips caller-identifying headers.
+- **Dev only:** Proxy Caddy provides a bridge for local development access to Azure PaaS services that are private-only (private endpoints; no public access outside the VNet).
 - Backend handles auth checks, agent orchestration, document ingestion, and RAG.
+
+Note: In non-dev environments, the proxy is not deployed; workloads running inside the VNet access Azure PaaS directly via private endpoints.
 
 ### 2.2 Why the proxy exists
 
-The proxy (Caddy) provides:
-- A single stable origin for backend/service calls
-- WebSocket support for **Azure Speech**
-- Centralized header sanitization (e.g., removes `X-Forwarded-For`, `X-Real-IP`)
-- Consistent timeouts and connection behavior for upstream Azure services
+The proxy (Caddy) is deployed **only in the Dev environment** to support local development.
+
+Why it exists:
+- Azure PaaS services are **private-only** (private endpoints) and have **no public access outside the VNet**.
+- The proxy runs inside the VNet and exposes a single, controlled ingress for development calls.
+- It provides WebSocket support for **Azure Speech** and consistent timeouts/connection behavior.
+- It strips caller-identifying headers (e.g., removes `X-Forwarded-For`, `X-Real-IP`).
 
 ---
 
@@ -86,15 +90,15 @@ The proxy (Caddy) provides:
 Key folders:
 - `api-ms-agent/` – the primary backend service
 - `frontend/` – React + Keycloak JS integration
-- `proxy/` – Caddy reverse proxy to Azure endpoints
+- `proxy/` – Caddy reverse proxy to Azure endpoints (**deployed in Dev only** for local development access)
 - `infra/` – Terraform modules (network, monitoring, OpenAI, Search, Cosmos, DI, backend, frontend)
 
 ```mermaid
 flowchart TB
-  R[azure-ai-poc repo]
+  R["azure-ai-poc repo"]
   R --> AMS["api-ms-agent<br/>FastAPI + MAF"]
   R --> FE["frontend<br/>React + Keycloak JS"]
-  R --> PX["proxy<br/>Caddy Azure proxy"]
+  R --> PX["proxy<br/>Caddy Azure proxy<br/>(dev-only deployment)"]
   R --> INF["infra<br/>Terraform modules"]
 
   AMS --> AMS_AUTH["app/auth<br/>JWT validation + role checks"]
@@ -105,11 +109,11 @@ flowchart TB
   FE --> FE_UI["src/<br/>BCGov design system"]
 
   INF --> M_BACK["modules/backend<br/>App Service (container)"]
-  INF --> M_FRONT["modules/frontend<br/>Frontend + Proxy App Services"]
+  INF --> M_FRONT["modules/frontend<br/>Frontend + (dev-only) Proxy App Services"]
   INF --> M_NET["modules/network<br/>VNet + subnets"]
   INF --> M_MON["modules/monitoring<br/>App Insights + Log Analytics"]
-  INF --> M_DATA[modules/cosmos + azure-ai-search]
-  INF --> M_AI[modules/azure-openai + azure-document-intelligence]
+  INF --> M_DATA["modules/cosmos + azure-ai-search"]
+  INF --> M_AI["modules/azure-openai + azure-document-intelligence"]
 ```
 
 ---
@@ -262,7 +266,9 @@ Terraform modules provision:
 - Compute
   - Backend App Service (Linux container)
   - Frontend App Service (Linux container)
-  - Proxy App Service (Linux container)
+  - Proxy App Service (Linux container, **dev only**)
+
+Note: The proxy is deployed in Dev to support local development access to private-only Azure PaaS (private endpoints; no public access outside the VNet).
 
 ```mermaid
 flowchart TB
@@ -282,8 +288,8 @@ flowchart TB
     ASP2["App Service Plan<br/>Frontend"]
     APP2["Web App<br/>Frontend (container)"]
 
-    ASP3["App Service Plan<br/>Proxy"]
-    APP3["Web App<br/>Proxy (container)"]
+    ASP3["App Service Plan<br/>Proxy (dev only)"]
+    APP3["Web App<br/>Proxy (container, dev only)"]
   end
 
   APP1 -->|MI role assignments| COS
@@ -310,7 +316,7 @@ flowchart TB
 
 ### 8.3 The “App Service → Azure Container Apps” path (high-level)
 When moving to ACA later, the conceptual architecture stays the same:
-- Frontend, backend, proxy remain separate deployable services
+- Frontend and backend remain separate deployable services (the dev-only proxy remains optional)
 - Identities and private networking continue to be first-class
 - Operational model improves (revisioning, scale rules, better container-native experience)
 
