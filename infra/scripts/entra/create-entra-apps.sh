@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/_entra_lib.sh"
 
 require_cmd az
-require_cmd python
+require_cmd python3
 az_login_check
 
 usage() {
@@ -76,7 +76,9 @@ api_app_object_id="$(get_app_object_id "$api_app_id")"
 api_sp_object_id="$(get_or_create_sp_object_id "$api_app_id")"
 
 # Identifier URI (idempotent)
-az ad app update --id "$api_app_id" --identifier-uris "api://$api_app_id" --only-show-errors >/dev/null
+# NOTE: Azure CLI subcommands are not consistent about accepting appId vs objectId.
+# Use objectId for updates to avoid "Application with identifier URI '<appId>' doesn't exist".
+az ad app update --id "$api_app_object_id" --identifier-uris "api://$api_app_id" --only-show-errors >/dev/null
 
 # Ensure API has scope + app roles (via Microsoft Graph)
 tmp_in="$(mktemp)"
@@ -188,7 +190,8 @@ print(json.dumps(uris))
 PY
 "${spa_redirect_uris[@]}"
 )
-az ad app update --id "$spa_app_id" --set "spa.redirectUris=${redirect_uris_json}" --only-show-errors >/dev/null || true
+az ad app update --id "$spa_app_object_id" --set "spa.redirectUris=${redirect_uris_json}" --only-show-errors >/dev/null || true
+
 
 # 3) Service-to-service (daemon) app
 s2s_app_id="$(get_or_create_app "$S2S_APP_NAME")"
