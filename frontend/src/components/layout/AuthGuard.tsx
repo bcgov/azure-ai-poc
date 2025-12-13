@@ -1,4 +1,4 @@
-import React, { type FC } from 'react'
+import React, { type FC, useEffect, useRef } from 'react'
 import { useAuth } from '@/components/AuthProvider'
 
 type Props = {
@@ -14,9 +14,20 @@ const AuthGuard: FC<Props> = ({
 }) => {
   const { isInitialized, isLoading, error, isAuthenticated, roles, login } =
     useAuth()
+  
+  // Prevent multiple login attempts
+  const loginAttemptedRef = useRef(false)
 
-  // Show loading state while initializing
-  if (!isInitialized || isLoading) {
+  // Auto-redirect to Entra login if not authenticated
+  useEffect(() => {
+    if (isInitialized && !isLoading && !isAuthenticated && !error && !loginAttemptedRef.current) {
+      loginAttemptedRef.current = true
+      login()
+    }
+  }, [isInitialized, isLoading, isAuthenticated, error, login])
+
+  // Show loading state while initializing or redirecting to login
+  if (!isInitialized || isLoading || (!isAuthenticated && !error)) {
     return <>{fallback}</>
   }
 
@@ -31,19 +42,6 @@ const AuthGuard: FC<Props> = ({
           onClick={() => window.location.reload()}
         >
           Retry
-        </button>
-      </div>
-    )
-  }
-
-  // If not logged in, show login prompt
-  if (!isAuthenticated) {
-    return (
-      <div className="text-center">
-        <h3>Authentication Required</h3>
-        <p>Please log in to access this application.</p>
-        <button className="btn btn-primary" onClick={() => login()}>
-          Log In
         </button>
       </div>
     )

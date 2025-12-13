@@ -56,12 +56,12 @@ class Settings(BaseSettings):
 
     # Authentication (Keycloak + Entra)
     # Defaults preserve existing Keycloak behavior; Entra is opt-in.
-    keycloak_enabled: bool = True
+    keycloak_enabled: bool = False
     keycloak_url: str = "https://dev.loginproxy.gov.bc.ca/auth"
     keycloak_realm: str = "standard"
     keycloak_client_id: str = "azure-poc-6086"
 
-    entra_enabled: bool = False
+    entra_enabled: bool = True
     entra_tenant_id: str = ""
     # API application (audience) for access tokens.
     entra_client_id: str = ""

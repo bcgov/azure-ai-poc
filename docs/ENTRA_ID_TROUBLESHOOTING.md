@@ -10,7 +10,10 @@ Symptoms:
 Checks:
 - Verify the token `iss` matches the expected issuer.
   - Entra v2 issuer typically: `https://login.microsoftonline.com/<tenant-id>/v2.0`
-- Verify the token `aud` matches the API app registration client ID (`ENTRA_CLIENT_ID` / `KEYCLOAK_CLIENT_ID`).
+- Verify the token `aud` matches the API app registration.
+  - For Entra, access tokens for custom APIs use the **Application ID URI** format: `api://<client-id>`
+  - Backend `ENTRA_CLIENT_ID` must use the `api://` prefix to match (e.g., `api://2dfe43c4-...`)
+  - For Keycloak, `aud` typically matches `KEYCLOAK_CLIENT_ID` directly.
 - Verify token expiry (`exp`) and system clock skew.
   - Check server time is correct (UTC). If system time is off by minutes, `exp`/`nbf` validation can fail.
 - Verify the backend can reach the JWKS URI over HTTPS.

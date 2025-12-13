@@ -10,10 +10,6 @@ vi.mock('@/components/AuthProvider', () => ({
   useAuth: vi.fn(),
 }))
 
-vi.mock('@/components/LoginButton', () => ({
-  default: () => <div data-testid="login-button" />,
-}))
-
 const mockNavigate = vi.fn()
 const mockUseLocation = vi.fn()
 vi.mock('@tanstack/react-router', () => ({
@@ -43,6 +39,7 @@ describe('Layout (Entra/MSAL)', () => {
       isAuthenticated: false,
       user: null,
       roles: [],
+      logout: vi.fn(),
     } as any)
 
     render(
@@ -55,7 +52,6 @@ describe('Layout (Entra/MSAL)', () => {
     expect(
       screen.getByRole('heading', { level: 1, name: 'AI POC' }),
     ).toBeInTheDocument()
-    expect(screen.getByTestId('login-button')).toBeInTheDocument()
   })
 
   it('renders the footer on non-chat pages', () => {
@@ -63,6 +59,7 @@ describe('Layout (Entra/MSAL)', () => {
       isAuthenticated: false,
       user: null,
       roles: [],
+      logout: vi.fn(),
     } as any)
 
     mockUseLocation.mockReturnValue({ pathname: '/other-page' })
@@ -76,11 +73,13 @@ describe('Layout (Entra/MSAL)', () => {
     expect(screen.getByTestId('bc-footer')).toBeInTheDocument()
   })
 
-  it('renders login controls when authenticated', () => {
+  it('renders user info and sign out button when authenticated', () => {
+    const mockLogout = vi.fn()
     vi.mocked(useAuth).mockReturnValue({
       isAuthenticated: true,
       user: { name: 'John Doe', username: 'john@example.com' },
       roles: ['ai-poc-participant'],
+      logout: mockLogout,
     } as any)
 
     render(
@@ -89,6 +88,7 @@ describe('Layout (Entra/MSAL)', () => {
       </Layout>,
     )
 
-    expect(screen.getByTestId('login-button')).toBeInTheDocument()
+    expect(screen.getByText('John Doe')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /sign out/i })).toBeInTheDocument()
   })
 })

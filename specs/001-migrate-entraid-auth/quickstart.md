@@ -54,7 +54,8 @@ cd infra/scripts/entra
 # Entra ID Configuration
 ENTRA_ENABLED=true
 ENTRA_TENANT_ID=11111111-1111-1111-1111-111111111111
-ENTRA_CLIENT_ID=22222222-2222-2222-2222-222222222222
+# Use Application ID URI format (api:// prefix) - matches token aud claim
+ENTRA_CLIENT_ID=api://22222222-2222-2222-2222-222222222222
 ENTRA_ISSUER=https://login.microsoftonline.com/11111111-1111-1111-1111-111111111111/v2.0
 ENTRA_JWKS_URI=https://login.microsoftonline.com/11111111-1111-1111-1111-111111111111/discovery/v2.0/keys
 

@@ -1,7 +1,7 @@
 import React, { type FC } from 'react'
 import { Footer, Header } from '@bcgov/design-system-react-components'
 import { Button } from 'react-bootstrap'
-import LoginButton from '@/components/LoginButton'
+import { useAuth } from '@/components/AuthProvider'
 import { useNavigate, useLocation } from '@tanstack/react-router'
 import '@/styles/chat.css'
 
@@ -10,8 +10,13 @@ type Props = {
 }
 
 const Layout: FC<Props> = ({ children }) => {
+  const { isAuthenticated, user, logout } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
+
+  const handleLogout = () => {
+    logout()
+  }
 
   const isOnChat = location.pathname === '/' || location.pathname === '/chat'
   const isOnOrchestrator = location.pathname === '/bc-data-query'
@@ -57,7 +62,31 @@ const Layout: FC<Props> = ({ children }) => {
               BC Data Query
             </Button>
             
-            <LoginButton />
+            {isAuthenticated && (
+              <div className="d-flex align-items-center gap-3">
+                <span className="text-dark fw-semibold d-flex align-items-center">
+                  <i className="bi bi-person-circle me-2"></i>
+                  {user?.name || user?.username || 'User'}
+                </span>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={handleLogout}
+                  style={{
+                    borderRadius: '0.5rem',
+                    fontWeight: '600',
+                    backgroundColor: '#003366',
+                    borderColor: '#003366'
+                  }}
+                >
+                  <i
+                    className="bi bi-box-arrow-right"
+                    style={{ fontSize: '1rem', marginRight: '0.25rem' }}
+                  ></i>
+                  Sign Out
+                </Button>
+              </div>
+            )}
           </div>
         </Header>
       </div>

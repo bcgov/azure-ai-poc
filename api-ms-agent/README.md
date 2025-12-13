@@ -182,7 +182,9 @@ KEYCLOAK_CLIENT_ID=<client-id>
 
 # Entra settings
 ENTRA_TENANT_ID=<tenant-guid>
-ENTRA_CLIENT_ID=<api-app-client-id>
+# Use Application ID URI format (api:// prefix) - matches token aud claim
+ENTRA_CLIENT_ID=api://<api-app-client-id>
+ENTRA_ENABLED=true
 
 # Optional overrides (defaults derived from tenant id)
 ENTRA_ISSUER=https://login.microsoftonline.com/<tenant-guid>/v2.0

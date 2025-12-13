@@ -51,6 +51,11 @@ class JWTAuthService:
                 f"https://login.microsoftonline.com/{self.entra_tenant_id}/discovery/v2.0/keys"
             )
 
+        # v1.0 issuer for access tokens (used when audience is a custom API)
+        self.entra_issuer_v1 = (
+            f"https://sts.windows.net/{self.entra_tenant_id}/" if self.entra_tenant_id else ""
+        )
+
         # jwks_uri -> {"jwks": <dict>, "fetched_at": <epoch_seconds>}
         self._jwks_cache: dict[str, dict[str, Any]] = {}
 
@@ -71,8 +76,10 @@ class JWTAuthService:
             if not issuer:
                 issuer = self._get_unverified_issuer(token)
 
-            if issuer and self.entra_enabled and self.entra_issuer and issuer == self.entra_issuer:
-                return await self._validate_entra_token(token)
+            # Accept both v1.0 (sts.windows.net) and v2.0 (login.microsoftonline.com) issuers
+            if issuer and self.entra_enabled and self.entra_issuer:
+                if issuer == self.entra_issuer or issuer == self.entra_issuer_v1:
+                    return await self._validate_entra_token(token, issuer)
 
             if (
                 issuer
@@ -122,7 +129,7 @@ class JWTAuthService:
                 headers={"WWW-Authenticate": "Bearer"},
             ) from exc
 
-    async def _validate_entra_token(self, token: str) -> EntraUser:
+    async def _validate_entra_token(self, token: str, token_issuer: str | None = None) -> EntraUser:
         if not self.entra_enabled:
             raise AuthError(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -137,10 +144,13 @@ class JWTAuthService:
                 code="auth.provider_misconfigured",
             )
 
+        # Use the actual issuer from the token for validation (v1.0 or v2.0)
+        expected_issuer = token_issuer or self.entra_issuer
+
         payload = await self._verify_and_decode(
             token=token,
             jwks_uri=self.entra_jwks_uri,
-            expected_issuer=self.entra_issuer,
+            expected_issuer=expected_issuer,
             expected_audience=self.entra_client_id,
         )
 
@@ -285,6 +295,19 @@ class JWTAuthService:
                 options={"verify_exp": True},
             )
         except JWTError as exc:
+            # Log the actual token claims for debugging
+            try:
+                unverified_claims = jwt.get_unverified_claims(token)
+                logger.warning(
+                    "jwt_decode_failed",
+                    error=str(exc),
+                    token_aud=unverified_claims.get("aud"),
+                    token_iss=unverified_claims.get("iss"),
+                    expected_aud=expected_audience,
+                    expected_iss=expected_issuer,
+                )
+            except Exception:
+                pass
             raise AuthError(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid or expired token",

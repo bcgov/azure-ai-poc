@@ -8,23 +8,22 @@ import { expect, test } from '@playwright/test'
 //   npm run test:e2e   (or your Playwright command)
 
 test.describe.parallel('Auth (Entra/MSAL)', () => {
-  test('login button triggers redirect to Microsoft sign-in', async ({ page }) => {
+  test('unauthenticated users are automatically redirected to Microsoft sign-in', async ({ page }) => {
     test.skip(
       process.env.E2E_ENABLE_AUTH_REDIRECT_TEST !== 'true',
       'Set E2E_ENABLE_AUTH_REDIRECT_TEST=true to enable this redirect smoke test',
     )
 
+    // Navigate to the app - should auto-redirect to Entra login
     await page.goto('/')
 
-    const loginButton = page.getByRole('button', { name: /^login$/i })
-    await expect(loginButton).toBeVisible()
+    // Wait for redirect to Microsoft sign-in
+    await page.waitForURL(
+      /microsoftonline\.com\/.*authorize|login\.microsoftonline\.com\/.*authorize|oauth2\/v2\.0\/authorize/i,
+      { timeout: 30_000 },
+    )
 
-    await Promise.all([
-      page.waitForURL(
-        /microsoftonline\.com\/.*authorize|login\.microsoftonline\.com\/.*authorize|oauth2\/v2\.0\/authorize/i,
-        { timeout: 30_000 },
-      ),
-      loginButton.click(),
-    ])
+    // Verify we're on the Microsoft login page
+    await expect(page).toHaveURL(/microsoftonline\.com/i)
   })
 })

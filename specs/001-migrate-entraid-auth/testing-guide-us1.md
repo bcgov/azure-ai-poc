@@ -22,7 +22,7 @@ At minimum:
 - `KEYCLOAK_ENABLED` (set to `false` if you want Entra-only testing)
 - `ENTRA_ENABLED=true`
 - `ENTRA_TENANT_ID=<tenant-guid>`
-- `ENTRA_CLIENT_ID=<api-app-client-id>`
+- `ENTRA_CLIENT_ID=api://<api-app-client-id>` (note the `api://` prefix - this matches the token's `aud` claim)
 
 Optional (usually derived automatically if omitted):
 
