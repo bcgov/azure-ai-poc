@@ -6,8 +6,8 @@
  * All responses include source attribution for traceability.
  */
 
-import { useAuthStore } from '../stores'
 import httpClient from './httpClient'
+import { acquireToken } from '@/service/auth-service'
 
 export interface ApiResponse<T> {
   success: boolean
@@ -77,17 +77,10 @@ class ChatAgentService {
    * Get authorization headers
    */
   private async getAuthHeaders(): Promise<Record<string, string>> {
-    const authStore = useAuthStore.getState()
-
-    if (authStore.isLoggedIn()) {
-      try {
-        await authStore.updateToken(30)
-      } catch (error) {
-        console.warn('Token refresh failed:', error)
-      }
-    }
-
-    const token = authStore.getToken()
+    const token = await acquireToken().catch((error) => {
+      console.warn('Token acquisition failed:', error)
+      return undefined
+    })
     return {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -359,8 +352,10 @@ class ChatAgentService {
     onError?: (error: string) => void,
   ): Promise<void> {
     try {
-      const authStore = (await import('../stores')).useAuthStore.getState()
-      const token = authStore.getToken()
+      const token = await acquireToken().catch((error) => {
+        console.warn('Token acquisition failed for streaming:', error)
+        return undefined
+      })
 
       const eventSource = new EventSource(
         `/api/v1/research/run/${runId}/stream${token ? `?token=${token}` : ''}`,

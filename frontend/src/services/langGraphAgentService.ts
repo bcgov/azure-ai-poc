@@ -8,8 +8,8 @@
  *   - researchAgentService: /api/v1/research/
  */
 
-import { useAuthStore } from '../stores'
 import httpClient from './httpClient'
+import { acquireToken } from '@/service/auth-service'
 
 export interface ApiResponse<T> {
   success: boolean
@@ -62,25 +62,11 @@ class LangGraphAgentService {
     request: LangGraphAgentRequest,
   ): Promise<ApiResponse<LangGraphAgentResponse>> {
     try {
-      const authStore = useAuthStore.getState()
-
-      if (authStore.isLoggedIn()) {
-        // Try to refresh token if it's close to expiring (within 30 seconds)
-        try {
-          await authStore.updateToken(30)
-        } catch (error) {
-          console.warn('Token refresh failed in request interceptor:', error)
-        }
-      }
-
-      // Ensure token gets refreshed by the client interceptor
-      if (authStore.isLoggedIn()) {
-        try {
-          await authStore.updateToken(30)
-        } catch (err) {
-          console.warn('Token refresh failed:', err)
-        }
-      }
+      // Ensure an access token is available before making the request via http client
+      await acquireToken().catch((error) => {
+        console.warn('Token acquisition failed:', error)
+        return undefined
+      })
 
       const resp = await httpClient.post('/api/v1/chat/ask', request)
       const data = resp.data as LangGraphAgentResponse
