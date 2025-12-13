@@ -134,7 +134,9 @@ def _make_tokens(monkeypatch, cfg: dict) -> tuple[str, str]:
         (False, False, False, False),
     ],
 )
-async def test_provider_feature_flags(monkeypatch, entra_enabled, keycloak_enabled, entra_ok, keycloak_ok):
+async def test_provider_feature_flags(
+    monkeypatch, entra_enabled, keycloak_enabled, entra_ok, keycloak_ok
+):
     cfg = _configure_test_issuers(monkeypatch)
     entra_token, keycloak_token = _make_tokens(monkeypatch, cfg)
 

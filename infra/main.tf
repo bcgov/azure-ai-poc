@@ -186,7 +186,7 @@ module "backend" {
   entra_enabled    = var.entra_enabled
   keycloak_enabled = var.keycloak_enabled
 
-  depends_on   = [module.frontend, module.azure_openai]
+  depends_on = [module.frontend, module.azure_openai]
 }
 
 
