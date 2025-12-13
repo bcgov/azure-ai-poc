@@ -153,6 +153,10 @@ ENVIRONMENT=local
 
 This API supports validating JWT access tokens from **either** Keycloak or Microsoft Entra ID.
 
+Related setup docs:
+- [frontend/ENTRA_ID_SETUP.md](../frontend/ENTRA_ID_SETUP.md)
+- [docs/ENTRA_ID_TROUBLESHOOTING.md](../docs/ENTRA_ID_TROUBLESHOOTING.md)
+
 ### Role requirement
 
 Protected endpoints expect the caller to have the `ai-poc-participant` role.

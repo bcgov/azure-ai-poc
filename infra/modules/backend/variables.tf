@@ -187,6 +187,28 @@ variable "keycloak_url" {
   nullable    = false
 }
 
+variable "entra_enabled" {
+  description = "Whether the backend accepts Microsoft Entra ID-issued JWTs."
+  type        = bool
+  default     = false
+
+  validation {
+    condition     = var.entra_enabled || var.keycloak_enabled
+    error_message = "At least one auth provider must be enabled (entra_enabled/keycloak_enabled)."
+  }
+}
+
+variable "keycloak_enabled" {
+  description = "Whether the backend accepts Keycloak-issued JWTs."
+  type        = bool
+  default     = true
+
+  validation {
+    condition     = var.entra_enabled || var.keycloak_enabled
+    error_message = "At least one auth provider must be enabled (entra_enabled/keycloak_enabled)."
+  }
+}
+
 # Azure Document Intelligence Configuration
 variable "azure_document_intelligence_endpoint" {
   description = "The endpoint for the Azure Document Intelligence service."

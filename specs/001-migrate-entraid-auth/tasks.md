@@ -168,51 +168,51 @@ Note: Running these scripts is an operator step (per environment) and is documen
 
 ### Frontend Auth Service
 
-- [ ] T025 [US2] Create `frontend/src/service/auth-service.ts` (MSAL.js integration)
+- [x] T025 [US2] Create `frontend/src/service/auth-service.ts` (MSAL.js integration)
   - Initialize `PublicClientApplication` with Entra config
   - Implement `acquireToken()` for silent + interactive flows
   - Implement `login()`, `logout()`, `getUser()` functions
   - Support sessionStorage token caching
 
-- [ ] T026 [US2] Create `frontend/src/components/AuthProvider.tsx` (React context)
+- [x] T026 [US2] Create `frontend/src/components/AuthProvider.tsx` (React context)
   - Wrap app with `MsalProvider`
   - Export custom hooks: `useAuth()`, `useIsAuthenticated()`, `useUserRoles()`
   - Initialize MSAL on app startup
 
-- [ ] T027 [US2] Update `frontend/src/main.tsx` to wrap app with AuthProvider
+- [x] T027 [US2] Update `frontend/src/main.tsx` to wrap app with AuthProvider
   - Import and use `AuthProvider` component
   - Ensure MSAL initialization before rendering routes
 
-- [ ] T028 [US2] Create API client wrapper in `frontend/src/service/api-client.ts`
+- [x] T028 [US2] Create API client wrapper in `frontend/src/service/api-client.ts`
   - Auto-inject Entra access token in `Authorization: Bearer` header
   - Refresh token on 401 response
   - Log API errors with structured format
 
 ### Frontend UI Components
 
-- [ ] T029 [US2] Create login/logout UI in `frontend/src/components/LoginButton.tsx`
+- [x] T029 [US2] Create login/logout UI in `frontend/src/components/LoginButton.tsx`
   - Display current user (if authenticated)
   - Show "Login" button if not authenticated
   - Show "Logout" button if authenticated
 
-- [ ] T030 [P] [US2] Update navigation/header to include AuthProvider status
+- [x] T030 [P] [US2] Update navigation/header to include AuthProvider status
   - Show authenticated user email/name
   - Show user roles (from token or Entra claims)
 
-- [ ] T031 [P] [US2] Create protected route wrapper in `frontend/src/components/ProtectedRoute.tsx`
+- [x] T031 [P] [US2] Create protected route wrapper in `frontend/src/components/ProtectedRoute.tsx`
   - Check `useIsAuthenticated()`
   - Redirect to login if not authenticated
   - Allow navigation if authenticated
 
 ### Testing Tasks (US2)
 
-- [ ] T032 [P] [US2] Create frontend auth tests in `frontend/src/__tests__/auth.test.ts`
+- [x] T032 [P] [US2] Create frontend auth tests in `frontend/src/__tests__/auth.test.ts`
   - Test token acquisition from Entra (mock MSAL)
   - Test login/logout flow
   - Test API client injects token in requests
   - Test token refresh on 401
 
-- [ ] T033 [P] [US2] Create E2E test in `frontend/e2e/auth.spec.ts` (Playwright)
+- [x] T033 [P] [US2] Create E2E test in `frontend/e2e/auth.spec.ts` (Playwright)
   - Navigate to app
   - Click login button
   - Authenticate with test Entra account
@@ -221,12 +221,12 @@ Note: Running these scripts is an operator step (per environment) and is documen
 
 ### Documentation Tasks (US2)
 
-- [ ] T034 [US2] Update `README.md`: Document user login flow
+- [x] T034 [US2] Update `README.md`: Document user login flow
   - Redirect to Entra SSO
   - Token acquisition via MSAL.js
   - Role-based UI rendering
 
-- [ ] T035 [US2] Create `frontend/ENTRA_ID_SETUP.md`
+- [x] T035 [US2] Create `frontend/ENTRA_ID_SETUP.md`
   - Step-by-step: Create Entra app registration (SPA)
   - Configure redirect URIs
   - Define app roles on the API app registration and assign them (user/group assignment)
@@ -246,39 +246,39 @@ Note: Running these scripts is an operator step (per environment) and is documen
 
 ### Implementation Tasks
 
-- [ ] T036 [US3] Ensure feature flags `KEYCLOAK_ENABLED` and `ENTRA_ENABLED` control token validation
+- [x] T036 [US3] Ensure feature flags `KEYCLOAK_ENABLED` and `ENTRA_ENABLED` control token validation
   - Update `api-ms-agent/app/auth/service.py` to check flags before accepting token
   - Return 401 if both disabled
   - Return 401 if issuer's flag is disabled
 
-- [ ] T037 [US3] Create migration checklist in `infra/MIGRATION_CHECKLIST.md`
+- [x] T037 [US3] Create migration checklist in `infra/MIGRATION_CHECKLIST.md`
   - Pre-migration: test both providers enabled
   - During migration: monitor error rates
   - Post-migration: disable Keycloak flag
 
-- [ ] T038 [US3] Document rollback procedure in `infra/ROLLBACK.md`
+- [x] T038 [US3] Document rollback procedure in `infra/ROLLBACK.md`
   - Steps to disable Entra and re-enable Keycloak
   - Clear instructions for on-call engineer
 
 ### Testing Tasks (US3)
 
-- [ ] T039 [P] [US3] Create coexistence test in `api-ms-agent/tests/test_coexistence.py`
+- [x] T039 [P] [US3] Create coexistence test in `api-ms-agent/tests/test_coexistence.py`
   - Test both providers enabled: valid tokens from both providers accepted
   - Test Entra disabled, Keycloak enabled: only Keycloak tokens accepted
   - Test Keycloak disabled, Entra enabled: only Entra tokens accepted
   - Test both disabled: all tokens rejected (safety check)
 
-- [ ] T040 [P] [US3] Create manual coexistence test guide in `specs/001-migrate-entraid-auth/testing-guide-us3.md`
+- [x] T040 [P] [US3] Create manual coexistence test guide in `specs/001-migrate-entraid-auth/testing-guide-us3.md`
   - Steps to generate tokens from both Keycloak and Entra
   - Steps to toggle feature flags and verify behavior
 
 ### Infrastructure Tasks (US3)
 
-- [ ] T041 [US3] Update `infra/modules/backend/main.tf` to pass feature flags as env vars
+- [x] T041 [US3] Update `infra/modules/backend/main.tf` to pass feature flags as env vars
   - Add `KEYCLOAK_ENABLED`, `ENTRA_ENABLED` to Container App/App Service config
   - Document default values (both enabled during transition)
 
-- [ ] T042 [P] [US3] Create migration runbook in `infra/MIGRATION_RUNBOOK.md`
+- [x] T042 [P] [US3] Create migration runbook in `infra/MIGRATION_RUNBOOK.md`
   - 1-week coexistence phase checklist
   - User communication template
   - Cutover date trigger criteria
@@ -292,19 +292,19 @@ Note: Running these scripts is an operator step (per environment) and is documen
 
 ### Logging & Observability
 
-- [ ] T043 Add structured logging for all auth events in `api-ms-agent/app/middleware/auth_middleware.py`
+- [x] T043 Add structured logging for all auth events in `api-ms-agent/app/middleware/auth_middleware.py`
   - Log token validation success: user ID, role, issuer, timestamp
   - Log token validation failure: reason (expired, invalid sig, wrong issuer), timestamp
   - Export logs to Application Insights (or similar)
 
-- [ ] T044 [P] Add metrics endpoint for auth: `api-ms-agent/app/routers/metrics.py`
+- [x] T044 [P] Add metrics endpoint for auth: `api-ms-agent/app/routers/metrics.py`
   - Count: successful auth, failed auth, role denial
   - Latency: token validation time
   - Expose Prometheus format for monitoring
 
 ### Security & Compliance
 
-- [ ] T045 Create security checklist in `infra/SECURITY_CHECKLIST.md`
+- [x] T045 Create security checklist in `infra/SECURITY_CHECKLIST.md`
   - Verify token signing uses RS256 (not HS256)
   - Verify no secrets in logs or error messages
   - Verify JWKS endpoint is HTTPS-only
@@ -312,12 +312,12 @@ Note: Running these scripts is an operator step (per environment) and is documen
 
 ### Final Documentation
 
-- [ ] T046 Update main `README.md` with new auth architecture overview
+- [x] T046 Update main `README.md` with new auth architecture overview
   - Document Keycloak + Entra coexistence and cutover/rollback flags
   - Add Entra ID authentication section
   - Link to ENTRA_ID_SETUP.md in both README files
 
-- [ ] T047 [P] Create troubleshooting guide in `docs/ENTRA_ID_TROUBLESHOOTING.md`
+- [x] T047 [P] Create troubleshooting guide in `docs/ENTRA_ID_TROUBLESHOOTING.md`
   - "Token validation fails" → check issuer, audience, expiry, JWKS
   - "User locked out" → check Entra app role assignment (often via group assignment)
   - "Roles claim missing" → verify the user/group is assigned an app role on the API enterprise application

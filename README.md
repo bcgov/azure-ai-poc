@@ -214,9 +214,24 @@ azure-ai-poc/
 The MAF backend supports **Keycloak + Microsoft Entra ID** JWT validation (coexistence).
 
 - Configure auth via `api-ms-agent/.env` using [api-ms-agent/.env.example](api-ms-agent/.env.example)
-- Toggle providers with `KEYCLOAK_ENABLED` and `ENTRA_ENABLED`
+- Enable one or both providers (coexistence) with `KEYCLOAK_ENABLED` and `ENTRA_ENABLED`
 - Entra authorization uses the access token `roles` claim (app roles). Protected endpoints typically require `ai-poc-participant`.
 - OpenTelemetry security monitoring
+
+#### Auth architecture (coexistence)
+
+- **Frontend** authenticates via Entra SSO (MSAL) and acquires an API access token
+- **Backend** accepts tokens from either issuer (Entra or Keycloak) depending on `ENTRA_ENABLED` / `KEYCLOAK_ENABLED`
+- **Authorization** is role-based; Entra uses the token `roles` claim (app roles)
+
+Related docs:
+- [frontend/ENTRA_ID_SETUP.md](frontend/ENTRA_ID_SETUP.md)
+- [docs/ENTRA_ID_TROUBLESHOOTING.md](docs/ENTRA_ID_TROUBLESHOOTING.md)
+- [infra/MIGRATION_RUNBOOK.md](infra/MIGRATION_RUNBOOK.md)
+- [infra/ROLLBACK.md](infra/ROLLBACK.md)
+
+Observability:
+- Auth metrics: `GET /api/v1/auth/metrics` (Prometheus text format)
 
 ### Frontend Authentication (Entra SSO)
 

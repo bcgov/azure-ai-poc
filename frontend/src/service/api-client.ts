@@ -52,7 +52,7 @@ apiClient.interceptors.response.use(
           if (token && originalRequest) {
             originalRequest.headers = originalRequest.headers ?? {}
             originalRequest.headers.Authorization = `Bearer ${token}`
-            return apiClient(originalRequest)
+            return apiClient.request(originalRequest)
           }
         } catch (refreshError) {
           console.warn('Token refresh failed after 401', refreshError)

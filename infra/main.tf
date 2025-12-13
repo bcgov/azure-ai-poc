@@ -181,6 +181,11 @@ module "backend" {
   azure_speech_key        = module.azure_openai.speech_key
   #keycloak
   keycloak_url = var.keycloak_url
+
+  # auth provider feature flags
+  entra_enabled    = var.entra_enabled
+  keycloak_enabled = var.keycloak_enabled
+
   depends_on   = [module.frontend, module.azure_openai]
 }
 
