@@ -136,3 +136,8 @@ variable "proxy_image" {
   description = "The image for the Frontend proxy container"
   type        = string
 }
+variable "api_backend_url" {
+  description = "The URL for the backend API"
+  type        = string
+  nullable    = false
+}

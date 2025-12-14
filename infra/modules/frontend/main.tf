@@ -60,7 +60,7 @@ resource "azurerm_linux_web_app" "frontend" {
     DOCKER_ENABLE_CI                      = "true"
     APPLICATIONINSIGHTS_CONNECTION_STRING = var.appinsights_connection_string
     APPINSIGHTS_INSTRUMENTATIONKEY        = var.appinsights_instrumentation_key
-    VITE_BACKEND_URL                      = "https://${var.repo_name}-${var.app_env}-api.azurewebsites.net"
+    VITE_BACKEND_URL                      = var.api_backend_url # "https://${var.repo_name}-${var.app_env}-api.azurewebsites.net"
     LOG_LEVEL                             = "info"
     VITE_KEYCLOAK_URL                     = "https://dev.loginproxy.gov.bc.ca/auth"
     VITE_KEYCLOAK_REALM                   = "standard"

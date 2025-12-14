@@ -1,6 +1,5 @@
 """Test fixtures and configuration."""
 
-from collections.abc import AsyncGenerator
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -8,7 +7,6 @@ from fastapi.testclient import TestClient
 
 from app.auth.models import KeycloakUser
 from app.main import app
-
 
 # Mock user for tests
 MOCK_USER = KeycloakUser(

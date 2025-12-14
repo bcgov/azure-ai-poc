@@ -1,13 +1,10 @@
 """Tests for the chat API."""
 
-from unittest.mock import AsyncMock, patch
-
-import pytest
-from fastapi.testclient import TestClient
+from unittest.mock import AsyncMock
 
 from app.main import app
 from app.services.chat_agent import ChatResult, SourceInfo, get_chat_agent_service
-
+from app.services.cosmos_db_service import get_cosmos_db_service
 
 # Note: client and auth_headers fixtures are now provided by conftest.py
 
@@ -75,6 +72,57 @@ def test_chat_endpoint(client, auth_headers):
         assert data["has_sufficient_info"] is True
     finally:
         # Clean up override
+        app.dependency_overrides.clear()
+
+
+def test_chat_endpoint_reuses_latest_session_when_missing_session_id(client, auth_headers):
+    """If session_id is omitted, the API should reuse the user's latest Cosmos session."""
+
+    # Mock chat agent
+    mock_agent = AsyncMock()
+    mock_agent.chat.return_value = ChatResult(
+        response="OK",
+        sources=[
+            SourceInfo(
+                source_type="llm_knowledge",
+                description="Based on AI model's training knowledge",
+                confidence="high",
+            )
+        ],
+        has_sufficient_info=True,
+    )
+
+    # Mock Cosmos
+    mock_cosmos = AsyncMock()
+    mock_cosmos.get_user_sessions.return_value = [
+        type("Sess", (), {"session_id": "session_latest_1"})()
+    ]
+    mock_cosmos.get_chat_history.return_value = []
+    mock_cosmos.save_message.return_value = None
+
+    app.dependency_overrides[get_chat_agent_service] = lambda: mock_agent
+    app.dependency_overrides[get_cosmos_db_service] = lambda: mock_cosmos
+
+    try:
+        response = client.post(
+            "/api/v1/chat/",
+            json={"message": "Hello"},
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        payload = response.json()
+
+        assert payload["session_id"] == "session_latest_1"
+
+        # Ensure we query only chat-scoped sessions
+        get_sessions_kwargs = mock_cosmos.get_user_sessions.await_args.kwargs
+        assert get_sessions_kwargs.get("session_id_prefix") == "session_"
+
+        # Save-message should be called at least once with the selected session
+        assert mock_cosmos.save_message.await_count >= 1
+        first_call_kwargs = mock_cosmos.save_message.await_args_list[0].kwargs
+        assert first_call_kwargs["session_id"] == "session_latest_1"
+    finally:
         app.dependency_overrides.clear()
 
 
