@@ -266,15 +266,3 @@ class OrgBookMCP(MCPWrapper):
         except Exception as e:
             logger.warning(f"OrgBook health check failed: {e}")
             return False
-
-
-# Singleton instance
-_orgbook_instance: OrgBookMCP | None = None
-
-
-def get_orgbook_mcp() -> OrgBookMCP:
-    """Get or create the OrgBook MCP singleton."""
-    global _orgbook_instance
-    if _orgbook_instance is None:
-        _orgbook_instance = OrgBookMCP()
-    return _orgbook_instance

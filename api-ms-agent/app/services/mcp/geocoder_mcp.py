@@ -402,15 +402,3 @@ class GeocoderMCP(MCPWrapper):
         except Exception as e:
             logger.warning(f"Geocoder health check failed: {e}")
             return False
-
-
-# Singleton instance
-_geocoder_instance: GeocoderMCP | None = None
-
-
-def get_geocoder_mcp() -> GeocoderMCP:
-    """Get or create the Geocoder MCP singleton."""
-    global _geocoder_instance
-    if _geocoder_instance is None:
-        _geocoder_instance = GeocoderMCP()
-    return _geocoder_instance

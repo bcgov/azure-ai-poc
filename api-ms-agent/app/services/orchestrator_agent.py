@@ -41,9 +41,9 @@ from azure.identity.aio import DefaultAzureCredential
 from app.config import settings
 from app.logger import get_logger
 from app.services.mcp.base import MCPToolResult
-from app.services.mcp.geocoder_mcp import GeocoderMCP, get_geocoder_mcp
-from app.services.mcp.orgbook_mcp import OrgBookMCP, get_orgbook_mcp
-from app.services.mcp.parks_mcp import ParksMCP, get_parks_mcp
+from app.services.mcp.geocoder_mcp import GeocoderMCP
+from app.services.mcp.orgbook_mcp import OrgBookMCP
+from app.services.mcp.parks_mcp import ParksMCP
 from app.utils import sort_source_dicts_by_confidence
 
 logger = get_logger(__name__)
@@ -186,7 +186,7 @@ def _get_orgbook() -> OrgBookMCP:
     if _orgbook_mcp is None:
         with _MCP_INIT_LOCK:
             if _orgbook_mcp is None:
-                _orgbook_mcp = get_orgbook_mcp()
+                _orgbook_mcp = OrgBookMCP()
     return _orgbook_mcp
 
 
@@ -195,7 +195,7 @@ def _get_geocoder() -> GeocoderMCP:
     if _geocoder_mcp is None:
         with _MCP_INIT_LOCK:
             if _geocoder_mcp is None:
-                _geocoder_mcp = get_geocoder_mcp()
+                _geocoder_mcp = GeocoderMCP()
     return _geocoder_mcp
 
 
@@ -204,8 +204,28 @@ def _get_parks() -> ParksMCP:
     if _parks_mcp is None:
         with _MCP_INIT_LOCK:
             if _parks_mcp is None:
-                _parks_mcp = get_parks_mcp()
+                _parks_mcp = ParksMCP()
     return _parks_mcp
+
+
+async def shutdown_mcp_wrappers() -> None:
+    """Close and clear MCP wrapper singletons for clean shutdown / test isolation."""
+    global _orgbook_mcp, _geocoder_mcp, _parks_mcp
+
+    orgbook_mcp = _orgbook_mcp
+    geocoder_mcp = _geocoder_mcp
+    parks_mcp = _parks_mcp
+
+    _orgbook_mcp = None
+    _geocoder_mcp = None
+    _parks_mcp = None
+
+    if orgbook_mcp:
+        await orgbook_mcp.close()
+    if geocoder_mcp:
+        await geocoder_mcp.close()
+    if parks_mcp:
+        await parks_mcp.close()
 
 
 # ==================== Geocoder Tools ====================
@@ -998,14 +1018,7 @@ class OrchestratorAgentService:
             await self._credential.close()
             self._credential = None
 
-        # Close MCP wrappers
-        orgbook_mcp = _get_orgbook()
-        geocoder_mcp = _get_geocoder()
-        parks_mcp = _get_parks()
-
-        await orgbook_mcp.close()
-        await geocoder_mcp.close()
-        await parks_mcp.close()
+        await shutdown_mcp_wrappers()
 
         logger.info("OrchestratorAgentService closed")
 
@@ -1029,3 +1042,6 @@ async def shutdown_orchestrator() -> None:
     if _orchestrator_instance:
         await _orchestrator_instance.close()
         _orchestrator_instance = None
+    else:
+        # Ensure MCP wrappers can still be cleaned up when orchestrator was never created.
+        await shutdown_mcp_wrappers()
