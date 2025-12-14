@@ -31,7 +31,7 @@ flowchart LR
     F["Caddy<br/>Serve SPA + reverse proxy /api"]
   end
 
-  subgraph BE["Backend App Service<br/>(container)"]
+  subgraph BE["Backend Azure Container Apps (ACA)"]
     A["FastAPI<br/>api-ms-agent"]
   end
 
@@ -91,7 +91,7 @@ Key folders:
 - `api-ms-agent/` – the primary backend service
 - `frontend/` – React + Keycloak JS integration
 - `proxy/` – Caddy reverse proxy to Azure endpoints (**deployed in Dev only** for local development access)
-- `infra/` – Terraform modules (network, monitoring, OpenAI, Search, Cosmos, DI, backend, frontend)
+- `infra/` – Terraform modules (network, monitoring, OpenAI, Search, Cosmos, DI, container-apps backend, frontend)
 
 ```mermaid
 flowchart TB
@@ -108,7 +108,7 @@ flowchart TB
   FE --> FE_AUTH["src/stores/auth.ts<br/>Keycloak + role gating"]
   FE --> FE_UI["src/<br/>BCGov design system"]
 
-  INF --> M_BACK["modules/backend<br/>App Service (container)"]
+  INF --> M_BACK["modules/container-apps<br/>Backend (ACA)"]
   INF --> M_FRONT["modules/frontend<br/>Frontend + (dev-only) Proxy App Services"]
   INF --> M_NET["modules/network<br/>VNet + subnets"]
   INF --> M_MON["modules/monitoring<br/>App Insights + Log Analytics"]
@@ -252,7 +252,7 @@ sequenceDiagram
 
 ---
 
-## 8) Azure deployment architecture (App Service now, ACA later)
+## 8) Azure deployment architecture (ACA for backend/API)
 
 ### 8.1 What Terraform provisions today
 Terraform modules provision:
@@ -264,7 +264,7 @@ Terraform modules provision:
   - Azure OpenAI
   - Document Intelligence
 - Compute
-  - Backend App Service (Linux container)
+  - Backend Azure Container Apps (Container Apps Environment + backend Container App)
   - Frontend App Service (Linux container)
   - Proxy App Service (Linux container, **dev only**)
 
@@ -282,8 +282,8 @@ flowchart TB
     OAI["Azure OpenAI"]
     DI["Document Intelligence"]
 
-    ASP1["App Service Plan<br/>Backend"]
-    APP1["Web App<br/>Backend (container)"]
+    CAE["Container Apps Environment"]
+    CA1["Container App<br/>Backend (api-ms-agent)"]
 
     ASP2["App Service Plan<br/>Frontend"]
     APP2["Web App<br/>Frontend (container)"]
@@ -292,21 +292,21 @@ flowchart TB
     APP3["Web App<br/>Proxy (container, dev only)"]
   end
 
-  APP1 -->|MI role assignments| COS
-  APP1 -->|MI roles| SRCH
-  APP1 -->|MI roles| OAI
+  CA1 -->|MI role assignments| COS
+  CA1 -->|MI roles| SRCH
+  CA1 -->|MI roles| OAI
 
-  APP1 --> AI
+  CA1 --> AI
   APP2 --> AI
   APP3 --> AI
 
-  APP1 --> VNET
+  CA1 --> VNET
   APP2 --> VNET
   APP3 --> VNET
 ```
 
 ### 8.2 Identity and access to Azure resources
-- Backend App Service uses **System-Assigned Managed Identity**.
+- Backend Container App uses **System-Assigned Managed Identity** (when enabled).
 - Terraform assigns:
   - Cosmos DB SQL role (Data Contributor)
   - Search roles (Index Data Contributor, Reader, etc.)
@@ -314,11 +314,10 @@ flowchart TB
 
 **What to emphasize:** This reduces the number of static secrets needed in production.
 
-### 8.3 The “App Service → Azure Container Apps” path (high-level)
-When moving to ACA later, the conceptual architecture stays the same:
-- Frontend and backend remain separate deployable services (the dev-only proxy remains optional)
-- Identities and private networking continue to be first-class
-- Operational model improves (revisioning, scale rules, better container-native experience)
+### 8.3 Current posture (what to say in the demo)
+- The backend/API has moved to **Azure Container Apps (ACA)**.
+- The frontend and the dev-only proxy remain on **App Service (container)**.
+- The logical architecture is unchanged: separate deployable units, private networking, managed identity, and centralized observability.
 
 ---
 

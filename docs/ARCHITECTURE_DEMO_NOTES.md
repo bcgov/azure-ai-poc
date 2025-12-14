@@ -41,9 +41,11 @@ Suggested pacing:
 - 2–3 minutes: Document ingestion + grounded Q&A.
 
 **13:00–15:00 — Azure deployment posture**
-- Terraform provisions: VNet/subnets, App Insights/Log Analytics, OpenAI, Search, Cosmos, Document Intelligence, App Services.
-- Managed identity on backend App Service with RBAC assignments for Cosmos/OpenAI/Search.
-- Close with: “App Service now; architecture translates cleanly to Azure Container Apps later.”
+- Terraform provisions: VNet/subnets, App Insights/Log Analytics, OpenAI, Search, Cosmos, Document Intelligence, and compute.
+- Backend/API is deployed on **Azure Container Apps (ACA)**.
+- Frontend and the **dev-only** proxy remain on **App Service (container)**.
+- Backend uses managed identity (system-assigned when enabled) with RBAC assignments for Cosmos/OpenAI/Search.
+- Close with: “Hosting shifted to ACA for the API, but the logical architecture stayed the same.”
 
 ---
 
@@ -70,8 +72,8 @@ Suggested pacing:
 **Q: How do you handle secrets?**
 - A: “Local uses `.env`; in Azure we prefer managed identity and platform RBAC. The repo also includes an Azure key sync script for development.”
 
-**Q: Why App Service now vs ACA later?**
-- A: “App Service is current hosting. The services are containerized and already split into separately deployable units; ACA mainly changes the hosting/runtime and scaling model, not the logical architecture.”
+**Q: Why move the backend to ACA?**
+- A: “It’s a better fit for container-native operations: revisions, scaling rules, and cleaner separation of runtime from deployment. The logical architecture stays the same.”
 
 ---
 
