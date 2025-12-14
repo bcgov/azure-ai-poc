@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.0  # Low temperature for consistent, high-confidence responses
     llm_max_output_tokens: int = 5000  # Cap responses to control cost/token usage
 
+    # LLM request timeout (seconds) for non-streaming calls.
+    # Prevents requests from hanging indefinitely when upstream is slow/flaky.
+    llm_request_timeout_seconds: float = 60.0
+
     # Dev UI (Agent Framework DevUI) settings
     devui_enabled: bool = True
     devui_host: str = "localhost"
