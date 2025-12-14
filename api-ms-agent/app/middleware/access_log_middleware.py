@@ -57,6 +57,7 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
             status=response.status_code,
             size=content_length,
             duration=f"{duration_ms:.1f}ms",
+            extra={"lines": "\n"},
         )
 
         return response
