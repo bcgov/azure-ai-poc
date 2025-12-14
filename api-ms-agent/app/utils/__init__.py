@@ -14,6 +14,7 @@ from app.utils.source_utils import (
     sort_sources_by_confidence,
     sources_to_dicts,
 )
+from app.utils.text_utils import MAX_HISTORY_CHARS, trim_text
 
 __all__ = [
     "CONFIDENCE_ORDER",
@@ -28,4 +29,6 @@ __all__ = [
     "sort_source_dicts_by_confidence",
     "sort_sources_by_confidence",
     "sources_to_dicts",
+    "MAX_HISTORY_CHARS",
+    "trim_text",
 ]

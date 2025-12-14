@@ -12,13 +12,12 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.routers.workflow_research import get_research_service
 from app.services.workflow_research_agent import (
-    WorkflowResearchAgentService,
-    WorkflowPhase,
-    WorkflowState,
-    ResearchPlan,
     ResearchFinding,
+    ResearchPlan,
+    WorkflowPhase,
+    WorkflowResearchAgentService,
+    WorkflowState,
 )
-
 
 # Note: mock_auth_service and auth_headers fixtures are provided by conftest.py
 

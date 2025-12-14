@@ -10,14 +10,18 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from app.auth.dependencies import get_current_user
-from app.auth.models import KeycloakUser as User
+from app.auth.dependencies import get_current_user_from_request
+from app.auth.models import KeycloakUser
 from app.logger import get_logger
+from app.services.cosmos_db_service import CosmosDbService, get_cosmos_db_service
 from app.services.orchestrator_agent import get_orchestrator_agent
+from app.services.session_utils import resolve_session_id
 
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+_ORCH_SESSION_PREFIX = "orch_"
 
 
 class OrchestratorQueryRequest(BaseModel):
@@ -57,6 +61,7 @@ class OrchestratorQueryResponse(BaseModel):
     """Response model for orchestrator queries."""
 
     response: str = Field(..., description="Synthesized response to the user's query")
+    session_id: str = Field(..., description="Session ID for conversation continuity")
     sources: list[SourceInfo] = Field(
         ..., min_length=1, description="List of sources used to generate the response"
     )
@@ -67,7 +72,8 @@ class OrchestratorQueryResponse(BaseModel):
 @router.post("/query", response_model=OrchestratorQueryResponse)
 async def query_orchestrator(
     request: OrchestratorQueryRequest,
-    current_user: Annotated[User, Depends(get_current_user)],
+    cosmos: Annotated[CosmosDbService, Depends(get_cosmos_db_service)],
+    current_user: Annotated[KeycloakUser, Depends(get_current_user_from_request)],
 ) -> OrchestratorQueryResponse:
     """
     Query the orchestrator agent to get information about BC businesses and locations.
@@ -84,19 +90,47 @@ async def query_orchestrator(
     - "Geocode 1234 Main Street, Vancouver BC"
     - "Is XYZ Corporation an active business in BC?"
     """
+    user_id = current_user.sub
+
+    session_id, session_id_source = await resolve_session_id(
+        cosmos=cosmos,
+        user_id=user_id,
+        requested_session_id=request.session_id,
+        session_id_prefix=_ORCH_SESSION_PREFIX,
+    )
+
     logger.info(
         "orchestrator_query_received",
-        user_id=current_user.sub,
+        user_id=user_id,
         query=request.query[:100],  # Log first 100 chars
-        session_id=request.session_id,
+        session_id=session_id,
+        session_id_source=session_id_source,
     )
 
     try:
         orchestrator = get_orchestrator_agent()
+
+        # Load recent history for this user+session so the LLM can remain conversational.
+        stored_messages = await cosmos.get_chat_history(session_id, user_id, limit=20)
+        history = (
+            [{"role": msg.role, "content": msg.content} for msg in stored_messages]
+            if stored_messages
+            else None
+        )
+
+        # Persist the user message first (even if downstream fails, we have an audit trail).
+        await cosmos.save_message(
+            session_id=session_id,
+            user_id=user_id,
+            role="user",
+            content=request.query,
+        )
+
         result = await orchestrator.process_query(
             query=request.query,
-            session_id=request.session_id,
-            user_id=current_user.sub,
+            session_id=session_id,
+            user_id=user_id,
+            history=history,
             model=request.model,
         )
 
@@ -119,14 +153,24 @@ async def query_orchestrator(
 
         response = OrchestratorQueryResponse(
             response=result.get("response", ""),
+            session_id=session_id,
             sources=sources,
             has_sufficient_info=result.get("has_sufficient_info", False),
             key_findings=result.get("key_findings", []),
         )
 
+        # Persist assistant response with citations for traceability.
+        await cosmos.save_message(
+            session_id=session_id,
+            user_id=user_id,
+            role="assistant",
+            content=response.response,
+            sources=[s for s in result.get("sources", []) if isinstance(s, dict)],
+        )
+
         logger.info(
             "orchestrator_query_completed",
-            user_id=current_user.sub,
+            user_id=user_id,
             source_count=len(sources),
             has_sufficient_info=response.has_sufficient_info,
         )
@@ -138,7 +182,7 @@ async def query_orchestrator(
     except Exception as e:
         logger.error(
             "orchestrator_query_failed",
-            user_id=current_user.sub,
+            user_id=user_id,
             error=str(e),
             query=request.query[:100],
         )

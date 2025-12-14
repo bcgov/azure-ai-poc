@@ -13,19 +13,16 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from threading import RLock
 from textwrap import shorten
+from threading import RLock
 from typing import Annotated, Any
 from uuid import uuid4
 
-from agent_framework import (
-    ChatAgent,
-    ChatMessage,
-    ai_function,
-)
+from agent_framework import ChatAgent, ChatMessage, ai_function
 
 from app.config import settings
 from app.logger import get_logger
+from app.services.agent_run_compat import run_agent_compat
 from app.utils import sort_sources_by_confidence
 
 logger = get_logger(__name__)
@@ -975,7 +972,7 @@ Provide comprehensive, detailed responses at each phase."""
             start = time.monotonic()
             try:
                 result = await asyncio.wait_for(
-                    agent.run(query, thread=thread),
+                    run_agent_compat(agent, query, thread=thread, user=state.user_id),
                     timeout=settings.llm_request_timeout_seconds,
                 )
             except TimeoutError as exc:
@@ -1363,9 +1360,11 @@ Provide comprehensive, detailed responses at each phase."""
 
         # Send the approval response back to the agent
         result = await asyncio.wait_for(
-            agent.run(
+            run_agent_compat(
+                agent,
                 ChatMessage(role="user", contents=[approval_response]),
                 thread=thread,
+                user=state.user_id,
             ),
             timeout=settings.llm_request_timeout_seconds,
         )

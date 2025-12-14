@@ -40,11 +40,12 @@ from azure.identity.aio import DefaultAzureCredential
 
 from app.config import settings
 from app.logger import get_logger
+from app.services.agent_run_compat import run_agent_compat
 from app.services.mcp.base import MCPToolResult
 from app.services.mcp.geocoder_mcp import GeocoderMCP
 from app.services.mcp.orgbook_mcp import OrgBookMCP
 from app.services.mcp.parks_mcp import ParksMCP
-from app.utils import sort_source_dicts_by_confidence
+from app.utils import MAX_HISTORY_CHARS, sort_source_dicts_by_confidence, trim_text
 
 logger = get_logger(__name__)
 
@@ -654,6 +655,7 @@ class OrchestratorAgentService:
         query: str,
         session_id: str | None = None,
         user_id: str | None = None,
+        history: list[dict[str, str]] | None = None,
         model: str | None = None,
     ) -> dict[str, Any]:
         """
@@ -668,6 +670,7 @@ class OrchestratorAgentService:
             query: User's natural language query
             session_id: Optional session ID for tracking
             user_id: User's Keycloak sub for tracking and context
+            history: Optional conversation history (list of {role, content})
             model: Model to use ('gpt-4o-mini' or 'gpt-41-nano')
 
         Returns:
@@ -688,12 +691,23 @@ class OrchestratorAgentService:
         try:
             agent = self._get_agent(model)
 
+            # If conversation history is provided, prepend a short transcript so the
+            # LLM can remain aware of the ongoing thread.
+            llm_query = query
+            if history:
+                history_text = "\n".join(
+                    f"{msg.get('role', '').upper()}: {msg.get('content', '')}"
+                    for msg in history[-5:]
+                )
+                history_text = trim_text(history_text, MAX_HISTORY_CHARS)
+                llm_query = f"Previous conversation:\n{history_text}\n\nCurrent question: {query}"
+
             # MAF's ChatAgent.run() handles everything:
             # - Tool selection (based on tool_choice="auto")
             # - ReAct reasoning loop (built-in)
             # - Parallel tool execution (if model supports it)
             # - Response synthesis
-            result = await agent.run(query)
+            result = await run_agent_compat(agent, llm_query, user=user_id)
             response_text = result.text if hasattr(result, "text") else str(result)
 
             # Build sources for traceability (regulatory requirement)

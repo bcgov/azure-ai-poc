@@ -5,9 +5,8 @@ Common functions for handling source citations across the application.
 Provides consistent sorting, formatting, and validation of sources.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
-
 
 # Confidence level ordering (higher = better)
 CONFIDENCE_ORDER = {"high": 3, "medium": 2, "low": 1}

@@ -239,18 +239,27 @@ class CosmosDbService:
 
     # ============= Chat History Operations =============
 
-    async def create_session(self, user_id: str, title: str | None = None) -> ConversationSession:
+    async def create_session(
+        self,
+        user_id: str,
+        title: str | None = None,
+        *,
+        session_id_prefix: str = "session_",
+    ) -> ConversationSession:
         """
         Create a new conversation session.
 
         Args:
             user_id: The user identifier
             title: Optional session title
+            session_id_prefix: Prefix to use for the session_id. Use different prefixes
+                to keep sessions distinct across agents (e.g., 'chat_', 'orch_', 'research_').
 
         Returns:
             The created conversation session
         """
-        session_id = f"session_{uuid.uuid4()}"
+        prefix = session_id_prefix or "session_"
+        session_id = f"{prefix}{uuid.uuid4()}"
 
         if not await self._ensure_initialized():
             return ConversationSession(
@@ -469,13 +478,21 @@ class CosmosDbService:
             )
             return []
 
-    async def get_user_sessions(self, user_id: str, limit: int = 20) -> list[ConversationSession]:
+    async def get_user_sessions(
+        self,
+        user_id: str,
+        limit: int = 20,
+        *,
+        session_id_prefix: str | None = None,
+    ) -> list[ConversationSession]:
         """
         Get recent conversation sessions for a user.
 
         Args:
             user_id: The user identifier
             limit: Maximum sessions to return
+            session_id_prefix: Optional prefix filter for session_id.
+                When set, returns only sessions that start with this prefix.
 
         Returns:
             List of conversation sessions
@@ -488,13 +505,20 @@ class CosmosDbService:
                 SELECT * FROM c
                 WHERE c.type = 'session'
                 AND c.user_id = @user_id
+            """
+            parameters: list[dict[str, Any]] = [
+                {"name": "@user_id", "value": user_id},
+            ]
+
+            if session_id_prefix:
+                query += "\n                AND STARTSWITH(c.session_id, @prefix)"
+                parameters.append({"name": "@prefix", "value": session_id_prefix})
+
+            query += """
                 ORDER BY c.last_updated DESC
                 OFFSET 0 LIMIT @limit
             """
-            parameters = [
-                {"name": "@user_id", "value": user_id},
-                {"name": "@limit", "value": limit},
-            ]
+            parameters.append({"name": "@limit", "value": limit})
 
             items = [
                 item

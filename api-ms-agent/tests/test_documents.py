@@ -2,8 +2,6 @@
 
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
 from app.config import settings
 from app.main import app
 from app.services.azure_search_service import get_azure_search_service

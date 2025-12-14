@@ -14,7 +14,6 @@ import asyncio
 import time
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from textwrap import shorten
 from typing import Any
 
 from agent_framework import ChatAgent, ai_function
@@ -22,11 +21,12 @@ from agent_framework.openai import OpenAIChatClient
 
 from app.config import settings
 from app.logger import get_logger
+from app.services.agent_run_compat import run_agent_compat
 from app.services.openai_clients import (
     get_client_for_model,
     get_deployment_for_model,
 )
-from app.utils import sort_sources_by_confidence
+from app.utils import MAX_HISTORY_CHARS, sort_sources_by_confidence, trim_text
 
 logger = get_logger(__name__)
 
@@ -86,7 +86,6 @@ _chat_sources_var: ContextVar[list[SourceInfo] | None] = ContextVar(
 
 # Token/cost guards
 MAX_DOC_CONTEXT_CHARS = 1800
-MAX_HISTORY_CHARS = 1200
 
 
 def _reset_chat_sources() -> None:
@@ -121,15 +120,6 @@ def _add_source(
             url=url,
         )
     )
-
-
-def _trim_text(text: str, max_chars: int) -> str:
-    """Trim text to reduce prompt size while keeping readability."""
-    if not text:
-        return text
-    if len(text) <= max_chars:
-        return text
-    return shorten(text, width=max_chars, placeholder=" …")
 
 
 # ==================== Chat Tools ====================
@@ -323,7 +313,7 @@ class ChatAgentService:
         # Document context or non-default model requires fresh agent
         instructions = SYSTEM_INSTRUCTIONS
         if document_context:
-            trimmed_context = _trim_text(document_context, MAX_DOC_CONTEXT_CHARS)
+            trimmed_context = trim_text(document_context, MAX_DOC_CONTEXT_CHARS)
             instructions = (
                 SYSTEM_INSTRUCTIONS
                 + f"""
@@ -407,7 +397,7 @@ DOCUMENT:
                 history_text = "\n".join(
                     f"{msg['role'].upper()}: {msg['content']}" for msg in history[-5:]
                 )
-                history_text = _trim_text(history_text, MAX_HISTORY_CHARS)
+                history_text = trim_text(history_text, MAX_HISTORY_CHARS)
                 query = f"Previous conversation:\n{history_text}\n\nCurrent question: {message}"
 
             # MAF's ChatAgent.run() handles ReAct reasoning internally.
@@ -415,7 +405,7 @@ DOCUMENT:
             start = time.monotonic()
             try:
                 result = await asyncio.wait_for(
-                    agent.run(query),
+                    run_agent_compat(agent, query, user=user_id),
                     timeout=settings.llm_request_timeout_seconds,
                 )
             except TimeoutError as exc:

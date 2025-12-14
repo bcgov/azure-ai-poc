@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Iterable
-from typing import Callable, Optional
 
 from agent_framework.devui import serve
 
@@ -69,7 +68,7 @@ class DevUIServer:
         self.auto_open = auto_open
         self.mode = mode
         self.cors_origins = list(cors_origins) if cors_origins else None
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
     def start(self) -> None:
