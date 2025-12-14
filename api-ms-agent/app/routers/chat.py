@@ -107,7 +107,7 @@ async def chat(
         "chat_request_received",
         user_id=user_id,
         session_id=session_id,
-        message_preview=request.message[:100],
+        message_length=len(request.message),
         has_history=request.history is not None,
         document_id=request.document_id,
     )

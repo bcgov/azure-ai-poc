@@ -8,11 +8,13 @@ These tests validate that the orchestrator agent:
 4. Follows Microsoft Agent Framework best practices
 """
 
+from unittest.mock import AsyncMock, Mock, patch
+
 import pytest
 
 from app.services.orchestrator_agent import (
-    SYSTEM_INSTRUCTIONS,
     ORCHESTRATOR_TOOLS,
+    SYSTEM_INSTRUCTIONS,
     OrchestratorAgentService,
 )
 
@@ -82,15 +84,30 @@ class TestOrchestratorService:
         """Verify service initializes without errors."""
         service = OrchestratorAgentService()
         assert service is not None
-        assert service._agent is None  # Lazy initialization
-        assert service._client is None
+        assert service._agents == {}  # Lazy initialization per model
+        assert service._credential is None
 
     def test_service_follows_maf_patterns(self):
         """Verify service uses MAF built-in ChatAgent."""
         service = OrchestratorAgentService()
-        agent = service._get_agent()
 
-        # Verify it's using ChatAgent (has expected attributes)
+        # Mock AzureOpenAIChatClient + ChatAgent so tests don't require live Azure settings
+        fake_chat_client = Mock()
+        fake_agent = Mock()
+        fake_agent.run = AsyncMock()
+        fake_agent.chat_client = fake_chat_client
+
+        with patch(
+            "app.services.openai_clients.get_deployment_for_model", return_value="gpt-4o-mini"
+        ):
+            with patch(
+                "app.services.orchestrator_agent.AzureOpenAIChatClient",
+                return_value=fake_chat_client,
+            ):
+                with patch("app.services.orchestrator_agent.ChatAgent", return_value=fake_agent):
+                    agent = service._get_agent()
+
+        # Verify it looks like a ChatAgent from a caller perspective
         assert hasattr(agent, "run")
         assert hasattr(agent, "chat_client")
 
@@ -98,7 +115,21 @@ class TestOrchestratorService:
     async def test_health_check(self):
         """Verify health check works."""
         service = OrchestratorAgentService()
-        health = await service.health_check()
+
+        orgbook = Mock()
+        orgbook.health_check = AsyncMock(return_value=True)
+        orgbook.close = AsyncMock()
+        geocoder = Mock()
+        geocoder.health_check = AsyncMock(return_value=True)
+        geocoder.close = AsyncMock()
+        parks = Mock()
+        parks.health_check = AsyncMock(return_value=True)
+        parks.close = AsyncMock()
+
+        with patch("app.services.orchestrator_agent._get_orgbook", return_value=orgbook):
+            with patch("app.services.orchestrator_agent._get_geocoder", return_value=geocoder):
+                with patch("app.services.orchestrator_agent._get_parks", return_value=parks):
+                    health = await service.health_check()
 
         assert "status" in health
         assert "services" in health

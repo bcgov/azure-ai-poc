@@ -27,7 +27,11 @@ MCP Tools Available (via @ai_function):
     - Parks: BC provincial parks information
 """
 
+import asyncio
+import json
+import time
 from dataclasses import dataclass
+from threading import Lock
 from typing import Any
 
 from agent_framework import ChatAgent, FunctionCallContent, FunctionResultContent, ai_function
@@ -36,9 +40,10 @@ from azure.identity.aio import DefaultAzureCredential
 
 from app.config import settings
 from app.logger import get_logger
-from app.services.mcp.geocoder_mcp import GeocoderMCP, get_geocoder_mcp
-from app.services.mcp.orgbook_mcp import OrgBookMCP, get_orgbook_mcp
-from app.services.mcp.parks_mcp import ParksMCP, get_parks_mcp
+from app.services.mcp.base import MCPToolResult
+from app.services.mcp.geocoder_mcp import GeocoderMCP
+from app.services.mcp.orgbook_mcp import OrgBookMCP
+from app.services.mcp.parks_mcp import ParksMCP
 from app.utils import sort_source_dicts_by_confidence
 
 logger = get_logger(__name__)
@@ -85,26 +90,142 @@ _orgbook_mcp: OrgBookMCP | None = None
 _geocoder_mcp: GeocoderMCP | None = None
 _parks_mcp: ParksMCP | None = None
 
+_MCP_INIT_LOCK = Lock()
+
+
+def _mcp_tool_timeout_seconds() -> float:
+    """Get the max wall-clock time for a single tool execution."""
+    return float(getattr(settings, "mcp_tool_timeout_seconds", 30.0))
+
+
+def _mcp_tool_max_output_chars() -> int:
+    """Get the maximum characters returned from tools to the LLM."""
+    return int(getattr(settings, "mcp_tool_max_output_chars", 4000))
+
+
+def _args_preview(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Return a safe, small preview of tool arguments for logging."""
+    preview: dict[str, Any] = {}
+    for key, value in (arguments or {}).items():
+        if isinstance(value, str):
+            preview[key] = value[:120]
+        elif isinstance(value, (int, float, bool)) or value is None:
+            preview[key] = value
+        else:
+            preview[key] = str(value)[:120]
+    return preview
+
+
+def _truncate_to_valid_json_wrapper(text: str, max_chars: int) -> str:
+    """Wrap large JSON payloads into a valid JSON envelope within max_chars."""
+    if max_chars <= 0:
+        return "{}"
+    if len(text) <= max_chars:
+        return text
+
+    envelope: dict[str, Any] = {
+        "truncated": True,
+        "max_chars": max_chars,
+        "content": "",
+    }
+    overhead = len(json.dumps(envelope, ensure_ascii=False))
+    allowed = max(0, max_chars - overhead)
+    envelope["content"] = text[:allowed]
+    return json.dumps(envelope, ensure_ascii=False)
+
+
+def _safe_json_dumps(data: Any, *, max_chars: int) -> str:
+    """Dump to JSON, ensuring the returned string stays bounded and valid."""
+    raw = json.dumps(data, indent=2, default=str, ensure_ascii=False)
+    return _truncate_to_valid_json_wrapper(raw, max_chars=max_chars)
+
+
+async def _execute_mcp_tool(
+    mcp: Any,
+    tool_name: str,
+    arguments: dict[str, Any],
+) -> MCPToolResult:
+    """Execute an MCP tool with a bounded timeout and duration logging."""
+    timeout_seconds = _mcp_tool_timeout_seconds()
+    start = time.perf_counter()
+    result: MCPToolResult | None = None
+    error_type: str | None = None
+
+    try:
+        result = await asyncio.wait_for(
+            mcp.execute_tool(tool_name, arguments),
+            timeout=timeout_seconds,
+        )
+        return result
+    except TimeoutError:
+        error_type = "timeout"
+        return MCPToolResult(
+            success=False,
+            error=f"Tool '{tool_name}' timed out after {timeout_seconds:.1f}s",
+        )
+    except Exception as e:
+        error_type = "exception"
+        return MCPToolResult(
+            success=False,
+            error=str(e),
+        )
+    finally:
+        duration_ms = (time.perf_counter() - start) * 1000.0
+        logger.info(
+            "mcp_tool_call_completed",
+            tool_name=tool_name,
+            duration_ms=round(duration_ms, 2),
+            success=(result.success if isinstance(result, MCPToolResult) else False),
+            error_type=error_type,
+            args=_args_preview(arguments),
+        )
+
 
 def _get_orgbook() -> OrgBookMCP:
     global _orgbook_mcp
     if _orgbook_mcp is None:
-        _orgbook_mcp = get_orgbook_mcp()
+        with _MCP_INIT_LOCK:
+            if _orgbook_mcp is None:
+                _orgbook_mcp = OrgBookMCP()
     return _orgbook_mcp
 
 
 def _get_geocoder() -> GeocoderMCP:
     global _geocoder_mcp
     if _geocoder_mcp is None:
-        _geocoder_mcp = get_geocoder_mcp()
+        with _MCP_INIT_LOCK:
+            if _geocoder_mcp is None:
+                _geocoder_mcp = GeocoderMCP()
     return _geocoder_mcp
 
 
 def _get_parks() -> ParksMCP:
     global _parks_mcp
     if _parks_mcp is None:
-        _parks_mcp = get_parks_mcp()
+        with _MCP_INIT_LOCK:
+            if _parks_mcp is None:
+                _parks_mcp = ParksMCP()
     return _parks_mcp
+
+
+async def shutdown_mcp_wrappers() -> None:
+    """Close and clear MCP wrapper singletons for clean shutdown / test isolation."""
+    global _orgbook_mcp, _geocoder_mcp, _parks_mcp
+
+    orgbook_mcp = _orgbook_mcp
+    geocoder_mcp = _geocoder_mcp
+    parks_mcp = _parks_mcp
+
+    _orgbook_mcp = None
+    _geocoder_mcp = None
+    _parks_mcp = None
+
+    if orgbook_mcp:
+        await orgbook_mcp.close()
+    if geocoder_mcp:
+        await geocoder_mcp.close()
+    if parks_mcp:
+        await parks_mcp.close()
 
 
 # ==================== Geocoder Tools ====================
@@ -123,7 +244,7 @@ async def geocoder_geocode(address: str) -> str:
         Formatted string with coordinates and address matches
     """
     mcp = _get_geocoder()
-    result = await mcp.execute_tool("geocoder_geocode", {"address": address})
+    result = await _execute_mcp_tool(mcp, "geocoder_geocode", {"address": address})
 
     if result.success and result.data:
         addresses = result.data.get("addresses", [])
@@ -152,15 +273,15 @@ async def geocoder_occupants(query: str, max_results: int = 10) -> str:
     Returns:
         JSON string with business/occupant results
     """
-    import json as json_module
-
     mcp = _get_geocoder()
-    result = await mcp.execute_tool(
-        "geocoder_occupants", {"query": query, "max_results": max_results}
+    result = await _execute_mcp_tool(
+        mcp,
+        "geocoder_occupants",
+        {"query": query, "max_results": max_results},
     )
 
     if result.success and result.data:
-        return json_module.dumps(result.data, indent=2, default=str)[:2000]
+        return _safe_json_dumps(result.data, max_chars=_mcp_tool_max_output_chars())
     return f"Error: {result.error}" if result.error else "No results found"
 
 
@@ -199,7 +320,7 @@ async def parks_search(
         args["longitude"] = longitude
         args["radius_km"] = radius_km
 
-    result = await mcp.execute_tool("parks_search", args)
+    result = await _execute_mcp_tool(mcp, "parks_search", args)
 
     if result.success and result.data:
         parks = result.data.get("parks", [])
@@ -236,13 +357,11 @@ async def parks_get_details(park_id: str) -> str:
     Returns:
         Detailed park information including description, activities, facilities
     """
-    import json as json_module
-
     mcp = _get_parks()
-    result = await mcp.execute_tool("parks_get_details", {"park_id": park_id})
+    result = await _execute_mcp_tool(mcp, "parks_get_details", {"park_id": park_id})
 
     if result.success and result.data:
-        return json_module.dumps(result.data, indent=2, default=str)[:3000]
+        return _safe_json_dumps(result.data, max_chars=_mcp_tool_max_output_chars())
     return f"Error: {result.error}" if result.error else "Park not found"
 
 
@@ -258,7 +377,11 @@ async def parks_by_activity(activity: str, limit: int = 15) -> str:
         List of parks offering the specified activity
     """
     mcp = _get_parks()
-    result = await mcp.execute_tool("parks_by_activity", {"activity": activity, "limit": limit})
+    result = await _execute_mcp_tool(
+        mcp,
+        "parks_by_activity",
+        {"activity": activity, "limit": limit},
+    )
 
     if result.success and result.data:
         parks = result.data.get("parks", [])
@@ -290,7 +413,11 @@ async def orgbook_search(query: str, limit: int = 10) -> str:
         List of matching organizations with status
     """
     mcp = _get_orgbook()
-    result = await mcp.execute_tool("orgbook_search", {"query": query, "limit": limit})
+    result = await _execute_mcp_tool(
+        mcp,
+        "orgbook_search",
+        {"query": query, "limit": limit},
+    )
 
     if result.success and result.data:
         orgs = result.data.get("organizations", [])
@@ -318,13 +445,11 @@ async def orgbook_get_topic(topic_id: str) -> str:
     Returns:
         Detailed organization information
     """
-    import json as json_module
-
     mcp = _get_orgbook()
-    result = await mcp.execute_tool("orgbook_get_topic", {"topic_id": topic_id})
+    result = await _execute_mcp_tool(mcp, "orgbook_get_topic", {"topic_id": topic_id})
 
     if result.success and result.data:
-        return json_module.dumps(result.data, indent=2, default=str)[:2000]
+        return _safe_json_dumps(result.data, max_chars=_mcp_tool_max_output_chars())
     return f"Error: {result.error}" if result.error else "Topic not found"
 
 
@@ -341,13 +466,17 @@ ORCHESTRATOR_TOOLS = [
     orgbook_get_topic,
 ]
 
-SYSTEM_INSTRUCTIONS = """You are a knowledgeable assistant specializing in British Columbia, Canada, \
+SYSTEM_INSTRUCTIONS = """
+You are a knowledgeable assistant specializing in British Columbia, Canada,
 with access to official BC government data sources through specialized tools.
 
 AVAILABLE TOOLS:
-- **BC Parks Tools**: Search parks by name/keyword/location, find parks by activity, get detailed park information
-- **BC Geocoder Tools**: Convert addresses/place names to coordinates, search for business occupants
-- **BC OrgBook Tools**: Search registered businesses and organizations, get detailed organization information
+- **BC Parks Tools**: Search parks by name/keyword/location, find parks by activity,
+  get detailed park information
+- **BC Geocoder Tools**: Convert addresses/place names to coordinates,
+  search for business occupants
+- **BC OrgBook Tools**: Search registered businesses and organizations,
+  get detailed organization information
 
 REASONING PROCESS (Think Step-by-Step):
 
@@ -374,7 +503,8 @@ REASONING PROCESS (Think Step-by-Step):
    - Always cite which tools/sources you used
 
 CRITICAL REQUIREMENT - SOURCE ATTRIBUTION:
-Every response MUST be grounded in tool results when possible. This is not optional - it's a regulatory requirement for traceability.
+Every response MUST be grounded in tool results when possible.
+This is not optional - it's a regulatory requirement for traceability.
 
 **Your reasoning process:**
 1. Analyze the query - does it relate to BC parks, locations, or businesses?
@@ -387,7 +517,9 @@ Every response MUST be grounded in tool results when possible. This is not optio
 - Don't make excuses - call the appropriate tool and report results
 - If unsure which tool, try the most relevant one (parks_search is great for exploring BC regions)
 
-If a query is genuinely outside available tools, clearly state: "I don't have access to tools that can answer this question with authoritative BC government data."
+If a query is genuinely outside available tools, clearly state:
+"I don't have access to tools that can answer this question
+with authoritative BC government data."
 
 WHEN TO USE TOOLS:
 
@@ -409,7 +541,8 @@ WHEN TO USE TOOLS:
   - Meta questions about your capabilities ("what can you do?")
   - Clearly non-BC topics ("weather in Tokyo", "restaurants in New York")
 
-**Important:** If a query mentions BC geography, nature, parks, businesses, or locations - ALWAYS try relevant tools first before saying you can't help.
+**Important:** If a query mentions BC geography, nature, parks, businesses,
+or locations - ALWAYS try relevant tools first before saying you can't help.
 
 EFFICIENCY & ACCURACY:
 - Call each tool only ONCE per piece of information
@@ -575,7 +708,9 @@ class OrchestratorAgentService:
                 sources = [
                     {
                         "source_type": "llm_knowledge",
-                        "description": f"Response generated by {model_display} using BC government data APIs",
+                        "description": (
+                            f"Response generated by {model_display} using BC government data APIs"
+                        ),
                         "confidence": "high",
                     }
                 ]
@@ -883,14 +1018,7 @@ class OrchestratorAgentService:
             await self._credential.close()
             self._credential = None
 
-        # Close MCP wrappers
-        orgbook_mcp = _get_orgbook()
-        geocoder_mcp = _get_geocoder()
-        parks_mcp = _get_parks()
-
-        await orgbook_mcp.close()
-        await geocoder_mcp.close()
-        await parks_mcp.close()
+        await shutdown_mcp_wrappers()
 
         logger.info("OrchestratorAgentService closed")
 
@@ -914,3 +1042,6 @@ async def shutdown_orchestrator() -> None:
     if _orchestrator_instance:
         await _orchestrator_instance.close()
         _orchestrator_instance = None
+    else:
+        # Ensure MCP wrappers can still be cleaned up when orchestrator was never created.
+        await shutdown_mcp_wrappers()

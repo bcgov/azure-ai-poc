@@ -4,9 +4,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from app.config import settings
 from app.main import app
-from app.services.embedding_service import Document, SearchResult, get_embedding_service
+from app.services.azure_search_service import get_azure_search_service
 from app.services.cosmos_db_service import get_cosmos_db_service
+from app.services.document_intelligence_service import get_document_intelligence_service
+from app.services.embedding_service import Document, SearchResult, get_embedding_service
 
 
 class TestDocumentsEndpoints:
@@ -100,7 +103,15 @@ class TestDocumentsEndpoints:
                 "details": {"responseTime": "5.00ms"},
             }
         )
+        mock_search = MagicMock()
+        mock_search.health_check = AsyncMock(
+            return_value={
+                "status": "up",
+                "details": {"responseTime": "5.00ms"},
+            }
+        )
         app.dependency_overrides[get_cosmos_db_service] = lambda: mock_cosmos
+        app.dependency_overrides[get_azure_search_service] = lambda: mock_search
 
         try:
             response = client.get("/api/v1/documents/health", headers=auth_headers)
@@ -157,5 +168,31 @@ class TestDocumentsEndpoints:
             assert len(data["documents"]) == 2
             assert data["documents"][0]["title"] == "Test Document 1"
             assert data["documents"][1]["chunk_count"] == 3
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_upload_document_too_large(self, client, auth_headers, monkeypatch):
+        """Upload should reject files exceeding max_upload_bytes."""
+        monkeypatch.setattr(settings, "max_upload_bytes", 10)
+
+        mock_embedding = MagicMock()
+        mock_embedding.index_document = AsyncMock()
+        app.dependency_overrides[get_embedding_service] = lambda: mock_embedding
+
+        mock_doc_intel = MagicMock()
+        mock_doc_intel.is_supported_format = MagicMock(return_value=True)
+        mock_doc_intel.analyze_document = AsyncMock()
+        app.dependency_overrides[get_document_intelligence_service] = lambda: mock_doc_intel
+
+        try:
+            response = client.post(
+                "/api/v1/documents/upload",
+                headers=auth_headers,
+                files={"file": ("test.txt", b"0123456789ABC", "text/plain")},
+            )
+            assert response.status_code == 413
+            # Ensure downstream services were not called
+            mock_doc_intel.analyze_document.assert_not_called()
+            mock_embedding.index_document.assert_not_called()
         finally:
             app.dependency_overrides.clear()

@@ -18,6 +18,13 @@ class Settings(BaseSettings):
     debug: bool = False
     environment: str = "local"  # local, development, production
 
+    # Keycloak Auth settings
+    # NOTE: Defaults intentionally blank so non-local environments must explicitly configure.
+    # Local defaults are applied in AuthService.
+    keycloak_url: str = ""
+    keycloak_realm: str = ""
+    keycloak_client_id: str = ""
+
     # Azure OpenAI settings
     azure_openai_endpoint: str = ""
     azure_openai_api_key: str = ""  # Optional if using managed identity
@@ -46,6 +53,36 @@ class Settings(BaseSettings):
     # LLM Configuration - Low temperature for high confidence responses
     llm_temperature: float = 0.0  # Low temperature for consistent, high-confidence responses
     llm_max_output_tokens: int = 5000  # Cap responses to control cost/token usage
+
+    # LLM request timeout (seconds) for non-streaming calls.
+    # Prevents requests from hanging indefinitely when upstream is slow/flaky.
+    llm_request_timeout_seconds: float = 120.0
+
+    # LLM request timeout (seconds) for streaming calls.
+    # Streaming sessions can take longer than a single non-streaming completion.
+    llm_streaming_timeout_seconds: float = 600.0
+
+    # Web search (DuckDuckGo) execution bounds.
+    web_search_timeout_seconds: float = 20.0
+    web_search_max_concurrent: int = 4
+    web_search_max_queries_per_run: int = 30
+
+    # MCP tool execution bounds.
+    # These tools call external BC government APIs and should not hang indefinitely.
+    mcp_tool_timeout_seconds: float = 30.0
+    # Max characters returned from a single tool call into the agent context.
+    mcp_tool_max_output_chars: int = 4000
+
+    # Embedding requests (Azure OpenAI) are non-streaming and should be bounded.
+    embedding_request_timeout_seconds: float = 60.0
+    embedding_max_retries: int = 2
+    embedding_retry_base_seconds: float = 0.5
+
+    # Upload limits (bytes) to avoid unbounded memory usage.
+    max_upload_bytes: int = 20 * 1024 * 1024  # 20 MiB
+
+    # Document Intelligence LRO polling timeout (seconds).
+    document_intelligence_timeout_seconds: float = 300.0
 
     # Dev UI (Agent Framework DevUI) settings
     devui_enabled: bool = True

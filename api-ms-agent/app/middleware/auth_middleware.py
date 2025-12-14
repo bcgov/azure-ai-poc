@@ -2,7 +2,7 @@
 
 from collections.abc import Callable
 
-from fastapi import Request, Response, status
+from fastapi import HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -93,13 +93,26 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 username=user.preferred_username,
             )
 
-        except Exception as e:
-            # Log the error but return generic 401 to avoid leaking info
+        except HTTPException as http_exc:
+            # Preserve explicit HTTPException semantics (401 vs 403).
             logger.warning(
                 "auth_failed",
                 path=path,
+                status_code=http_exc.status_code,
                 reason="token_validation_failed",
-                error=str(e),
+            )
+            return JSONResponse(
+                status_code=http_exc.status_code,
+                content={"detail": http_exc.detail},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        except Exception as e:
+            # Non-HTTP errors (unexpected): return safe generic 401
+            logger.warning(
+                "auth_failed",
+                path=path,
+                reason="unexpected_error",
+                error_type=type(e).__name__,
             )
             return JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,

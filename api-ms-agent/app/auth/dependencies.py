@@ -12,13 +12,24 @@ from app.logger import get_logger
 logger = get_logger(__name__)
 
 # Security scheme for bearer token
-security = HTTPBearer()
+# MAJOR: Use auto_error=False to avoid fastapi's automatic 403/401 behavior and
+# allow consistent, explicit 401 responses matching middleware semantics.
+security = HTTPBearer(auto_error=False)
 
 
 async def get_token(
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
 ) -> str:
-    """Extract bearer token from Authorization header."""
+    """Extract bearer token from Authorization header.
+
+    Returns a bearer token string or raises explicit 401 if missing/invalid.
+    """
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or invalid Authorization header",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return credentials.credentials
 
 
@@ -70,8 +81,11 @@ def require_roles(*required_roles: str):
     roles = tuple(required_roles)
 
     async def checker(
-        current_user: Annotated[KeycloakUser, Depends(get_current_user)],
+        request: Request,
     ) -> KeycloakUser:
+        # Prefer middleware-populated user to avoid re-validating the token.
+        current_user = await get_current_user_from_request(request)
+
         user_roles = current_user.client_roles or []
         if not user_roles or not any(r in user_roles for r in roles):
             raise HTTPException(
@@ -84,5 +98,6 @@ def require_roles(*required_roles: str):
 
 
 # Common role dependencies
-RequireAuth = Depends(get_current_user)
+# Prefer middleware-populated user to avoid redundant token validation.
+RequireAuth = Depends(get_current_user_from_request)
 RequireParticipant = Depends(require_roles("ai-poc-participant"))
