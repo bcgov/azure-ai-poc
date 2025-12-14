@@ -17,11 +17,17 @@ from app.services.azure_search_service import (
 from app.services.chat_agent import ChatAgentService, get_chat_agent_service
 from app.services.cosmos_db_service import CosmosDbService, get_cosmos_db_service
 from app.services.embedding_service import EmbeddingService, get_embedding_service
+from app.services.session_utils import resolve_session_id
 from app.utils import sort_source_dicts_by_confidence
 
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+# Frontend generates session ids like `session_${Date.now()}` and CosmosDbService
+# defaults to the same prefix. Keep this aligned so `/chat/sessions` returns
+# sessions created during chat, and history can be reloaded reliably.
+_CHAT_SESSION_PREFIX = "session_"
 
 # Prompt/cost guards
 MAX_CONTEXT_CHARS_PER_CHUNK = 600
@@ -100,23 +106,33 @@ async def chat(
 
     Chat history is persisted to Cosmos DB for session continuity.
     """
-    session_id = request.session_id or str(uuid4())
     user_id = current_user.sub
+
+    session_id, session_id_source = await resolve_session_id(
+        cosmos=cosmos,
+        user_id=user_id,
+        requested_session_id=request.session_id,
+        session_id_prefix=_CHAT_SESSION_PREFIX,
+    )
+
+    # Final guard (should never happen, but keeps types strict)
+    session_id = session_id or str(uuid4())
 
     logger.info(
         "chat_request_received",
         user_id=user_id,
         session_id=session_id,
-        message_preview=request.message[:100],
+        session_id_source=session_id_source,
+        message_length=len(request.message),
         has_history=request.history is not None,
         document_id=request.document_id,
     )
 
-    # If no history provided but session_id exists, try to load from Cosmos DB
+    # If no history provided, try to load from Cosmos DB using resolved session_id.
     history = None
     if request.history:
         history = [{"role": msg.role, "content": msg.content} for msg in request.history]
-    elif request.session_id:
+    elif session_id:
         # Load history from Cosmos DB
         stored_messages = await cosmos.get_chat_history(session_id, user_id)
         if stored_messages:
@@ -311,7 +327,7 @@ async def create_session(
 ) -> SessionResponse:
     """Create a new chat session."""
     user_id = current_user.sub
-    session = await cosmos.create_session(user_id, title)
+    session = await cosmos.create_session(user_id, title, session_id_prefix=_CHAT_SESSION_PREFIX)
     return SessionResponse(session_id=session.session_id, title=session.title)
 
 
@@ -323,7 +339,11 @@ async def list_sessions(
 ) -> SessionListResponse:
     """List user's chat sessions."""
     user_id = current_user.sub
-    sessions = await cosmos.get_user_sessions(user_id, limit)
+    sessions = await cosmos.get_user_sessions(
+        user_id,
+        limit,
+        session_id_prefix=_CHAT_SESSION_PREFIX,
+    )
     return SessionListResponse(
         sessions=[
             {

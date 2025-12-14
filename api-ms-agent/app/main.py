@@ -40,11 +40,12 @@ def _format_bytes(num: float) -> str:
     return f"{num:.2f} PB"
 
 
-def _collect_process_metrics() -> dict:
+def _collect_process_metrics(*, sample_cpu: bool = True) -> dict:
     """Gather CPU and memory metrics for the current Python process only."""
     proc = psutil.Process()
 
-    cpu_percent = proc.cpu_percent(interval=0.05)
+    # Avoid blocking on frequently-called endpoints (e.g., health checks).
+    cpu_percent = proc.cpu_percent(interval=0.05 if sample_cpu else 0.0)
     mem_info = proc.memory_info()
 
     data = {
@@ -78,22 +79,39 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("Starting up API MS Agent")
     devui_server: DevUIServer | None = None
 
-    async def _safe_init(name: str, func):
-        """Run initializer safely and log warnings without failing startup."""
+    async def _safe_init(name: str, func, *, is_ready=None, required: bool = False) -> None:
+        """Run initializer safely; optionally fail fast when required."""
         try:
             result = func()
             if inspect.isawaitable(result):
                 await result
-            logger.info("service_initialized", service=name)
+            if is_ready is not None and not is_ready():
+                if required:
+                    raise RuntimeError(f"Required service '{name}' failed to initialize")
+                logger.warning("service_unavailable", service=name)
+            else:
+                logger.info("service_initialized", service=name)
         except Exception as exc:  # noqa: BLE001 - we want to catch all during startup warmup
+            if required:
+                raise
             logger.warning("service_init_failed", service=name, error=str(exc))
 
     # Startup: initialize core infrastructure services
     cosmos_service = get_cosmos_db_service()
     azure_search_service = get_azure_search_service()
 
-    await _safe_init("cosmos_db", cosmos_service._initialize_client)
-    await _safe_init("azure_search", azure_search_service._initialize_client)
+    await _safe_init(
+        "cosmos_db",
+        cosmos_service._initialize_client,
+        is_ready=lambda: cosmos_service._initialized,
+        required=bool(settings.cosmos_db_endpoint),
+    )
+    await _safe_init(
+        "azure_search",
+        azure_search_service._initialize_client,
+        is_ready=lambda: azure_search_service._initialized,
+        required=bool(settings.azure_search_endpoint),
+    )
 
     # Initialize Document Intelligence service (eagerly create client)
     from app.services.document_intelligence_service import (
@@ -181,7 +199,7 @@ def create_app() -> FastAPI:
     app.add_middleware(SecurityMiddleware)
 
     # Authentication middleware - validates JWT for all non-excluded routes
-    # Note: Middleware executes in reverse order, so this runs before SecurityMiddleware
+    # Note: Middleware is applied in reverse order of addition.
     app.add_middleware(AuthMiddleware)
 
     # Root endpoints (excluded from auth)
@@ -198,12 +216,12 @@ def create_app() -> FastAPI:
     @app.get("/health")
     async def health():
         """Health check endpoint."""
-        return {"status": "healthy", "process": _collect_process_metrics()}
+        return {"status": "healthy", "process": _collect_process_metrics(sample_cpu=False)}
 
     @app.get("/api/health")
     async def api_health():
         """Health check endpoint."""
-        return {"status": "healthy", "process": _collect_process_metrics()}
+        return {"status": "healthy", "process": _collect_process_metrics(sample_cpu=False)}
 
     # Include all routers with API prefix and versioning
     app.include_router(api_router, prefix="/api/v1")

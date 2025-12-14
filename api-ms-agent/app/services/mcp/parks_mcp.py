@@ -5,6 +5,8 @@ Provides MCP tools for querying BC Parks API for parks, activities, and faciliti
 API Base: https://bcparks.api.gov.bc.ca/api
 """
 
+import asyncio
+import math
 import re
 import time
 from typing import Any
@@ -30,12 +32,14 @@ class ParksMCP(MCPWrapper):
     - Getting campsite/reservation information
     """
 
-    def __init__(self, base_url: str | None = None, cache_ttl_seconds: int = 3600):
+    def __init__(self, base_url: str | None = None, cache_ttl_seconds: int = 43200):
         """Initialize the Parks MCP wrapper."""
         configured_base = base_url or getattr(settings, "parks_base_url", None) or PARKS_BASE_URL
         super().__init__(base_url=configured_base)
         self._cache_ttl_seconds = cache_ttl_seconds
         self._parks_cache: dict[str, Any] = {"timestamp": 0, "parks": []}
+        self._parks_cache_lock = asyncio.Lock()
+        self._parks_cache_refresh_lock = asyncio.Lock()
         logger.info("ParksMCP initialized")
 
     @property
@@ -61,6 +65,21 @@ class ParksMCP(MCPWrapper):
                             "default": 10,
                             "minimum": 1,
                             "maximum": 50,
+                        },
+                        "latitude": {
+                            "type": "number",
+                            "description": "Optional: Latitude for proximity search",
+                        },
+                        "longitude": {
+                            "type": "number",
+                            "description": "Optional: Longitude for proximity search",
+                        },
+                        "radius_km": {
+                            "type": "number",
+                            "description": "Optional: Search radius (km) for proximity search",
+                            "default": 100,
+                            "minimum": 0,
+                            "maximum": 500,
                         },
                     },
                     "required": ["query"],
@@ -225,49 +244,8 @@ class ParksMCP(MCPWrapper):
 
         endpoint = "/protected-areas"
 
-        # Fetch all parks using pagination (API returns max 100 per page)
-        all_parks = []
-        page = 1
-        max_pages = 15  # Safety limit
-
-        now = time.time()
-        if (
-            self._parks_cache["parks"]
-            and now - self._parks_cache["timestamp"] < self._cache_ttl_seconds
-        ):
-            all_parks = self._parks_cache["parks"]
-            logger.debug(f"[ParksMCP] Using cached parks list ({len(all_parks)})")
-        else:
-            while page <= max_pages:
-                params = {
-                    "pagination[page]": page,
-                    "pagination[pageSize]": 100,
-                }
-                try:
-                    data = await self._request("GET", endpoint, params=params)
-                    parks = data.get("data", [])
-                    meta = data.get("meta", {}).get("pagination", {})
-
-                    all_parks.extend(parks)
-
-                    # Check if we've fetched all pages
-                    if page >= meta.get("pageCount", 1):
-                        break
-                    page += 1
-                except Exception as e:
-                    logger.warning(f"[ParksMCP] Pagination error at page {page}: {e}")
-                    break
-
-            # Persist cache
-            try:
-                self._parks_cache["parks"] = all_parks
-                self._parks_cache["timestamp"] = now
-            except Exception:
-                # Fail silently; caching is optional
-                pass
-        # (Pagination fetched above, or from cache)
-
-        logger.info(f"[ParksMCP] Fetched {len(all_parks)} total parks")
+        all_parks = await self._get_all_parks_cached(endpoint=endpoint)
+        logger.info(f"[ParksMCP] Loaded {len(all_parks)} total parks")
 
         results = []
 
@@ -347,8 +325,6 @@ class ParksMCP(MCPWrapper):
 
     def _haversine_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
         """Calculate distance between two points in kilometers using Haversine formula."""
-        import math
-
         R = 6371  # Earth's radius in kilometers
 
         lat1_rad = math.radians(lat1)
@@ -363,6 +339,71 @@ class ParksMCP(MCPWrapper):
         c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
         return R * c
+
+    async def _get_all_parks_cached(self, endpoint: str) -> list[dict[str, Any]]:
+        """Return the full parks list, using a TTL cache.
+
+        - Concurrency-safe: cache reads/writes are locked.
+        - Thundering-herd safe: only one refresh runs at a time.
+        """
+        now = time.time()
+        async with self._parks_cache_lock:
+            cached_parks = self._parks_cache.get("parks") or []
+            cached_ts = float(self._parks_cache.get("timestamp") or 0)
+            if cached_parks and now - cached_ts < self._cache_ttl_seconds:
+                logger.debug(f"[ParksMCP] Using cached parks list ({len(cached_parks)})")
+                return cached_parks
+
+        async with self._parks_cache_refresh_lock:
+            # Re-check after acquiring refresh lock in case another coroutine refreshed.
+            now = time.time()
+            async with self._parks_cache_lock:
+                cached_parks = self._parks_cache.get("parks") or []
+                cached_ts = float(self._parks_cache.get("timestamp") or 0)
+                if cached_parks and now - cached_ts < self._cache_ttl_seconds:
+                    logger.debug(f"[ParksMCP] Using cached parks list ({len(cached_parks)})")
+                    return cached_parks
+
+            parks = await self._fetch_all_parks_paginated(endpoint=endpoint)
+            async with self._parks_cache_lock:
+                self._parks_cache["parks"] = parks
+                self._parks_cache["timestamp"] = now
+            return parks
+
+    async def _fetch_all_parks_paginated(self, endpoint: str) -> list[dict[str, Any]]:
+        """Fetch the full parks list using Strapi pagination.
+
+        Uses bounded parallelism to reduce cold-cache latency.
+        """
+        page_size = 100
+        max_pages = 50  # Hard safety cap
+
+        first_params = {"pagination[page]": 1, "pagination[pageSize]": page_size}
+        first = await self._request("GET", endpoint, params=first_params)
+        parks = list(first.get("data", []) or [])
+        meta = first.get("meta", {}).get("pagination", {})
+        page_count = int(meta.get("pageCount", 1) or 1)
+        page_count = max(1, min(page_count, max_pages))
+
+        if page_count <= 1:
+            return parks
+
+        semaphore = asyncio.Semaphore(5)
+
+        async def fetch_page(p: int) -> list[dict[str, Any]]:
+            async with semaphore:
+                params = {"pagination[page]": p, "pagination[pageSize]": page_size}
+                try:
+                    data = await self._request("GET", endpoint, params=params)
+                    return list(data.get("data", []) or [])
+                except Exception as e:
+                    logger.warning(f"[ParksMCP] Pagination error at page {p}: {e}")
+                    return []
+
+        remaining_pages = await asyncio.gather(*(fetch_page(p) for p in range(2, page_count + 1)))
+        for page_items in remaining_pages:
+            parks.extend(page_items)
+        return parks
 
     async def _list_parks(self, arguments: dict[str, Any]) -> MCPToolResult:
         """List all parks with pagination."""
@@ -762,15 +803,3 @@ class ParksMCP(MCPWrapper):
         except Exception as e:
             logger.warning(f"Parks API health check failed: {e}")
             return False
-
-
-# Singleton instance
-_parks_instance: ParksMCP | None = None
-
-
-def get_parks_mcp() -> ParksMCP:
-    """Get or create the Parks MCP singleton."""
-    global _parks_instance
-    if _parks_instance is None:
-        _parks_instance = ParksMCP()
-    return _parks_instance

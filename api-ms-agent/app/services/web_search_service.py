@@ -48,6 +48,7 @@ class WebSearchService:
         self,
         query: str,
         max_results: int = 5,
+        timeout_seconds: float | None = None,
     ) -> list[WebSearchResult]:
         """
         Search the web using DuckDuckGo.
@@ -63,10 +64,15 @@ class WebSearchService:
 
         try:
             # Run synchronous DuckDuckGo search in dedicated thread pool
-            loop = asyncio.get_event_loop()
-            results = await loop.run_in_executor(
+            loop = asyncio.get_running_loop()
+            work = loop.run_in_executor(
                 _WEB_SEARCH_EXECUTOR,
                 lambda: self._search_sync(query, max_results),
+            )
+            results = (
+                await asyncio.wait_for(work, timeout=timeout_seconds)
+                if timeout_seconds
+                else await work
             )
 
             logger.info(
@@ -146,6 +152,7 @@ class WebSearchService:
         self,
         query: str,
         max_results: int = 5,
+        timeout_seconds: float | None = None,
     ) -> list[WebSearchResult]:
         """
         Search news articles using DuckDuckGo News.
@@ -160,9 +167,15 @@ class WebSearchService:
         logger.info("news_search_started", query=query, max_results=max_results)
 
         try:
-            results = await asyncio.get_event_loop().run_in_executor(
-                None,
+            loop = asyncio.get_running_loop()
+            work = loop.run_in_executor(
+                _WEB_SEARCH_EXECUTOR,
                 lambda: self._search_news_sync(query, max_results),
+            )
+            results = (
+                await asyncio.wait_for(work, timeout=timeout_seconds)
+                if timeout_seconds
+                else await work
             )
 
             logger.info(

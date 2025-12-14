@@ -98,6 +98,7 @@ class WorkflowState:
     """State passed through the workflow executors."""
 
     topic: str
+    user_id: str | None = None
     require_approval: bool = False
     model: str | None = None
     model_deployment: str | None = None
@@ -162,6 +163,7 @@ You MUST respond with ONLY valid JSON using this exact format:
                 response_format={"type": "json_object"},
                 temperature=settings.llm_temperature,  # Low temperature for high confidence
                 max_tokens=settings.llm_max_output_tokens,
+                user=state.user_id,
             )
 
             plan_data = json.loads(response.choices[0].message.content or "{}")
@@ -252,6 +254,7 @@ Research questions to address: {", ".join(state.plan.research_questions)}""",
                     temperature=settings.llm_temperature,  # Low temperature for high confidence
                     max_tokens=settings.llm_max_output_tokens,
                     additional_chat_options={"reasoning": {"effort": "high", "summary": "concise"}},
+                    user=state.user_id,
                 )
 
                 finding_data = json.loads(response.choices[0].message.content or "{}")
@@ -352,6 +355,7 @@ Write in a clear, professional style using markdown formatting.""",
                 ],
                 temperature=settings.llm_temperature,
                 max_tokens=settings.llm_max_output_tokens,
+                user=state.user_id,
             )
 
             # Get the report content and normalize any escaped newlines
@@ -516,6 +520,7 @@ class WorkflowResearchAgentService:
 
         initial_state = WorkflowState(
             topic=topic,
+            user_id=user_id,
             require_approval=require_approval,
             model=model,
             model_deployment=model_deployment,

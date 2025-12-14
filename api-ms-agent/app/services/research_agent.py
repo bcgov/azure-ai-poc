@@ -5,24 +5,24 @@ This service uses Microsoft Agent Framework SDK's ChatAgent with ai_function
 approval_mode="always_require" for native human-in-the-loop support.
 """
 
+import asyncio
 import json
 import re
+import time
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
 from textwrap import shorten
+from threading import RLock
 from typing import Annotated, Any
 from uuid import uuid4
 
-from agent_framework import (
-    ChatAgent,
-    ChatMessage,
-    ai_function,
-)
+from agent_framework import ChatAgent, ChatMessage, ai_function
 
 from app.config import settings
 from app.logger import get_logger
+from app.services.agent_run_compat import run_agent_compat
 from app.utils import sort_sources_by_confidence
 
 logger = get_logger(__name__)
@@ -204,12 +204,21 @@ class ResearchState:
 # Format: {run_id: (timestamp, ResearchState)}
 _run_state_cache: dict[str, tuple[float, ResearchState]] = {}
 
+# Locks to protect shared in-memory state across concurrent requests.
+_STATE_CACHE_LOCK = RLock()
+
 # Prompt/cost guards
 MAX_DOC_CONTEXT_CHARS = 2400
+
+# Web search safety/operability bounds
+_WEB_SEARCH_SEMAPHORE = asyncio.Semaphore(settings.web_search_max_concurrent)
 
 # Cache configuration
 _STATE_CACHE_TTL_SECONDS = 3600  # 1 hour TTL for research state
 _STATE_CACHE_MAX_SIZE = 50  # Maximum research sessions to cache
+
+# Per-run web cache bounds
+_WEB_SEARCH_MAX_QUERIES_PER_RUN = settings.web_search_max_queries_per_run
 
 # Global web search results cache for current research session (keyed by run_id)
 _web_search_cache: dict[str, dict[str, list[dict]]] = {}
@@ -227,30 +236,29 @@ def _get_user_id() -> str:
 
 def _prune_state_cache() -> None:
     """Remove expired entries and enforce max size."""
-    import time as time_module
+    now = time.time()
 
-    now = time_module.time()
-
-    # Remove expired entries
-    expired_keys = [
-        key
-        for key, (timestamp, _) in _run_state_cache.items()
-        if now - timestamp > _STATE_CACHE_TTL_SECONDS
-    ]
-    for key in expired_keys:
-        del _run_state_cache[key]
-        if key in _web_search_cache:
-            del _web_search_cache[key]
-
-    # Enforce max size by removing oldest entries
-    items_to_remove = 0
-    if len(_run_state_cache) > _STATE_CACHE_MAX_SIZE:
-        sorted_items = sorted(_run_state_cache.items(), key=lambda x: x[1][0])
-        items_to_remove = len(sorted_items) - _STATE_CACHE_MAX_SIZE
-        for key, _ in sorted_items[:items_to_remove]:
+    with _STATE_CACHE_LOCK:
+        # Remove expired entries
+        expired_keys = [
+            key
+            for key, (timestamp, _) in _run_state_cache.items()
+            if now - timestamp > _STATE_CACHE_TTL_SECONDS
+        ]
+        for key in expired_keys:
             del _run_state_cache[key]
             if key in _web_search_cache:
                 del _web_search_cache[key]
+
+        # Enforce max size by removing oldest entries
+        items_to_remove = 0
+        if len(_run_state_cache) > _STATE_CACHE_MAX_SIZE:
+            sorted_items = sorted(_run_state_cache.items(), key=lambda x: x[1][0])
+            items_to_remove = len(sorted_items) - _STATE_CACHE_MAX_SIZE
+            for key, _ in sorted_items[:items_to_remove]:
+                del _run_state_cache[key]
+                if key in _web_search_cache:
+                    del _web_search_cache[key]
 
     if expired_keys or items_to_remove > 0:
         logger.debug(
@@ -262,30 +270,31 @@ def _prune_state_cache() -> None:
 
 def _get_or_create_state(run_id: str, topic: str = "") -> ResearchState:
     """Get or create state for a run from cache with TTL."""
-    import time as time_module
-
     _prune_state_cache()
 
-    if run_id in _run_state_cache:
-        _, state = _run_state_cache[run_id]
-        # Update timestamp on access
-        _run_state_cache[run_id] = (time_module.time(), state)
-        return state
+    with _STATE_CACHE_LOCK:
+        if run_id in _run_state_cache:
+            _, state = _run_state_cache[run_id]
+            # Update timestamp on access
+            _run_state_cache[run_id] = (time.time(), state)
+            return state
 
-    state = ResearchState(
-        topic=topic,
-        user_id=_get_user_id(),
-        current_phase=ResearchPhase.PLANNING,
-    )
-    _run_state_cache[run_id] = (time_module.time(), state)
-    return state
+        state = ResearchState(
+            topic=topic,
+            user_id=_get_user_id(),
+            current_phase=ResearchPhase.PLANNING,
+        )
+        _run_state_cache[run_id] = (time.time(), state)
+        return state
 
 
 def _get_web_cache(run_id: str) -> dict[str, list[dict]]:
     """Get web search cache for a run."""
-    if run_id not in _web_search_cache:
-        _web_search_cache[run_id] = {}
-    return _web_search_cache[run_id]
+    _prune_state_cache()
+    with _STATE_CACHE_LOCK:
+        if run_id not in _web_search_cache:
+            _web_search_cache[run_id] = {}
+        return _web_search_cache[run_id]
 
 
 @ai_function()
@@ -303,22 +312,37 @@ async def web_search(
     logger.info("web_search_ai_function_called", query=query, run_id=run_id)
 
     try:
+        # Ensure caches are initialized for this run.
+        _get_or_create_state(run_id)
+
         service = get_web_search_service()
-        results = await service.search(query, max_results=5)
+        async with _WEB_SEARCH_SEMAPHORE:
+            results = await asyncio.wait_for(
+                service.search(
+                    query, max_results=5, timeout_seconds=settings.web_search_timeout_seconds
+                ),
+                timeout=settings.web_search_timeout_seconds,
+            )
 
         if not results:
             return f"No web results found for: {query}. Try a different search query."
 
         # Cache results for source citation (keyed by run_id)
         web_cache = _get_web_cache(run_id)
-        web_cache[query] = [
-            {
-                "title": r.title,
-                "url": r.url,
-                "snippet": r.snippet,
-            }
-            for r in results
-        ]
+        with _STATE_CACHE_LOCK:
+            web_cache[query] = [
+                {
+                    "title": r.title,
+                    "url": r.url,
+                    "snippet": r.snippet,
+                }
+                for r in results
+            ]
+
+            # Bound per-run cache growth
+            while len(web_cache) > _WEB_SEARCH_MAX_QUERIES_PER_RUN:
+                oldest_key = next(iter(web_cache.keys()))
+                del web_cache[oldest_key]
 
         # Format results for the LLM
         formatted = [f"## Web Search Results for: {query}\n"]
@@ -328,6 +352,18 @@ async def web_search(
         logger.info("web_search_completed", query=query, results_count=len(results), run_id=run_id)
         return "\n".join(formatted)
 
+    except TimeoutError as e:
+        logger.warning(
+            "web_search_timeout",
+            query=query,
+            run_id=run_id,
+            timeout_seconds=settings.web_search_timeout_seconds,
+            error=str(e),
+        )
+        return (
+            f"Web search timed out after {settings.web_search_timeout_seconds} seconds "
+            f"for query: {query}. Continue with available knowledge."
+        )
     except Exception as e:
         logger.error("web_search_failed", query=query, error=str(e), run_id=run_id)
         return f"Web search failed: {str(e)}. Continue with available knowledge."
@@ -543,8 +579,8 @@ class DeepResearchAgentService:
 
     def __init__(self) -> None:
         """Initialize the deep research agent service."""
-        self._deep_research_agent: ChatAgent | None = None
         self._active_runs: dict[str, Any] = {}  # Track active workflow runs
+        self._active_runs_lock = RLock()
         self._cosmos_db: Any | None = None  # Lazy-loaded Cosmos DB service
         logger.info("DeepResearchAgentService initialized with Agent Framework SDK")
 
@@ -631,8 +667,6 @@ class DeepResearchAgentService:
         document_context: str | None = None,
         model: str | None = None,
     ) -> ChatAgent:
-        if self._deep_research_agent is not None:
-            return self._deep_research_agent
         """Create a ChatAgent configured for deep research."""
         from agent_framework.openai import OpenAIChatClient
 
@@ -829,8 +863,9 @@ When citing from this document, use:
         """
         run_id = str(uuid4())
 
-        # Clear web search cache for new research session
-        _web_search_cache.clear()
+        # Initialize per-run web search cache (do NOT clear global cache).
+        with _STATE_CACHE_LOCK:
+            _web_search_cache[run_id] = {}
 
         # If document_id is provided, fetch document content for thorough scanning
         document_context = None
@@ -860,14 +895,15 @@ When citing from this document, use:
         thread = agent.get_new_thread()
 
         # Store the agent, thread, and state for tracking
-        self._active_runs[run_id] = {
-            "agent": agent,
-            "thread": thread,
-            "state": initial_state,
-            "user_id": user_id,
-            "pending_approvals": [],
-            "messages": [],
-        }
+        with self._active_runs_lock:
+            self._active_runs[run_id] = {
+                "agent": agent,
+                "thread": thread,
+                "state": initial_state,
+                "user_id": user_id,
+                "pending_approvals": [],
+                "messages": [],
+            }
 
         return {
             "run_id": run_id,
@@ -886,13 +922,13 @@ When citing from this document, use:
         Returns:
             Dictionary with results or pending approval information.
         """
-        if run_id not in self._active_runs:
-            raise ValueError(f"Run {run_id} not found")
-
-        run_data = self._active_runs[run_id]
-        agent: ChatAgent = run_data["agent"]
-        thread = run_data["thread"]
-        state: ResearchState = run_data["state"]
+        with self._active_runs_lock:
+            if run_id not in self._active_runs:
+                raise ValueError(f"Run {run_id} not found")
+            run_data = self._active_runs[run_id]
+            agent: ChatAgent = run_data["agent"]
+            thread = run_data["thread"]
+            state: ResearchState = run_data["state"]
 
         logger.info(
             "executing_workflow",
@@ -907,9 +943,10 @@ When citing from this document, use:
 
         try:
             # Initialize state cache for this run with timestamp
-            import time as time_module
-
-            _run_state_cache[run_id] = (time_module.time(), state)
+            with _STATE_CACHE_LOCK:
+                _run_state_cache[run_id] = (time.time(), state)
+                if run_id not in _web_search_cache:
+                    _web_search_cache[run_id] = {}
 
             # Build user context for personalization
             user_context = ""
@@ -932,7 +969,24 @@ Complete all three phases of the research workflow:
 
 Provide comprehensive, detailed responses at each phase."""
 
-            result = await agent.run(query, thread=thread)
+            start = time.monotonic()
+            try:
+                result = await asyncio.wait_for(
+                    run_agent_compat(agent, query, thread=thread, user=state.user_id),
+                    timeout=settings.llm_request_timeout_seconds,
+                )
+            except TimeoutError as exc:
+                duration_ms = int((time.monotonic() - start) * 1000)
+                logger.warning(
+                    "deep_research_timeout",
+                    run_id=run_id,
+                    user_id=state.user_id,
+                    duration_ms=duration_ms,
+                    timeout_seconds=settings.llm_request_timeout_seconds,
+                )
+                raise TimeoutError(
+                    f"Deep research timed out after {settings.llm_request_timeout_seconds} seconds"
+                ) from exc
 
             # Log the result for debugging
             logger.info(
@@ -1030,6 +1084,16 @@ Provide comprehensive, detailed responses at each phase."""
             # Update state with all collected sources
             state.sources = all_sources
 
+            # Determine sufficiency based on content and sources.
+            report_text = state.final_report or final_message
+            insuff_phrases = (
+                "i don't have enough information",
+                "i cannot answer",
+                "i'm not sure",
+                "i don't know",
+            )
+            has_sufficient_info = not any(p in report_text.lower() for p in insuff_phrases)
+
             # Save final state to Cosmos DB for persistence
             await self._save_research_state_to_cosmos(run_id, state)
 
@@ -1065,7 +1129,7 @@ Provide comprehensive, detailed responses at each phase."""
                     }
                     for s in sort_sources_by_confidence(state.sources)
                 ],
-                "has_sufficient_info": len(state.sources) > 0,
+                "has_sufficient_info": has_sufficient_info,
             }
 
         except Exception as e:
@@ -1086,10 +1150,11 @@ Provide comprehensive, detailed responses at each phase."""
             _current_user_id.reset(user_id_token)
 
             # Clean up run-specific caches
-            if run_id in _run_state_cache:
-                del _run_state_cache[run_id]
-            if run_id in _web_search_cache:
-                del _web_search_cache[run_id]
+            with _STATE_CACHE_LOCK:
+                if run_id in _run_state_cache:
+                    del _run_state_cache[run_id]
+                if run_id in _web_search_cache:
+                    del _web_search_cache[run_id]
 
     async def _save_research_state_to_cosmos(self, run_id: str, state: ResearchState) -> None:
         """Save research state to Cosmos DB for persistence."""
@@ -1152,13 +1217,13 @@ Provide comprehensive, detailed responses at each phase."""
         Yields:
             Event dictionaries as they occur.
         """
-        if run_id not in self._active_runs:
-            raise ValueError(f"Run {run_id} not found")
-
-        run_data = self._active_runs[run_id]
-        agent: ChatAgent = run_data["agent"]
-        thread = run_data["thread"]
-        state: ResearchState = run_data["state"]
+        with self._active_runs_lock:
+            if run_id not in self._active_runs:
+                raise ValueError(f"Run {run_id} not found")
+            run_data = self._active_runs[run_id]
+            agent: ChatAgent = run_data["agent"]
+            thread = run_data["thread"]
+            state: ResearchState = run_data["state"]
 
         logger.info(
             "executing_workflow_streaming",
@@ -1166,6 +1231,12 @@ Provide comprehensive, detailed responses at each phase."""
             user_id=state.user_id,
             phase=state.current_phase.value,
         )
+
+        # Initialize caches for this run (streaming path may start before non-streaming state init).
+        with _STATE_CACHE_LOCK:
+            _run_state_cache[run_id] = (time.time(), state)
+            if run_id not in _web_search_cache:
+                _web_search_cache[run_id] = {}
 
         try:
             # Build user context for personalization
@@ -1175,40 +1246,54 @@ Provide comprehensive, detailed responses at each phase."""
 
             query = f"Please research this topic thoroughly: {state.topic}{user_context}"
 
-            async for chunk in agent.run_stream(query, thread=thread):
-                event_dict = {
-                    "run_id": run_id,
-                    "event_type": "chunk",
-                }
+            async with asyncio.timeout(settings.llm_streaming_timeout_seconds):
+                async for chunk in agent.run_stream(query, thread=thread):
+                    event_dict = {
+                        "run_id": run_id,
+                        "event_type": "chunk",
+                    }
 
-                # Stream text content
-                if chunk.text:
-                    event_dict["text"] = chunk.text
-                    yield event_dict
+                    # Stream text content
+                    if chunk.text:
+                        event_dict["text"] = chunk.text
+                        yield event_dict
 
-                # Check for approval requests
-                if chunk.user_input_requests:
-                    run_data["pending_approvals"].extend(chunk.user_input_requests)
+                    # Check for approval requests
+                    if chunk.user_input_requests:
+                        with self._active_runs_lock:
+                            run_data["pending_approvals"].extend(chunk.user_input_requests)
 
-                    for req in chunk.user_input_requests:
-                        # Update phase
-                        if "plan" in req.function_call.name:
-                            state.current_phase = ResearchPhase.AWAITING_PLAN_APPROVAL
-                        elif "findings" in req.function_call.name:
-                            state.current_phase = ResearchPhase.AWAITING_FINDINGS_APPROVAL
-                        elif "report" in req.function_call.name:
-                            state.current_phase = ResearchPhase.AWAITING_REPORT_APPROVAL
+                        for req in chunk.user_input_requests:
+                            # Update phase
+                            if "plan" in req.function_call.name:
+                                state.current_phase = ResearchPhase.AWAITING_PLAN_APPROVAL
+                            elif "findings" in req.function_call.name:
+                                state.current_phase = ResearchPhase.AWAITING_FINDINGS_APPROVAL
+                            elif "report" in req.function_call.name:
+                                state.current_phase = ResearchPhase.AWAITING_REPORT_APPROVAL
 
-                        yield {
-                            "run_id": run_id,
-                            "event_type": "approval_request",
-                            "requires_approval": True,
-                            "request_id": req.id,
-                            "function_name": req.function_call.name,
-                            "arguments": req.function_call.arguments,
-                            "current_phase": state.current_phase.value,
-                        }
+                            yield {
+                                "run_id": run_id,
+                                "event_type": "approval_request",
+                                "requires_approval": True,
+                                "request_id": req.id,
+                                "function_name": req.function_call.name,
+                                "arguments": req.function_call.arguments,
+                                "current_phase": state.current_phase.value,
+                            }
 
+        except TimeoutError as e:
+            logger.warning(
+                "workflow_streaming_timeout",
+                run_id=run_id,
+                timeout_seconds=settings.llm_streaming_timeout_seconds,
+                error=str(e),
+            )
+            yield {
+                "run_id": run_id,
+                "event_type": "error",
+                "error": f"Streaming timed out after {settings.llm_streaming_timeout_seconds} seconds",
+            }
         except Exception as e:
             logger.error(
                 "workflow_streaming_failed",
@@ -1220,6 +1305,10 @@ Provide comprehensive, detailed responses at each phase."""
                 "event_type": "error",
                 "error": str(e),
             }
+        finally:
+            with _STATE_CACHE_LOCK:
+                _run_state_cache.pop(run_id, None)
+                _web_search_cache.pop(run_id, None)
 
     async def send_approval(
         self, run_id: str, request_id: str, approved: bool, feedback: str | None = None
@@ -1236,13 +1325,14 @@ Provide comprehensive, detailed responses at each phase."""
         Returns:
             Status of the approval submission.
         """
-        if run_id not in self._active_runs:
-            raise ValueError(f"Run {run_id} not found")
+        with self._active_runs_lock:
+            if run_id not in self._active_runs:
+                raise ValueError(f"Run {run_id} not found")
 
-        run_data = self._active_runs[run_id]
-        agent: ChatAgent = run_data["agent"]
-        thread = run_data["thread"]
-        state: ResearchState = run_data["state"]
+            run_data = self._active_runs[run_id]
+            agent: ChatAgent = run_data["agent"]
+            thread = run_data["thread"]
+            state: ResearchState = run_data["state"]
 
         logger.info(
             "sending_approval",
@@ -1253,12 +1343,13 @@ Provide comprehensive, detailed responses at each phase."""
         )
 
         # Find the pending approval request
-        pending = [a for a in run_data["pending_approvals"] if a.id == request_id]
-        if not pending:
-            raise ValueError(f"Approval request {request_id} not found")
+        with self._active_runs_lock:
+            pending = [a for a in run_data["pending_approvals"] if a.id == request_id]
+            if not pending:
+                raise ValueError(f"Approval request {request_id} not found")
 
-        approval_request = pending[0]
-        run_data["pending_approvals"].remove(approval_request)
+            approval_request = pending[0]
+            run_data["pending_approvals"].remove(approval_request)
 
         # Add feedback to history if provided
         if feedback:
@@ -1268,14 +1359,20 @@ Provide comprehensive, detailed responses at each phase."""
         approval_response = approval_request.create_response(approved=approved)
 
         # Send the approval response back to the agent
-        result = await agent.run(
-            ChatMessage(role="user", contents=[approval_response]),
-            thread=thread,
+        result = await asyncio.wait_for(
+            run_agent_compat(
+                agent,
+                ChatMessage(role="user", contents=[approval_response]),
+                thread=thread,
+                user=state.user_id,
+            ),
+            timeout=settings.llm_request_timeout_seconds,
         )
 
         # Check if there are more approval requests
         if result.user_input_requests:
-            run_data["pending_approvals"] = list(result.user_input_requests)
+            with self._active_runs_lock:
+                run_data["pending_approvals"] = list(result.user_input_requests)
 
             approval_info = []
             for req in result.user_input_requests:
@@ -1319,11 +1416,12 @@ Provide comprehensive, detailed responses at each phase."""
 
     def get_run_status(self, run_id: str) -> dict:
         """Get the current status of a workflow run."""
-        if run_id not in self._active_runs:
-            raise ValueError(f"Run {run_id} not found")
+        with self._active_runs_lock:
+            if run_id not in self._active_runs:
+                raise ValueError(f"Run {run_id} not found")
 
-        run_data = self._active_runs[run_id]
-        state: ResearchState = run_data["state"]
+            run_data = self._active_runs[run_id]
+            state: ResearchState = run_data["state"]
 
         return {
             "run_id": run_id,
@@ -1338,7 +1436,8 @@ Provide comprehensive, detailed responses at each phase."""
 
     async def close(self) -> None:
         """Clean up resources. Clients are managed by openai_clients module."""
-        self._active_runs.clear()
+        with self._active_runs_lock:
+            self._active_runs.clear()
         logger.info("DeepResearchAgentService closed")
 
 

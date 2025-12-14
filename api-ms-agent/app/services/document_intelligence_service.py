@@ -13,6 +13,7 @@ text and structure from various document formats including:
 Falls back to pypdf for PDF files when Document Intelligence is not configured.
 """
 
+import asyncio
 import re
 from dataclasses import dataclass, field
 from io import BytesIO
@@ -69,19 +70,23 @@ class DocumentAnalysisResult:
 
 def _create_proxy_polling_method(proxy_base_url: str):
     """
-    Create a custom polling method that rewrites Operation-Location URLs to go through the proxy.
+    Create an async polling method that rewrites Operation-Location URLs through the proxy.
 
     The Azure Document Intelligence SDK uses LRO (Long Running Operations) which return an
     Operation-Location header pointing to the Azure endpoint. When using a proxy, we need to
     rewrite these URLs to go through the proxy instead of directly to Azure.
 
+    IMPORTANT: We use AsyncLROBasePolling because we're using the async DocumentIntelligenceClient.
+    Using the sync LROBasePolling with an async client causes "_Coroutine has no attribute" errors.
+
     Args:
         proxy_base_url: The base URL of the proxy (e.g., https://proxy.example.com/document-intelligence)
 
     Returns:
-        A custom LROBasePolling instance that rewrites URLs
+        A custom AsyncLROBasePolling instance that rewrites URLs
     """
-    from azure.core.polling.base_polling import LROBasePolling, OperationResourcePolling
+    from azure.core.polling.async_base_polling import AsyncLROBasePolling
+    from azure.core.polling.base_polling import OperationResourcePolling
 
     class ProxyOperationResourcePolling(OperationResourcePolling):
         """Custom polling that rewrites Operation-Location URLs to go through the proxy."""
@@ -132,8 +137,8 @@ def _create_proxy_polling_method(proxy_base_url: str):
                     if parsed.query:
                         self._location_url += f"?{parsed.query}"
 
-    class ProxyLROBasePolling(LROBasePolling):
-        """LRO polling that uses the proxy for all polling requests."""
+    class ProxyAsyncLROBasePolling(AsyncLROBasePolling):
+        """Async LRO polling that uses the proxy for all polling requests."""
 
         def __init__(self, proxy_url: str, timeout: int = 30, **kwargs):
             # Create custom lro_algorithms with our proxy-aware polling
@@ -142,7 +147,7 @@ def _create_proxy_polling_method(proxy_base_url: str):
             ]
             super().__init__(timeout=timeout, lro_algorithms=lro_algorithms, **kwargs)
 
-    return ProxyLROBasePolling(proxy_base_url)
+    return ProxyAsyncLROBasePolling(proxy_base_url)
 
 
 class DocumentIntelligenceService:
@@ -340,7 +345,13 @@ class DocumentIntelligenceService:
                 status=str(poller.status()) if hasattr(poller, "status") else "unknown",
             )
 
-            result = await poller.result()
+            timeout_s = float(getattr(settings, "document_intelligence_timeout_seconds", 300.0))
+            try:
+                result = await asyncio.wait_for(poller.result(), timeout=timeout_s)
+            except TimeoutError as exc:
+                raise ValueError(
+                    f"Document Intelligence timed out after {timeout_s} seconds"
+                ) from exc
 
             logger.debug(
                 "document_intelligence_result_received",

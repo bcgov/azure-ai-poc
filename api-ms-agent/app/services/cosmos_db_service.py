@@ -13,6 +13,7 @@ Uses the async Cosmos DB SDK (azure.cosmos.aio) for non-blocking I/O operations.
 
 from __future__ import annotations
 
+import asyncio
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -33,6 +34,7 @@ logger = get_logger(__name__)
 # LRU cache for chat history (performance optimization)
 # Key: (session_id, user_id), Value: (timestamp, messages)
 _chat_history_cache: dict[tuple[str, str], tuple[float, list[ChatMessage]]] = {}
+_chat_history_cache_lock = asyncio.Lock()
 _CACHE_TTL_SECONDS = 30  # Cache TTL - short to ensure freshness
 _MAX_CACHE_SIZE = 100  # Maximum sessions to cache
 
@@ -237,18 +239,27 @@ class CosmosDbService:
 
     # ============= Chat History Operations =============
 
-    async def create_session(self, user_id: str, title: str | None = None) -> ConversationSession:
+    async def create_session(
+        self,
+        user_id: str,
+        title: str | None = None,
+        *,
+        session_id_prefix: str = "session_",
+    ) -> ConversationSession:
         """
         Create a new conversation session.
 
         Args:
             user_id: The user identifier
             title: Optional session title
+            session_id_prefix: Prefix to use for the session_id. Use different prefixes
+                to keep sessions distinct across agents (e.g., 'chat_', 'orch_', 'research_').
 
         Returns:
             The created conversation session
         """
-        session_id = f"session_{uuid.uuid4()}"
+        prefix = session_id_prefix or "session_"
+        session_id = f"{prefix}{uuid.uuid4()}"
 
         if not await self._ensure_initialized():
             return ConversationSession(
@@ -339,7 +350,7 @@ class CosmosDbService:
             logger.debug("message_saved", message_id=message_id, session_id=session_id)
 
             # Invalidate cache so next read gets fresh data
-            self._invalidate_chat_cache(session_id, user_id)
+            await self._invalidate_chat_cache(session_id, user_id)
 
             # Update session metadata - pass content for title if user message
             first_msg = content if role == "user" else None
@@ -353,22 +364,24 @@ class CosmosDbService:
             )
             return message
 
-    def _invalidate_chat_cache(self, session_id: str, user_id: str) -> None:
+    async def _invalidate_chat_cache(self, session_id: str, user_id: str) -> None:
         """Invalidate cache entry for a session when new messages are added."""
         cache_key = (session_id, user_id)
-        if cache_key in _chat_history_cache:
-            del _chat_history_cache[cache_key]
-            logger.debug("chat_cache_invalidated", session_id=session_id)
+        async with _chat_history_cache_lock:
+            if cache_key in _chat_history_cache:
+                del _chat_history_cache[cache_key]
+                logger.debug("chat_cache_invalidated", session_id=session_id)
 
-    def _prune_cache_if_needed(self) -> None:
+    async def _prune_cache_if_needed(self) -> None:
         """Remove oldest entries if cache exceeds max size."""
-        if len(_chat_history_cache) > _MAX_CACHE_SIZE:
-            # Sort by timestamp and remove oldest 20%
-            sorted_items = sorted(_chat_history_cache.items(), key=lambda x: x[1][0])
-            items_to_remove = len(sorted_items) // 5  # Remove 20%
-            for key, _ in sorted_items[:items_to_remove]:
-                del _chat_history_cache[key]
-            logger.debug("chat_cache_pruned", removed=items_to_remove)
+        async with _chat_history_cache_lock:
+            if len(_chat_history_cache) > _MAX_CACHE_SIZE:
+                # Sort by timestamp and remove oldest 20%
+                sorted_items = sorted(_chat_history_cache.items(), key=lambda x: x[1][0])
+                items_to_remove = len(sorted_items) // 5  # Remove 20%
+                for key, _ in sorted_items[:items_to_remove]:
+                    del _chat_history_cache[key]
+                logger.debug("chat_cache_pruned", removed=items_to_remove)
 
     async def get_chat_history(
         self,
@@ -393,17 +406,18 @@ class CosmosDbService:
         if not await self._ensure_initialized():
             return []
 
-        # Check cache first
+        # Check cache first (lock held only briefly)
         cache_key = (session_id, user_id)
-        if cache_key in _chat_history_cache:
-            cached_time, cached_messages = _chat_history_cache[cache_key]
-            if time.time() - cached_time < _CACHE_TTL_SECONDS:
-                logger.debug(
-                    "chat_history_cache_hit",
-                    session_id=session_id,
-                    message_count=len(cached_messages),
-                )
-                return cached_messages[:limit]
+        async with _chat_history_cache_lock:
+            if cache_key in _chat_history_cache:
+                cached_time, cached_messages = _chat_history_cache[cache_key]
+                if time.time() - cached_time < _CACHE_TTL_SECONDS:
+                    logger.debug(
+                        "chat_history_cache_hit",
+                        session_id=session_id,
+                        message_count=len(cached_messages),
+                    )
+                    return cached_messages[:limit]
 
         try:
             query = """
@@ -445,8 +459,9 @@ class CosmosDbService:
                 )
 
             # Update cache
-            self._prune_cache_if_needed()
-            _chat_history_cache[cache_key] = (time.time(), messages)
+            await self._prune_cache_if_needed()
+            async with _chat_history_cache_lock:
+                _chat_history_cache[cache_key] = (time.time(), messages)
 
             logger.debug(
                 "chat_history_loaded",
@@ -463,13 +478,21 @@ class CosmosDbService:
             )
             return []
 
-    async def get_user_sessions(self, user_id: str, limit: int = 20) -> list[ConversationSession]:
+    async def get_user_sessions(
+        self,
+        user_id: str,
+        limit: int = 20,
+        *,
+        session_id_prefix: str | None = None,
+    ) -> list[ConversationSession]:
         """
         Get recent conversation sessions for a user.
 
         Args:
             user_id: The user identifier
             limit: Maximum sessions to return
+            session_id_prefix: Optional prefix filter for session_id.
+                When set, returns only sessions that start with this prefix.
 
         Returns:
             List of conversation sessions
@@ -482,13 +505,20 @@ class CosmosDbService:
                 SELECT * FROM c
                 WHERE c.type = 'session'
                 AND c.user_id = @user_id
+            """
+            parameters: list[dict[str, Any]] = [
+                {"name": "@user_id", "value": user_id},
+            ]
+
+            if session_id_prefix:
+                query += "\n                AND STARTSWITH(c.session_id, @prefix)"
+                parameters.append({"name": "@prefix", "value": session_id_prefix})
+
+            query += """
                 ORDER BY c.last_updated DESC
                 OFFSET 0 LIMIT @limit
             """
-            parameters = [
-                {"name": "@user_id", "value": user_id},
-                {"name": "@limit", "value": limit},
-            ]
+            parameters.append({"name": "@limit", "value": limit})
 
             items = [
                 item

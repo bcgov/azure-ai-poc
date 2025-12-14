@@ -4,7 +4,7 @@ Tests for the Deep Research Agent using Agent Framework SDK.
 Tests the workflow-based implementation with WorkflowBuilder and Executors.
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -13,12 +13,11 @@ from app.main import app
 from app.routers.research import get_research_service
 from app.services.research_agent import (
     DeepResearchAgentService,
-    ResearchPhase,
-    ResearchState,
-    ResearchPlan,
     ResearchFinding,
+    ResearchPhase,
+    ResearchPlan,
+    ResearchState,
 )
-
 
 # Note: mock_auth_service and auth_headers fixtures are provided by conftest.py
 
