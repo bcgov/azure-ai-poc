@@ -58,6 +58,15 @@ class Settings(BaseSettings):
     # Prevents requests from hanging indefinitely when upstream is slow/flaky.
     llm_request_timeout_seconds: float = 120.0
 
+    # LLM request timeout (seconds) for streaming calls.
+    # Streaming sessions can take longer than a single non-streaming completion.
+    llm_streaming_timeout_seconds: float = 600.0
+
+    # Web search (DuckDuckGo) execution bounds.
+    web_search_timeout_seconds: float = 20.0
+    web_search_max_concurrent: int = 4
+    web_search_max_queries_per_run: int = 30
+
     # MCP tool execution bounds.
     # These tools call external BC government APIs and should not hang indefinitely.
     mcp_tool_timeout_seconds: float = 30.0

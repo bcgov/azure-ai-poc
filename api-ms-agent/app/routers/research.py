@@ -9,7 +9,8 @@ Provides endpoints for:
 - Document-based deep research
 """
 
-from typing import Annotated
+from typing import Annotated, Literal
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -20,7 +21,6 @@ from app.auth.models import KeycloakUser
 from app.logger import get_logger
 from app.services.research_agent import (
     DeepResearchAgentService,
-    ResearchPhase,
     get_deep_research_service,
 )
 
@@ -40,7 +40,7 @@ class StartResearchRequest(BaseModel):
     document_id: str | None = Field(
         None, description="Optional document ID for document-based research"
     )
-    model: str | None = Field(
+    model: Literal["gpt-4o-mini", "gpt-41-nano"] | None = Field(
         default=None,
         description="Model to use: 'gpt-4o-mini' (default) or 'gpt-41-nano'",
     )
@@ -95,14 +95,14 @@ class WorkflowResultResponse(BaseModel):
     status: str
     current_phase: str | None = None
     plan: dict | None = None
-    findings: list[dict] = []
+    findings: list[dict] = Field(default_factory=list)
     final_report: str = ""
     sources: list[SourceInfo] = Field(
         default_factory=list,
         description="Sources used in the research (REQUIRED for traceability)",
     )
     has_sufficient_info: bool = Field(
-        default=True, description="Whether sufficient information was available"
+        default=False, description="Whether sufficient information was available"
     )
     message: str | None = None
     workflow_state: str | None = None
@@ -168,11 +168,12 @@ async def start_research(
         )
         return WorkflowStartResponse(**result)
     except Exception as e:
-        logger.error("start_research_failed", error=str(e))
+        error_id = str(uuid4())
+        logger.error("start_research_failed", error=str(e), error_id=error_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to start research: {str(e)}",
-        )
+            detail=f"Failed to start research (error_id={error_id}): {str(e)}",
+        ) from e
 
 
 @router.post(
@@ -181,12 +182,12 @@ async def start_research(
     summary="Execute the research workflow",
     description="""
     Execute the research workflow.
-    
+
     The workflow will run through all phases:
     1. Planning - Creates research plan with approval checkpoint
     2. Researching - Gathers findings with approval checkpoint
     3. Synthesizing - Creates final report with approval checkpoint
-    
+
     Each phase uses ai_function(approval_mode="always_require") for human-in-the-loop.
     """,
 )
@@ -201,13 +202,14 @@ async def run_workflow(
         result = await service.run_workflow(run_id)
         return WorkflowResultResponse(**result)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
     except Exception as e:
-        logger.error("run_workflow_failed", run_id=run_id, error=str(e))
+        error_id = str(uuid4())
+        logger.error("run_workflow_failed", run_id=run_id, error=str(e), error_id=error_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to run workflow: {str(e)}",
-        )
+            detail=f"Failed to run workflow (error_id={error_id}): {str(e)}",
+        ) from e
 
 
 @router.get(
@@ -215,7 +217,7 @@ async def run_workflow(
     summary="Execute workflow with streaming events",
     description="""
     Execute the research workflow and stream events as they occur.
-    
+
     Returns Server-Sent Events (SSE) with workflow progress,
     including approval requests that pause the workflow.
     """,
@@ -234,8 +236,9 @@ async def run_workflow_streaming(
         except ValueError as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
         except Exception as e:
-            logger.error("streaming_error", run_id=run_id, error=str(e))
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            error_id = str(uuid4())
+            logger.error("streaming_error", run_id=run_id, error=str(e), error_id=error_id)
+            yield f"data: {json.dumps({'error': str(e), 'error_id': error_id})}\n\n"
 
     return StreamingResponse(
         event_generator(),
@@ -262,7 +265,7 @@ async def get_run_status(
         result = service.get_run_status(run_id)
         return WorkflowStatusResponse(**result)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
 
 
 @router.post(
@@ -271,7 +274,7 @@ async def get_run_status(
     summary="Send approval for a pending checkpoint",
     description="""
     Send an approval response for a pending human-in-the-loop checkpoint.
-    
+
     When the workflow pauses at an approval checkpoint, use this endpoint
     to approve or reject and resume the workflow.
     """,
@@ -298,13 +301,14 @@ async def send_approval(
         )
         return ApprovalResponse(**result)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     except Exception as e:
-        logger.error("send_approval_failed", run_id=run_id, error=str(e))
+        error_id = str(uuid4())
+        logger.error("send_approval_failed", run_id=run_id, error=str(e), error_id=error_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to send approval: {str(e)}",
-        )
+            detail=f"Failed to send approval (error_id={error_id}): {str(e)}",
+        ) from e
 
 
 @router.get(
