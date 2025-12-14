@@ -1,14 +1,15 @@
-output "container_app_environment_id" {
-  value       = azurerm_container_app_environment.this.id
-  description = "ID of the Container Apps Environment"
-}
 
 output "backend_container_app_url" {
-  value       = azurerm_container_app.backend.configuration[0].ingress[0].fqdn
+  value       = "https://${azurerm_container_app.backend.ingress[0].fqdn}"
   description = "FQDN/URL for the backend container app"
 }
 
 output "backend_container_app_id" {
   value       = azurerm_container_app.backend.id
   description = "ID of the backend Container App"
+}
+
+output "backend_managed_identity_principal_id" {
+  value       = azurerm_container_app.backend.identity[0].principal_id
+  description = "Principal ID for the backend Container App's system-assigned identity"
 }

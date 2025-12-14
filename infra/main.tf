@@ -113,7 +113,42 @@ module "document_intelligence" {
   depends_on = [azurerm_resource_group.main, module.network, module.monitoring]
 }
 
+module "container_apps_backend" {
+  source = "./modules/container-apps"
 
+  app_env                           = var.app_env
+  backend_image                     = var.api_image
+  app_name                          = var.app_name
+  appinsights_connection_string     = module.monitoring.appinsights_connection_string
+  appinsights_instrumentation_key   = module.monitoring.appinsights_instrumentation_key
+  azure_openai_api_key              = module.azure_openai.openai_primary_key
+  azure_openai_deployment_name      = module.azure_openai.gpt_deployment_name
+  azure_openai_embedding_deployment = module.azure_openai.embedding_deployment_name
+  common_tags                       = var.common_tags
+  location                          = var.location
+  log_analytics_workspace_id        = module.monitoring.log_analytics_workspace_id
+  private_endpoint_subnet_id        = module.network.private_endpoint_subnet_id
+  resource_group_name               = azurerm_resource_group.main.name
+  image_tag                         = var.image_tag
+  azure_openai_embedding_endpoint   = module.azure_openai.openai_endpoint
+  azure_openai_llm_endpoint         = module.azure_openai.openai_endpoint
+  # Azure AI Search
+  azure_search_endpoint   = module.azure_ai_search.search_service_url
+  azure_search_index_name = var.azure_search_index_name
+  # Azure Document Intelligence
+  azure_document_intelligence_endpoint = module.document_intelligence.endpoint
+  # CosmosDB
+  cosmosdb_endpoint       = module.cosmos.cosmosdb_endpoint
+  cosmosdb_db_name        = module.cosmos.cosmosdb_sql_database_name
+  cosmosdb_container_name = module.cosmos.cosmosdb_sql_database_container_name
+  azure_speech_endpoint   = module.azure_openai.speech_endpoint
+  azure_speech_key        = module.azure_openai.speech_key
+  #keycloak
+  keycloak_url             = var.keycloak_url
+  container_apps_subnet_id = module.network.container_apps_subnet_id
+
+  depends_on = [azurerm_resource_group.main, module.network, module.monitoring]
+}
 module "frontend" {
   source = "./modules/frontend"
 
@@ -141,10 +176,11 @@ module "frontend" {
   azure_search_endpoint = module.azure_ai_search.search_service_url
   azure_search_host     = module.azure_ai_search.search_service_host
   proxy_image           = var.proxy_image
+  api_backend_url       = module.container_apps_backend.backend_container_app_url
   depends_on            = [module.monitoring, module.network, module.azure_ai_search]
 }
 
-module "backend" {
+/* module "backend" {
   source = "./modules/backend"
 
   api_image                               = var.api_image
@@ -182,7 +218,9 @@ module "backend" {
   #keycloak
   keycloak_url = var.keycloak_url
   depends_on   = [module.frontend, module.azure_openai]
-}
+} */
+
+
 
 
 
@@ -190,7 +228,7 @@ module "backend" {
 
 # due to circular dependency issues this resource is created at root level
 // Assign the App Service's managed identity to the Cosmos DB SQL Database with Data Contributor role
-
+/* 
 resource "azurerm_cosmosdb_sql_role_assignment" "cosmosdb_role_assignment_app_service_data_contributor" {
   resource_group_name = azurerm_resource_group.main.name
   account_name        = module.cosmos.account_name
@@ -283,4 +321,103 @@ resource "azurerm_role_assignment" "backend_speech_services_user" {
     module.backend,
     module.azure_openai
   ]
+} */
+
+
+# same for container apps backend managed identity
+resource "azurerm_cosmosdb_sql_role_assignment" "containerapps_cosmosdb_role_assignment_app_service_data_contributor" {
+  resource_group_name = azurerm_resource_group.main.name
+  account_name        = module.cosmos.account_name
+  role_definition_id  = "${module.cosmos.account_id}/sqlRoleDefinitions/00000000-0000-0000-0000-000000000002"
+  principal_id        = module.container_apps_backend.backend_managed_identity_principal_id
+  scope               = module.cosmos.account_id
+
+  depends_on = [
+    module.container_apps_backend,
+    module.cosmos
+  ]
 }
+
+# Azure OpenAI role assignments for container apps managed identity
+resource "azurerm_role_assignment" "containerapps_cognitive_services_openai_user" {
+  scope                = module.azure_openai.openai_id
+  role_definition_name = "Cognitive Services OpenAI User"
+  principal_id         = module.container_apps_backend.backend_managed_identity_principal_id
+
+  depends_on = [
+    module.container_apps_backend,
+    module.azure_openai
+  ]
+}
+
+resource "azurerm_role_assignment" "containerapps_cognitive_services_openai_contributor" {
+  scope                = module.azure_openai.openai_id
+  role_definition_name = "Cognitive Services OpenAI Contributor"
+  principal_id         = module.container_apps_backend.backend_managed_identity_principal_id
+
+  depends_on = [
+    module.container_apps_backend,
+    module.azure_openai
+  ]
+}
+
+# Azure AI Search role assignments for container apps managed identity
+resource "azurerm_role_assignment" "containerapps_search_index_data_contributor" {
+  scope                = module.azure_ai_search.search_service_id
+  role_definition_name = "Search Index Data Contributor"
+  principal_id         = module.container_apps_backend.backend_managed_identity_principal_id
+
+  depends_on = [
+    module.container_apps_backend,
+    module.azure_ai_search
+  ]
+}
+
+resource "azurerm_role_assignment" "containerapps_search_service_contributor" {
+  scope                = module.azure_ai_search.search_service_id
+  role_definition_name = "Search Service Contributor"
+  principal_id         = module.container_apps_backend.backend_managed_identity_principal_id
+
+  depends_on = [
+    module.container_apps_backend,
+    module.azure_ai_search
+  ]
+}
+
+resource "azurerm_role_assignment" "containerapps_search_index_data_reader" {
+  scope                = module.azure_ai_search.search_service_id
+  role_definition_name = "Search Index Data Reader"
+  principal_id         = module.container_apps_backend.backend_managed_identity_principal_id
+
+  depends_on = [
+    module.container_apps_backend,
+    module.azure_ai_search
+  ]
+}
+
+# Azure Document Intelligence role assignment for container apps managed identity
+resource "azurerm_role_assignment" "containerapps_cognitive_services_user" {
+  scope                = module.document_intelligence.document_intelligence_id
+  role_definition_name = "Cognitive Services User"
+  principal_id         = module.container_apps_backend.backend_managed_identity_principal_id
+
+  depends_on = [
+    module.container_apps_backend,
+    module.document_intelligence
+  ]
+}
+
+# Azure Speech Services role assignment for container apps managed identity
+resource "azurerm_role_assignment" "containerapps_speech_services_user" {
+  scope                = module.azure_openai.speech_id
+  role_definition_name = "Cognitive Services Speech User"
+  principal_id         = module.container_apps_backend.backend_managed_identity_principal_id
+
+  depends_on = [
+    module.container_apps_backend,
+    module.azure_openai
+  ]
+}
+
+## update the frontend app service env var to point to the new container apps backend URL
+
