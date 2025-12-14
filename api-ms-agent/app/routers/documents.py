@@ -1,6 +1,6 @@
 """Documents router - API endpoints for document indexing and vector search."""
 
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
@@ -8,19 +8,42 @@ from pydantic import BaseModel, Field
 
 from app.auth.dependencies import get_current_user_from_request
 from app.auth.models import KeycloakUser
+from app.config import settings
 from app.logger import get_logger
 from app.services.azure_search_service import AzureSearchService, get_azure_search_service
 from app.services.cosmos_db_service import CosmosDbService, get_cosmos_db_service
 from app.services.document_intelligence_service import (
+    SUPPORTED_EXTENSIONS,
     DocumentIntelligenceService,
     get_document_intelligence_service,
-    SUPPORTED_EXTENSIONS,
 )
 from app.services.embedding_service import EmbeddingService, get_embedding_service
 
 router = APIRouter()
 
 logger = get_logger(__name__)
+
+
+async def _read_upload_file_limited(file: UploadFile, *, max_bytes: int) -> bytes:
+    """Read an UploadFile into memory with a hard maximum size."""
+    if max_bytes <= 0:
+        return await file.read()
+
+    buf = bytearray()
+    chunk_size = 1024 * 1024  # 1 MiB
+
+    while True:
+        chunk = await file.read(chunk_size)
+        if not chunk:
+            break
+        buf.extend(chunk)
+        if len(buf) > max_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail=f"File too large. Max allowed size is {max_bytes} bytes.",
+            )
+
+    return bytes(buf)
 
 
 class IndexDocumentRequest(BaseModel):
@@ -124,9 +147,6 @@ async def upload_document(
     if not file:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No file uploaded")
 
-    # Validate file type
-    file_extension = f".{file.filename.lower().split('.')[-1]}" if file.filename else ""
-
     if not doc_intelligence.is_supported_format(file.filename or ""):
         supported = ", ".join(sorted(SUPPORTED_EXTENSIONS.keys()))
         raise HTTPException(
@@ -143,7 +163,10 @@ async def upload_document(
     )
 
     try:
-        content_bytes = await file.read()
+        content_bytes = await _read_upload_file_limited(
+            file,
+            max_bytes=int(getattr(settings, "max_upload_bytes", 0)),
+        )
 
         # Use Azure Document Intelligence to analyze the document
         result = await doc_intelligence.analyze_document(

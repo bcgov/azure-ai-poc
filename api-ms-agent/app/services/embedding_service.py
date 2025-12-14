@@ -1,5 +1,4 @@
-"""
-Embedding service for generating and storing document embeddings.
+"""Embedding service for generating and storing document embeddings.
 
 This service uses Azure OpenAI to generate embeddings and stores them
 in Azure AI Search for vector similarity search.
@@ -9,6 +8,10 @@ Storage Architecture:
 - Document metadata: Cosmos DB (for user document listing)
 """
 
+from __future__ import annotations
+
+import asyncio
+import random
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -81,9 +84,103 @@ class EmbeddingService:
             search_service: Optional Azure Search service instance for vector operations
             cosmos_service: Optional Cosmos DB service instance for metadata
         """
-        self.search = search_service or get_azure_search_service()
+        # NOTE: Do not name this attribute `search` since this class also exposes a `search()`
+        # method for consumers (documents router). Keeping these distinct avoids attribute/method
+        # name collisions.
+        self.search_service = search_service or get_azure_search_service()
         self.cosmos = cosmos_service or get_cosmos_db_service()
         logger.info("EmbeddingService initialized with Azure AI Search backend")
+
+    @staticmethod
+    def _is_retryable_embedding_error(exc: Exception) -> bool:
+        """Return True if the embedding call error is likely transient."""
+        try:
+            from openai import (
+                APIConnectionError,
+                APIStatusError,
+                APITimeoutError,
+                InternalServerError,
+                RateLimitError,
+            )
+
+            if isinstance(
+                exc,
+                (
+                    RateLimitError,
+                    APIConnectionError,
+                    APITimeoutError,
+                    InternalServerError,
+                ),
+            ):
+                return True
+
+            if isinstance(exc, APIStatusError):
+                return getattr(exc, "status_code", None) in {429, 500, 502, 503, 504}
+        except Exception:
+            # Fallback for environments where OpenAI exception classes differ.
+            pass
+
+        msg = str(exc).lower()
+        return any(
+            token in msg
+            for token in [
+                "rate limit",
+                "timeout",
+                "timed out",
+                "temporarily unavailable",
+                "connection reset",
+                "service unavailable",
+                "502",
+                "503",
+                "504",
+                "429",
+            ]
+        )
+
+    async def _embeddings_create_with_retry(self, client, *, input_text) -> Any:
+        """Call Azure OpenAI embeddings with bounded retries + timeout."""
+        max_retries = max(0, int(getattr(settings, "embedding_max_retries", 3)))
+        timeout_s = float(
+            getattr(
+                settings,
+                "embedding_request_timeout_seconds",
+                settings.llm_request_timeout_seconds,
+            )
+        )
+        base_delay = float(getattr(settings, "embedding_retry_base_seconds", 0.5))
+
+        for attempt in range(max_retries + 1):
+            try:
+                return await asyncio.wait_for(
+                    client.embeddings.create(
+                        model=settings.azure_openai_embedding_deployment,
+                        input=input_text,
+                    ),
+                    timeout=timeout_s,
+                )
+            except Exception as exc:
+                if attempt >= max_retries or not self._is_retryable_embedding_error(exc):
+                    logger.error(
+                        "embedding_request_failed",
+                        attempt=attempt,
+                        max_retries=max_retries,
+                        error=str(exc),
+                    )
+                    raise
+
+                # Exponential backoff with jitter
+                delay = base_delay * (2**attempt)
+                delay = delay * (0.5 + random.random())
+                delay = min(delay, 10.0)
+
+                logger.warning(
+                    "embedding_request_retry",
+                    attempt=attempt + 1,
+                    max_retries=max_retries,
+                    delay_seconds=f"{delay:.2f}",
+                    error=str(exc),
+                )
+                await asyncio.sleep(delay)
 
     async def generate_embedding(self, text: str) -> list[float]:
         """
@@ -98,10 +195,7 @@ class EmbeddingService:
         client = await get_embedding_client()
 
         try:
-            response = await client.embeddings.create(
-                model=settings.azure_openai_embedding_deployment,
-                input=text,
-            )
+            response = await self._embeddings_create_with_retry(client, input_text=text)
             embedding = response.data[0].embedding
             logger.debug(
                 "embedding_generated",
@@ -131,8 +225,6 @@ class EmbeddingService:
         Returns:
             List of embedding vectors in the same order as input texts
         """
-        import asyncio
-
         if not texts:
             return []
 
@@ -140,10 +232,7 @@ class EmbeddingService:
 
         async def process_batch(batch: list[str]) -> list[list[float]]:
             """Process a single batch of texts."""
-            response = await client.embeddings.create(
-                model=settings.azure_openai_embedding_deployment,
-                input=batch,
-            )
+            response = await self._embeddings_create_with_retry(client, input_text=batch)
             # Sort by index to maintain order
             sorted_data = sorted(response.data, key=lambda x: x.index)
             return [item.embedding for item in sorted_data]
@@ -371,7 +460,7 @@ class EmbeddingService:
             ]
 
         # Bulk upload chunks to Azure Search (batched at 1000 per request)
-        await self.search.bulk_store_chunks(document_chunks)
+        await self.search_service.bulk_store_chunks(document_chunks)
 
         # Store document metadata in Cosmos DB
         await self.cosmos.save_document_metadata(
@@ -433,7 +522,7 @@ class EmbeddingService:
             min_similarity=min_similarity,
         )
 
-        results = await self.search.vector_search(query_embedding, options)
+        results = await self.search_service.vector_search(query_embedding, options)
 
         search_results = [
             SearchResult(
@@ -467,7 +556,7 @@ class EmbeddingService:
             Number of chunks deleted
         """
         # Delete chunks from Azure AI Search
-        count = await self.search.delete_document_chunks(document_id, user_id)
+        count = await self.search_service.delete_document_chunks(document_id, user_id)
 
         # Delete metadata from Cosmos DB
         await self.cosmos.delete_document_metadata(document_id, user_id)

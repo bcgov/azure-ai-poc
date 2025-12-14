@@ -13,6 +13,7 @@ text and structure from various document formats including:
 Falls back to pypdf for PDF files when Document Intelligence is not configured.
 """
 
+import asyncio
 import re
 from dataclasses import dataclass, field
 from io import BytesIO
@@ -340,7 +341,13 @@ class DocumentIntelligenceService:
                 status=str(poller.status()) if hasattr(poller, "status") else "unknown",
             )
 
-            result = await poller.result()
+            timeout_s = float(getattr(settings, "document_intelligence_timeout_seconds", 300.0))
+            try:
+                result = await asyncio.wait_for(poller.result(), timeout=timeout_s)
+            except TimeoutError as exc:
+                raise ValueError(
+                    f"Document Intelligence timed out after {timeout_s} seconds"
+                ) from exc
 
             logger.debug(
                 "document_intelligence_result_received",

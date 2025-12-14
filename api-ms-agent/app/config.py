@@ -56,7 +56,18 @@ class Settings(BaseSettings):
 
     # LLM request timeout (seconds) for non-streaming calls.
     # Prevents requests from hanging indefinitely when upstream is slow/flaky.
-    llm_request_timeout_seconds: float = 60.0
+    llm_request_timeout_seconds: float = 120.0
+
+    # Embedding requests (Azure OpenAI) are non-streaming and should be bounded.
+    embedding_request_timeout_seconds: float = 60.0
+    embedding_max_retries: int = 2
+    embedding_retry_base_seconds: float = 0.5
+
+    # Upload limits (bytes) to avoid unbounded memory usage.
+    max_upload_bytes: int = 20 * 1024 * 1024  # 20 MiB
+
+    # Document Intelligence LRO polling timeout (seconds).
+    document_intelligence_timeout_seconds: float = 300.0
 
     # Dev UI (Agent Framework DevUI) settings
     devui_enabled: bool = True
