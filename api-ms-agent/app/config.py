@@ -18,6 +18,13 @@ class Settings(BaseSettings):
     debug: bool = False
     environment: str = "local"  # local, development, production
 
+    # Keycloak Auth settings
+    # NOTE: Defaults intentionally blank so non-local environments must explicitly configure.
+    # Local defaults are applied in AuthService.
+    keycloak_url: str = ""
+    keycloak_realm: str = ""
+    keycloak_client_id: str = ""
+
     # Azure OpenAI settings
     azure_openai_endpoint: str = ""
     azure_openai_api_key: str = ""  # Optional if using managed identity
