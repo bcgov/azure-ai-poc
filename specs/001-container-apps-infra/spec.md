@@ -78,7 +78,7 @@ As an SRE, I want logging, metrics, and configuration (secrets, environment vari
 
 - **FR-001**: The infrastructure must provision an Azure Container Apps environment (Container Apps Environment / Log Analytics workspace / VNet as required) and be configurable via the repository's Infrastructure-as-Code conventions.
 - **FR-002**: The infra must provision one or more Container App resources for backend services, with configurable CPU/memory, scaling rules, and ingress settings.
-- **FR-003**: CI pipelines must build container images, push to the configured container registry, and deploy new revisions to Container Apps on successful builds or via manual promotion.
+- **FR-003**: CI pipelines must build container images and push to the configured container registry. (Note: repository `GitHub Actions` build/push workflows already exist; modifying CI to perform automated infra deploys is out of scope for this change.)
 - **FR-004**: Deployments must support secret injection via Azure Key Vault or built-in Container Apps secrets with no secrets written to logs.
 - **FR-005**: Observability resources (Log Analytics workspace, Application Insights or equivalent) must be provisioned and integrated to capture logs and metrics from Container Apps.
 - **FR-006**: The infra changes must be idempotent and suitable for inclusion in existing Terraform workflow and state management.
@@ -104,8 +104,16 @@ As an SRE, I want logging, metrics, and configuration (secrets, environment vari
 - Azure subscription has permissions to create Container Apps, Log Analytics workspaces, and container registries.
 - Standard security practices apply: service principals / managed identities are used for registry and infra operations.
 - The existing Infrastructure-as-Code codebase is the preferred place to add infra resources; changes will follow current repo conventions.
+- Existing CI/GitHub Actions build and publish workflows already exist and will not be modified as part of this change; this work is Terraform/infra-only.
+
+## Clarifications
+
+### Session 2025-12-14
+
+- Q: Should we modify CI/GitHub Actions to perform automated deploys as part of this work, or keep builds/workflows unchanged and only add Terraform infra? → A: Option A (keep CI/GHA unchanged; only Terraform changes are needed).
 
 ## Out of Scope
 
 - Migrating or re-architecting application code to suit containers beyond minimal Dockerfile adjustments (app code changes are separate tasks).
 - Replacing existing production hosting if not explicitly requested; the initial change targets enabling Container Apps and deploying backend to it as an option.
+- Modifying existing CI/GitHub Actions workflows to add automated infra deploys (this change is Terraform-only; CI may be updated later in a follow-up task).
