@@ -133,6 +133,8 @@ async def query_orchestrator(
 
         return response
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(
             "orchestrator_query_failed",
@@ -142,7 +144,7 @@ async def query_orchestrator(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to process query: {str(e)}",
+            detail="Failed to process query",
         ) from e
 
 

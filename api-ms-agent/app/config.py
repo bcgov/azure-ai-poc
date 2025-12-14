@@ -58,6 +58,12 @@ class Settings(BaseSettings):
     # Prevents requests from hanging indefinitely when upstream is slow/flaky.
     llm_request_timeout_seconds: float = 120.0
 
+    # MCP tool execution bounds.
+    # These tools call external BC government APIs and should not hang indefinitely.
+    mcp_tool_timeout_seconds: float = 30.0
+    # Max characters returned from a single tool call into the agent context.
+    mcp_tool_max_output_chars: int = 4000
+
     # Embedding requests (Azure OpenAI) are non-streaming and should be bounded.
     embedding_request_timeout_seconds: float = 60.0
     embedding_max_retries: int = 2
