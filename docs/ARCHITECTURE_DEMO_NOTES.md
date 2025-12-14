@@ -14,8 +14,8 @@ These notes are for the presenter only. The shareable version is: `docs/ARCHITEC
 - Point out the deployed services:
   - Frontend (Caddy serves SPA + proxies `/api/*`)
   - Backend (`api-ms-agent` FastAPI + Microsoft Agent Framework)
-  - **Dev only:** Proxy (Caddy reverse-proxy to Azure services)
-- Why proxy exists (one sentence): “Azure PaaS is private-only (private endpoints; no public access outside the VNet), so the proxy is deployed only in Dev to bridge local development access.”
+  - (Optional, local only) Proxy (Caddy reverse-proxy to Azure services for local development)
+- Why proxy exists (one sentence): “Azure PaaS is private-only (private endpoints; no public access outside the VNet), so the local proxy helps developers reach those endpoints during local development.”
 
 **04:00–06:00 — Repo tour (use Section 3 diagram)**
 - The four folders:
@@ -43,7 +43,7 @@ Suggested pacing:
 **13:00–15:00 — Azure deployment posture**
 - Terraform provisions: VNet/subnets, App Insights/Log Analytics, OpenAI, Search, Cosmos, Document Intelligence, and compute.
 - Backend/API is deployed on **Azure Container Apps (ACA)**.
-- Frontend and the **dev-only** proxy remain on **App Service (container)**.
+- Frontend remains on **App Service (container)**.
 - Backend uses managed identity (system-assigned when enabled) with RBAC assignments for Cosmos/OpenAI/Search.
 - Close with: “Hosting shifted to ACA for the API, but the logical architecture stayed the same.”
 
@@ -53,7 +53,7 @@ Suggested pacing:
 
 - Backend reachable: `GET /health` returns healthy.
 - Frontend can authenticate via Keycloak.
-- **Dev only:** Proxy health: `GET /healthz` on proxy.
+- (Optional, local only) Proxy health: `GET /healthz` on proxy.
 - Azure dependencies configured in environment (or synced via `api-ms-agent/sync-azure-keys.sh`).
 - Have 1 prepared document for upload (PDF/Doc) and 2 prepared questions.
 
@@ -64,7 +64,7 @@ Suggested pacing:
 ### Likely questions and crisp answers
 
 **Q: Why have a separate proxy service?**
-- A: “It’s a Dev-only bridge. Azure PaaS is private-only (private endpoints; no public access outside the VNet), so we deploy a proxy in Dev to enable local development access with consistent behavior (timeouts, WebSocket support, header stripping).”
+- A: “It’s a local-development bridge only. Azure PaaS is private-only (private endpoints; no public access outside the VNet), so the local proxy helps developers access those endpoints with consistent behavior (timeouts, WebSocket support, header stripping).”
 
 **Q: Where is the authorization boundary?**
 - A: “The backend. Frontend gating is UX only; backend validates JWT and enforces roles.”
@@ -90,4 +90,4 @@ Keep it short and non-committal:
 
 - If a request returns 401/403 unexpectedly, verify the token audience and role claims.
 - If document grounding looks weak, confirm the index is populated and embeddings are configured.
-- If Azure service calls fail, check the proxy’s configured endpoints and environment variables.
+- If local Azure service calls fail, check the proxy’s configured endpoints and environment variables.
