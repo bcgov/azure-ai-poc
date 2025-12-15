@@ -70,9 +70,7 @@ def render_report(comp: dict[str, Any]) -> str:
         c95 = data["current"]["p95_ms"]
         d95 = data["delta"]["p95_ms"]
 
-        lines.append(
-            f"- {step}: p50 {b50} -> {c50} (Δ {d50}), p95 {b95} -> {c95} (Δ {d95})"
-        )
+        lines.append(f"- {step}: p50 {b50} -> {c50} (Δ {d50}), p95 {b95} -> {c95} (Δ {d95})")
 
     return "\n".join(lines) + "\n"
 

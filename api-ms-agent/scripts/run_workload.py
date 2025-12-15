@@ -145,9 +145,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run a repeatable API workload")
     parser.add_argument("--base-url", default="http://localhost:4000", help="API base URL")
     parser.add_argument("--repetitions", type=int, default=3, help="Number of repetitions")
-    parser.add_argument(
-        "--timeout-seconds", type=float, default=10.0, help="Per-request timeout"
-    )
+    parser.add_argument("--timeout-seconds", type=float, default=10.0, help="Per-request timeout")
     parser.add_argument("--bearer-token", default=None, help="Optional JWT bearer token")
     parser.add_argument(
         "--out",
