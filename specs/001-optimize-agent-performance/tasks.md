@@ -45,7 +45,6 @@
 
 ### Implementation (US1)
 
-- [ ] T013 [US1] Add safe Cosmos read caching wrappers in api-ms-agent/app/services/cosmos_db_service.py
 - [x] T013 [US1] Add safe Cosmos read caching wrappers in api-ms-agent/app/services/cosmos_db_service.py
 - [x] T014 [US1] Add targeted cache invalidation on Cosmos writes in api-ms-agent/app/services/cosmos_db_service.py
 - [x] T015 [US1] Add GET-only outbound HTTP caching in api-ms-agent/app/http_client.py
@@ -72,16 +71,16 @@
 
 ### Implementation (US2)
 
-- [ ] T023 [US2] Add request timing middleware instrumentation in api-ms-agent/app/middleware/performance_middleware.py
-- [ ] T024 [US2] Emit structured perf logs (request id, path, outcome, duration) in api-ms-agent/app/logger.py
-- [ ] T025 [P] [US2] Add cache hit/miss counters per namespace in api-ms-agent/app/core/cache/stats.py
-- [ ] T026 [US2] Add a repeatable workload runner script in api-ms-agent/scripts/run_workload.py
-- [ ] T027 [US2] Add baseline comparison report in api-ms-agent/scripts/compare_baseline.py
+- [x] T023 [US2] Add request timing middleware instrumentation in api-ms-agent/app/middleware/performance_middleware.py
+- [x] T024 [US2] Emit structured perf logs (request id, path, outcome, duration) in api-ms-agent/app/logger.py
+- [x] T025 [P] [US2] Add cache hit/miss counters per namespace in api-ms-agent/app/core/cache/stats.py
+- [x] T026 [US2] Add a repeatable workload runner script in api-ms-agent/scripts/run_workload.py
+- [x] T027 [US2] Add baseline comparison report in api-ms-agent/scripts/compare_baseline.py
 
 ### Tests (required by FR-003/FR-004)
 
-- [ ] T028 [P] [US2] Unit test perf middleware adds timing context in api-ms-agent/tests/test_performance_middleware.py
-- [ ] T029 [US2] Snapshot-style test for baseline report format in api-ms-agent/tests/test_compare_baseline.py
+- [x] T028 [P] [US2] Unit test perf middleware adds timing context in api-ms-agent/tests/test_performance_middleware.py
+- [x] T029 [US2] Snapshot-style test for baseline report format in api-ms-agent/tests/test_compare_baseline.py
 
 **Checkpoint**: US2 complete; operators can validate improvements and detect regressions.
 

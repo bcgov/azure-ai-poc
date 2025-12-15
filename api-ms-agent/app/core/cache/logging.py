@@ -22,6 +22,12 @@ def log_cache_event(
     duration_ms: float | None = None,
     detail: str | None = None,
 ) -> None:
+    # Lightweight in-memory stats for per-namespace hit/miss visibility.
+    # Import locally to avoid any import-order coupling.
+    from app.core.cache import stats as cache_stats
+
+    cache_stats.increment(namespace=namespace, cache_event=cache_event)
+
     # Never log keys or user content here.
     # NOTE: structlog uses `event` as the message positional arg.
     # Never pass `event=` as a kwarg to logger.* calls.

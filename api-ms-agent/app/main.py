@@ -17,6 +17,7 @@ from app.http_client import close_http_client
 from app.logger import get_logger, setup_logging
 from app.middleware.access_log_middleware import AccessLogMiddleware
 from app.middleware.auth_middleware import AuthMiddleware
+from app.middleware.performance_middleware import PerformanceMiddleware
 from app.middleware.security_middleware import SecurityMiddleware
 from app.routers import api_router
 from app.services import (
@@ -194,6 +195,9 @@ def create_app() -> FastAPI:
     # Access log middleware - logs requests with timing and content length
     # Note: This must be added first so it wraps all other middleware
     app.add_middleware(AccessLogMiddleware)
+
+    # Performance middleware - structured request perf logs + cache deltas
+    app.add_middleware(PerformanceMiddleware)
 
     # Security middleware (equivalent to helmet)
     app.add_middleware(SecurityMiddleware)

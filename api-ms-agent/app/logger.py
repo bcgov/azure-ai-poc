@@ -148,3 +148,40 @@ def get_logger(name: str | None = None) -> structlog.BoundLogger:
         A bound structlog logger instance.
     """
     return structlog.get_logger(name)
+
+
+def _outcome_from_status(status_code: int) -> str:
+    if 200 <= status_code < 400:
+        return "success"
+    if 400 <= status_code < 500:
+        return "client_error"
+    return "server_error"
+
+
+def log_request_performance(
+    *,
+    request_id: str,
+    method: str,
+    path: str,
+    status_code: int,
+    duration_ms: float,
+    cache_delta: dict | None = None,
+) -> None:
+    """Emit a structured request performance log.
+
+    Intentionally log-only: no response mutations.
+    """
+
+    logger = get_logger("app.performance")
+    payload: dict[str, object] = {
+        "request_id": request_id,
+        "method": method,
+        "path": path,
+        "status": status_code,
+        "outcome": _outcome_from_status(status_code),
+        "duration_ms": round(duration_ms, 3),
+    }
+    if cache_delta:
+        payload["cache_delta"] = cache_delta
+
+    logger.info("request_perf", **payload)
