@@ -323,6 +323,40 @@ class ParksMCP(MCPWrapper):
             ),
         )
 
+    async def _resolve_park_id(self, park_id: str) -> str | None:
+        """Resolve a park_id to an ORCS number.
+
+        The BC Parks API expects /protected-areas/{orcs} where orcs is numeric.
+        If park_id is already numeric, return it. Otherwise, search the cached
+        parks list by name and return the matching ORCS number.
+        """
+        # If it looks like an ORCS number (digits only), use it directly
+        if park_id.isdigit():
+            return park_id
+
+        # Search the cached parks list for a matching name
+        all_parks = await self._get_all_parks_cached(endpoint="/protected-areas")
+        park_id_lower = park_id.lower().strip()
+
+        for park in all_parks:
+            attrs = park.get("attributes", park) if isinstance(park, dict) else {}
+            name = (attrs.get("protectedAreaName") or attrs.get("name") or "").lower()
+            orcs = attrs.get("orcs")
+
+            # Check for exact match or close match
+            if name == park_id_lower or park_id_lower in name or name in park_id_lower:
+                if orcs:
+                    logger.debug(f"Resolved park name '{park_id}' to ORCS '{orcs}'")
+                    return str(orcs)
+                # Fallback to park id if orcs not available
+                pid = park.get("id")
+                if pid:
+                    logger.debug(f"Resolved park name '{park_id}' to id '{pid}'")
+                    return str(pid)
+
+        # Could not resolve
+        return None
+
     def _haversine_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
         """Calculate distance between two points in kilometers using Haversine formula."""
         R = 6371  # Earth's radius in kilometers
@@ -458,14 +492,21 @@ class ParksMCP(MCPWrapper):
                 error="park_id is required",
             )
 
-        # Try to get park by ORCS number or slug
-        endpoint = f"/protected-areas/{park_id}"
+        # Resolve park_id to an ORCS number if it looks like a park name.
+        # The API expects /protected-areas/{orcs} where orcs is numeric.
+        resolved_id = await self._resolve_park_id(park_id)
+        if resolved_id is None:
+            # Could not resolve; fall back to search
+            logger.info(f"Could not resolve park_id '{park_id}', using search fallback")
+            return await self._search_parks({"query": park_id, "limit": 1})
+
+        endpoint = f"/protected-areas/{resolved_id}"
 
         try:
             data = await self._request("GET", endpoint)
         except Exception as e:
-            # Try searching for the park
-            logger.info(f"Direct lookup failed, trying search: {e}")
+            # Fall back to search if direct lookup fails
+            logger.info(f"Direct lookup failed for '{resolved_id}', trying search: {e}")
             return await self._search_parks({"query": park_id, "limit": 1})
 
         # Handle nested data structure

@@ -120,13 +120,27 @@ class Settings(BaseSettings):
     cache_backend: str = "memory"
     cache_max_entries: int = 4096
 
+    # Optional per-namespace cache capacities. When unset, falls back to cache_max_entries.
+    cache_db_max_entries: int | None = None
+    cache_http_max_entries: int | None = None
+    cache_embed_max_entries: int | None = None
+    cache_prompt_max_entries: int | None = None
+    cache_llm_max_entries: int | None = None
+
     cache_default_ttl_seconds: int = 30
     cache_db_ttl_seconds: int = 30
     cache_http_ttl_seconds: int = 900
+    # Optional negative caching (disabled by default). When enabled, caches safe GET errors
+    # for a short TTL to reduce repeated downstream calls.
+    cache_http_negative_ttl_seconds: int = 0
     cache_embed_ttl_seconds: int = 7 * 24 * 60 * 60
     cache_prompt_ttl_seconds: int = 600
     # LLM response caching is disabled by default to avoid semantic changes.
     cache_llm_ttl_seconds: int = 0
+
+    # Defensive HTTP bounds for cached downstream calls.
+    # Applies to app.http_client.cached_get_json unless overridden.
+    http_request_timeout_seconds: float = 30.0
 
     # Use managed identity for non-local environments
     # Local uses API keys, cloud environments use managed identity

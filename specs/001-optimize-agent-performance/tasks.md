@@ -94,15 +94,15 @@
 
 ### Implementation (US3)
 
-- [ ] T030 [US3] Add per-namespace capacity tuning knobs in api-ms-agent/app/config.py
-- [ ] T031 [US3] Add defensive timeouts around cached downstream calls in api-ms-agent/app/http_client.py
-- [ ] T032 [US3] Add cache eviction observability (evict events) in api-ms-agent/app/core/cache/memory_backend.py
-- [ ] T033 [US3] Add optional short negative caching for safe HTTP errors in api-ms-agent/app/http_client.py
+- [x] T030 [US3] Add per-namespace capacity tuning knobs in api-ms-agent/app/config.py
+- [x] T031 [US3] Add defensive timeouts around cached downstream calls in api-ms-agent/app/http_client.py
+- [x] T032 [US3] Add cache eviction observability (evict events) in api-ms-agent/app/core/cache/memory_backend.py
+- [x] T033 [US3] Add optional short negative caching for safe HTTP errors in api-ms-agent/app/http_client.py
 
 ### Tests (US3)
 
-- [ ] T034 [P] [US3] Concurrency test for single-flight under load in api-ms-agent/tests/test_cache_concurrency.py
-- [ ] T035 [US3] Load-style test harness (local) in api-ms-agent/tests/test_workload_smoke.py
+- [x] T034 [P] [US3] Concurrency test for single-flight under load in api-ms-agent/tests/test_cache_concurrency.py
+- [x] T035 [US3] Load-style test harness (local) in api-ms-agent/tests/test_workload_smoke.py
 
 **Checkpoint**: US3 complete; system remains stable and predictable under load.
 

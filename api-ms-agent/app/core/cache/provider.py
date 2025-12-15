@@ -23,7 +23,7 @@ def get_cache(namespace: str) -> Cache:
 
         policy = _policy_for_namespace(namespace)
         backend = (
-            MemoryCacheBackend(max_entries=policy.max_entries)
+            MemoryCacheBackend(max_entries=policy.max_entries, namespace=policy.namespace)
             if settings.cache_enabled
             else NoOpCacheBackend()
         )
@@ -34,6 +34,16 @@ def get_cache(namespace: str) -> Cache:
 
 def _policy_for_namespace(namespace: str) -> CachePolicy:
     max_entries = settings.cache_max_entries
+    if namespace == "db" and settings.cache_db_max_entries is not None:
+        max_entries = settings.cache_db_max_entries
+    elif namespace == "http" and settings.cache_http_max_entries is not None:
+        max_entries = settings.cache_http_max_entries
+    elif namespace == "embed" and settings.cache_embed_max_entries is not None:
+        max_entries = settings.cache_embed_max_entries
+    elif namespace == "prompt" and settings.cache_prompt_max_entries is not None:
+        max_entries = settings.cache_prompt_max_entries
+    elif namespace == "llm" and settings.cache_llm_max_entries is not None:
+        max_entries = settings.cache_llm_max_entries
 
     if namespace == "db":
         ttl = settings.cache_db_ttl_seconds
