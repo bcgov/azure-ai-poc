@@ -114,6 +114,20 @@ class Settings(BaseSettings):
     orgbook_base_url: str = ""
     parks_base_url: str = ""
 
+    # Unified caching (in-memory by default; Redis-ready via backend swap).
+    # Defaults are conservative to preserve semantics.
+    cache_enabled: bool = True
+    cache_backend: str = "memory"
+    cache_max_entries: int = 4096
+
+    cache_default_ttl_seconds: int = 30
+    cache_db_ttl_seconds: int = 30
+    cache_http_ttl_seconds: int = 900
+    cache_embed_ttl_seconds: int = 7 * 24 * 60 * 60
+    cache_prompt_ttl_seconds: int = 600
+    # LLM response caching is disabled by default to avoid semantic changes.
+    cache_llm_ttl_seconds: int = 0
+
     # Use managed identity for non-local environments
     # Local uses API keys, cloud environments use managed identity
     @property

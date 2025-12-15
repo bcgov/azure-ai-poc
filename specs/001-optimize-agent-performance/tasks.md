@@ -22,12 +22,16 @@
 
 **Purpose**: Core cache implementation required before any user story work.
 
-- [ ] T004 Implement in-memory TTL + bounded LRU backend in api-ms-agent/app/core/cache/memory_backend.py
-- [ ] T005 Implement Cache facade + namespace policies in api-ms-agent/app/core/cache/cache.py
-- [ ] T006 Implement single-flight (stampede protection) for get_or_set in api-ms-agent/app/core/cache/singleflight.py
-- [ ] T007 Wire cache configuration defaults into api-ms-agent/app/config.py (safe defaults; LLM response caching disabled)
-- [ ] T008 [P] Add structured cache logging helpers in api-ms-agent/app/core/cache/logging.py
-- [ ] T009 Add a cache provider/factory in api-ms-agent/app/core/cache/provider.py (future Redis backend swap point)
+- [x] T004 Implement in-memory TTL + bounded LRU backend in api-ms-agent/app/core/cache/memory_backend.py
+- [x] T005 Implement Cache facade + namespace policies in api-ms-agent/app/core/cache/cache.py
+- [x] T006 Implement single-flight (stampede protection) for get_or_set in api-ms-agent/app/core/cache/singleflight.py
+- [x] T007 Wire cache configuration defaults into api-ms-agent/app/config.py (safe defaults; LLM response caching disabled)
+- [x] T008 [P] Add structured cache logging helpers in api-ms-agent/app/core/cache/logging.py
+- [x] T009 Add a cache provider/factory in api-ms-agent/app/core/cache/provider.py (future Redis backend swap point)
+
+- [x] T010 [P] Add unit tests for cache TTL + eviction in api-ms-agent/tests/test_cache_backend.py
+- [x] T011 [P] Add unit tests for key helper stability in api-ms-agent/tests/test_cache_keys.py
+- [x] T012 [P] Add unit tests for single-flight behavior in api-ms-agent/tests/test_cache_singleflight.py
 
 **Checkpoint**: Foundation ready; user stories can begin.
 
@@ -41,20 +45,17 @@
 
 ### Implementation (US1)
 
-- [ ] T010 [US1] Add safe Cosmos read caching wrappers in api-ms-agent/app/services/cosmos_db_service.py
-- [ ] T011 [US1] Add targeted cache invalidation on Cosmos writes in api-ms-agent/app/services/cosmos_db_service.py
-- [ ] T012 [US1] Add GET-only outbound HTTP caching in api-ms-agent/app/http_client.py
-- [ ] T013 [US1] Apply caching to orchestrator tool calls in api-ms-agent/app/services/orchestrator_agent.py
-- [ ] T014 [US1] Apply caching to workflow state reads in api-ms-agent/app/services/workflow_state_service.py
-- [ ] T015 [US1] Add embedding caching in api-ms-agent/app/services/azure_openai_embedding_service.py
-- [ ] T016 [US1] (Optional) Add prompt assembly caching in api-ms-agent/app/services/prompt_builder.py
-- [ ] T017 [US1] (Opt-in) Add deterministic-only LLM response caching in api-ms-agent/app/services/azure_openai_chat_service.py
+- [ ] T013 [US1] Add safe Cosmos read caching wrappers in api-ms-agent/app/services/cosmos_db_service.py
+- [ ] T014 [US1] Add targeted cache invalidation on Cosmos writes in api-ms-agent/app/services/cosmos_db_service.py
+- [ ] T015 [US1] Add GET-only outbound HTTP caching in api-ms-agent/app/http_client.py
+- [ ] T016 [US1] Apply caching to orchestrator tool calls in api-ms-agent/app/services/orchestrator_agent.py
+- [ ] T017 [US1] Apply caching to workflow state reads in api-ms-agent/app/services/workflow_state_service.py
+- [ ] T018 [US1] Add embedding caching in api-ms-agent/app/services/embedding_service.py
+- [ ] T019 [US1] (Optional) Add prompt assembly caching in api-ms-agent/app/services/prompt_builder.py
+- [ ] T020 [US1] (Opt-in) Add deterministic-only LLM response caching in api-ms-agent/app/services/azure_openai_chat_service.py
 
 ### Tests (required by FR-003)
 
-- [ ] T018 [P] [US1] Unit tests for cache TTL + eviction in api-ms-agent/tests/test_cache_backend.py
-- [ ] T019 [P] [US1] Unit tests for key scoping (tenant/user) in api-ms-agent/tests/test_cache_keys.py
-- [ ] T020 [P] [US1] Unit tests for single-flight behavior in api-ms-agent/tests/test_cache_singleflight.py
 - [ ] T021 [US1] Integration-style test for Cosmos read caching (mocked) in api-ms-agent/tests/test_cosmos_db_cache.py
 - [ ] T022 [US1] Integration-style test for HTTP GET caching (mocked) in api-ms-agent/tests/test_http_cache.py
 
@@ -126,12 +127,12 @@
 
 - Phase 1: T002 and T003 can be done in parallel.
 - Phase 2: T008 can be done in parallel with T004–T007.
-- US1 tests T018–T020 can be done in parallel.
+- Phase 2: T010–T012 can be done in parallel.
 - US2: T025 can be done in parallel with T023–T024.
 - US3: T034 can be done in parallel after T006 exists.
 
 ## Parallel Example: US1
 
-- Implement DB caching in api-ms-agent/app/services/cosmos_db_service.py (T010, T011)
-- Implement HTTP caching in api-ms-agent/app/http_client.py (T012)
-- Implement cache backend tests in api-ms-agent/tests/test_cache_backend.py (T018)
+- Implement DB caching in api-ms-agent/app/services/cosmos_db_service.py (T013, T014)
+- Implement HTTP caching in api-ms-agent/app/http_client.py (T015)
+- Implement foundation tests in api-ms-agent/tests/test_cache_backend.py (T010)
