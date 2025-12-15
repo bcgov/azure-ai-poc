@@ -26,7 +26,11 @@ from app.services.openai_clients import (
     get_client_for_model,
     get_deployment_for_model,
 )
-from app.utils import MAX_HISTORY_CHARS, sort_sources_by_confidence, trim_text
+from app.services.prompt_builder import (
+    build_history_augmented_query,
+    build_system_instructions_with_document_context,
+)
+from app.utils import MAX_HISTORY_CHARS, sort_sources_by_confidence
 
 logger = get_logger(__name__)
 
@@ -313,19 +317,18 @@ class ChatAgentService:
         # Document context or non-default model requires fresh agent
         instructions = SYSTEM_INSTRUCTIONS
         if document_context:
-            trimmed_context = trim_text(document_context, MAX_DOC_CONTEXT_CHARS)
-            instructions = (
-                SYSTEM_INSTRUCTIONS
-                + f"""
-
-## DOCUMENT CONTEXT PROVIDED
-
-The following document context is relevant to the user's question.
-Use analyze_document_context tool to extract information from it.
-REDACT any PII before including in your response.
-
-DOCUMENT:
-{trimmed_context}"""
+            instructions = await build_system_instructions_with_document_context(
+                base_instructions=SYSTEM_INSTRUCTIONS,
+                document_context=document_context,
+                user_id=None,
+                max_doc_context_chars=MAX_DOC_CONTEXT_CHARS,
+                header=(
+                    "## DOCUMENT CONTEXT PROVIDED\n\n"
+                    "The following document context is relevant to the user's question.\n"
+                    "Use analyze_document_context tool to extract information from it.\n"
+                    "REDACT any PII before including in your response.\n\n"
+                    "DOCUMENT:"
+                ),
             )
 
         client = await get_client_for_model(model)
@@ -391,14 +394,13 @@ DOCUMENT:
             agent = await self._get_agent(document_context, model)
 
             # Build the query with history context if provided
-            query = message
-            if history:
-                # Format history as context
-                history_text = "\n".join(
-                    f"{msg['role'].upper()}: {msg['content']}" for msg in history[-5:]
-                )
-                history_text = trim_text(history_text, MAX_HISTORY_CHARS)
-                query = f"Previous conversation:\n{history_text}\n\nCurrent question: {message}"
+            query = await build_history_augmented_query(
+                query=message,
+                history=history,
+                user_id=user_id,
+                max_history_chars=MAX_HISTORY_CHARS,
+                max_history_messages=5,
+            )
 
             # MAF's ChatAgent.run() handles ReAct reasoning internally.
             # Guard the call with a timeout to prevent request hangs.

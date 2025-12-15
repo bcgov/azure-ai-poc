@@ -116,22 +116,24 @@ module "document_intelligence" {
 module "container_apps_backend" {
   source = "./modules/container-apps"
 
-  app_env                           = var.app_env
-  backend_image                     = var.api_image
-  app_name                          = var.app_name
-  appinsights_connection_string     = module.monitoring.appinsights_connection_string
-  appinsights_instrumentation_key   = module.monitoring.appinsights_instrumentation_key
-  azure_openai_api_key              = module.azure_openai.openai_primary_key
-  azure_openai_deployment_name      = module.azure_openai.gpt_deployment_name
-  azure_openai_embedding_deployment = module.azure_openai.embedding_deployment_name
-  common_tags                       = var.common_tags
-  location                          = var.location
-  log_analytics_workspace_id        = module.monitoring.log_analytics_workspace_id
-  private_endpoint_subnet_id        = module.network.private_endpoint_subnet_id
-  resource_group_name               = azurerm_resource_group.main.name
-  image_tag                         = var.image_tag
-  azure_openai_embedding_endpoint   = module.azure_openai.openai_endpoint
-  azure_openai_llm_endpoint         = module.azure_openai.openai_endpoint
+  app_env                             = var.app_env
+  backend_image                       = var.api_image
+  app_name                            = var.app_name
+  appinsights_connection_string       = module.monitoring.appinsights_connection_string
+  appinsights_instrumentation_key     = module.monitoring.appinsights_instrumentation_key
+  azure_openai_api_key                = module.azure_openai.openai_primary_key
+  azure_openai_deployment_name        = module.azure_openai.gpt_deployment_name
+  azure_openai_embedding_deployment   = module.azure_openai.embedding_deployment_name
+  common_tags                         = var.common_tags
+  location                            = var.location
+  log_analytics_workspace_id          = module.monitoring.log_analytics_workspace_id
+  log_analytics_workspace_customer_id = module.monitoring.log_analytics_workspace_workspaceId
+  log_analytics_workspace_key         = module.monitoring.log_analytics_workspace_key
+  private_endpoint_subnet_id          = module.network.private_endpoint_subnet_id
+  resource_group_name                 = azurerm_resource_group.main.name
+  image_tag                           = var.image_tag
+  azure_openai_embedding_endpoint     = module.azure_openai.openai_endpoint
+  azure_openai_llm_endpoint           = module.azure_openai.openai_endpoint
   # Azure AI Search
   azure_search_endpoint   = module.azure_ai_search.search_service_url
   azure_search_index_name = var.azure_search_index_name

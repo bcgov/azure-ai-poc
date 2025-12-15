@@ -52,6 +52,7 @@ from openai import AsyncAzureOpenAI
 
 from app.config import settings
 from app.logger import get_logger
+from app.services.azure_openai_chat_service import AzureOpenAIChatService
 from app.services.openai_clients import get_client_for_model, get_deployment_for_model
 
 logger = get_logger(__name__)
@@ -132,8 +133,9 @@ class PlanningExecutor(Executor):
         state.current_phase = WorkflowPhase.PLANNING
 
         try:
-            response = await self.client.chat.completions.create(
-                model=self.model_deployment,
+            chat_svc = AzureOpenAIChatService(self.client)
+            content = await chat_svc.create_chat_completion_content(
+                deployment=self.model_deployment,
                 messages=[
                     {
                         "role": "system",
@@ -166,7 +168,7 @@ You MUST respond with ONLY valid JSON using this exact format:
                 user=state.user_id,
             )
 
-            plan_data = json.loads(response.choices[0].message.content or "{}")
+            plan_data = json.loads(content or "{}")
 
             state.plan = ResearchPlan(
                 main_topic=state.topic,
@@ -220,8 +222,9 @@ class ResearchExecutor(Executor):
             for subtopic in state.plan.subtopics:
                 logger.info(f"[ResearchExecutor] Researching: {subtopic}")
 
-                response = await self.client.chat.completions.create(
-                    model=self.model_deployment,
+                chat_svc = AzureOpenAIChatService(self.client)
+                content = await chat_svc.create_chat_completion_content(
+                    deployment=self.model_deployment,
                     messages=[
                         {
                             "role": "system",
@@ -257,7 +260,7 @@ Research questions to address: {", ".join(state.plan.research_questions)}""",
                     user=state.user_id,
                 )
 
-                finding_data = json.loads(response.choices[0].message.content or "{}")
+                finding_data = json.loads(content or "{}")
                 state.findings.append(
                     ResearchFinding(
                         subtopic=subtopic,
@@ -312,8 +315,9 @@ class SynthesisExecutor(Executor):
                 for f in state.findings
             )
 
-            response = await self.client.chat.completions.create(
-                model=self.model_deployment,
+            chat_svc = AzureOpenAIChatService(self.client)
+            content = await chat_svc.create_chat_completion_content(
+                deployment=self.model_deployment,
                 messages=[
                     {
                         "role": "system",
@@ -359,7 +363,7 @@ Write in a clear, professional style using markdown formatting.""",
             )
 
             # Get the report content and normalize any escaped newlines
-            report_content = response.choices[0].message.content or ""
+            report_content = content or ""
             state.final_report = report_content.replace("\\n", "\n").replace("\\t", "\t")
             logger.info(f"[SynthesisExecutor] Report created ({len(state.final_report)} chars)")
 

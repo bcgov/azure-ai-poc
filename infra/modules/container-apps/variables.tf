@@ -109,14 +109,14 @@ variable "container_apps_subnet_id" {
 variable "container_cpu" {
   description = "CPU allocation for backend container app (in cores)"
   type        = number
-  default     = 0.5
+  default     = 0.25
   nullable    = false
 }
 
 variable "container_memory" {
   description = "Memory allocation for backend container app"
   type        = string
-  default     = "1Gi"
+  default     = "0.5Gi"
   nullable    = false
 }
 
@@ -167,6 +167,19 @@ variable "location" {
 variable "log_analytics_workspace_id" {
   description = "Log Analytics Workspace ID for Container Apps Environment"
   type        = string
+  nullable    = false
+}
+
+variable "log_analytics_workspace_customer_id" {
+  description = "Log Analytics Workspace customer ID (GUID) for Container Apps Environment logs"
+  type        = string
+  nullable    = false
+}
+
+variable "log_analytics_workspace_key" {
+  description = "Log Analytics Workspace primary shared key for Container Apps Environment logs"
+  type        = string
+  sensitive   = true
   nullable    = false
 }
 

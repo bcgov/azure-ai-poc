@@ -32,6 +32,30 @@ resource "azurerm_container_app_environment" "main" {
   }
 }
 
+# -----------------------------------------------------------------------------
+# Fix Log Analytics Configuration
+# -----------------------------------------------------------------------------
+# The azurerm_container_app_environment resource doesn't properly set the
+# Log Analytics shared key. Use azapi to patch the configuration.
+resource "azapi_update_resource" "container_app_env_logs" {
+  type        = "Microsoft.App/managedEnvironments@2024-03-01"
+  resource_id = azurerm_container_app_environment.main.id
+
+  body = {
+    properties = {
+      appLogsConfiguration = {
+        destination = "log-analytics"
+        logAnalyticsConfiguration = {
+          customerId = var.log_analytics_workspace_customer_id
+          sharedKey  = var.log_analytics_workspace_key
+        }
+      }
+    }
+  }
+
+  depends_on = [azurerm_container_app_environment.main]
+}
+
 
 # Private Endpoint for Container Apps Environment
 # Note: DNS zone association will be automatically managed by Azure Policy
@@ -233,7 +257,7 @@ resource "azurerm_container_app" "backend" {
     }
     http_scale_rule {
       name                = "http-scaling"
-      concurrent_requests = "20"
+      concurrent_requests = "10"
     }
   }
 
@@ -268,12 +292,17 @@ resource "azurerm_monitor_diagnostic_setting" "container_app_env_diagnostics" {
   name                       = "${var.app_name}-ca-env-diagnostics"
   target_resource_id         = azurerm_container_app_environment.main.id
   log_analytics_workspace_id = var.log_analytics_workspace_id
+
+  # Container console logs (stdout/stderr from your application)
   enabled_log {
-    category_group = "allLogs"
+    category = "ContainerAppConsoleLogs"
   }
+
+  # System logs (scaling events, container restarts, platform events)
   enabled_log {
-    category_group = "audit"
+    category = "ContainerAppSystemLogs"
   }
+
   enabled_metric {
     category = "AllMetrics"
   }

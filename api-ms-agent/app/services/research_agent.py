@@ -21,8 +21,10 @@ from uuid import uuid4
 from agent_framework import ChatAgent, ChatMessage, ai_function
 
 from app.config import settings
+from app.core.cache.keys import hash_text
 from app.logger import get_logger
 from app.services.agent_run_compat import run_agent_compat
+from app.services.prompt_builder import build_cached
 from app.utils import sort_sources_by_confidence
 
 logger = get_logger(__name__)
@@ -665,6 +667,7 @@ class DeepResearchAgentService:
     async def _create_research_agent(
         self,
         document_context: str | None = None,
+        user_id: str | None = None,
         model: str | None = None,
     ) -> ChatAgent:
         """Create a ChatAgent configured for deep research."""
@@ -686,34 +689,36 @@ class DeepResearchAgentService:
         # Get current date for the LLM to understand "current" means today
         current_date = datetime.now(UTC).strftime("%B %d, %Y")
         current_year = datetime.now(UTC).strftime("%Y")
+        current_month = datetime.now(UTC).strftime("%B")
 
-        # Build instructions based on whether we have document context
-        # Note: Using string concatenation instead of f-string to avoid escaping JSON braces
-        base_instructions = (
-            """You are a thorough research assistant. You MUST complete all three phases using the provided tools.
+        def _assemble_instructions() -> str:
+            # Build instructions based on whether we have document context
+            # Note: Using string concatenation instead of f-string to avoid escaping JSON braces
+            base_instructions = (
+                """You are a thorough research assistant. You MUST complete all three phases using the provided tools.
 
 ## CURRENT DATE AWARENESS (CRITICAL)
 TODAY'S DATE IS: **"""
-            + current_date
-            + """**
+                + current_date
+                + """**
 
 When the user asks about "current", "latest", "today's", or "now":
 - This means data as of """
-            + current_date
-            + """ or the most recent available
+                + current_date
+                + """ or the most recent available
 - ALWAYS use web_search() to get up-to-date information
 - Do NOT use outdated information from your training data
 - When searching, include the current year ("""
-            + current_year
-            + """) in your queries
+                + current_year
+                + """) in your queries
 
 For example, if user asks "what's the current interest rate", search for "interest rate """
-            + current_date.split()[0]
-            + " "
-            + current_year
-            + """" or "interest rate """
-            + current_year
-            + """", NOT historical data unless the user explicitly asks for past information.
+                + current_month
+                + " "
+                + current_year
+                + """" or "interest rate """
+                + current_year
+                + """", NOT historical data unless the user explicitly asks for past information.
 
 ## SECURITY GUARDRAILS (MANDATORY - NO EXCEPTIONS)
 
@@ -803,14 +808,14 @@ MANDATORY WORKFLOW:
 4. Call save_final_report() with the report and ALL sources (including web URLs)
 
 FAILURE TO USE web_search() WILL RESULT IN OUTDATED INFORMATION!"""
-        )
-
-        # Add document-specific instructions if we have document context
-        if document_context:
-            trimmed_context = shorten(
-                document_context, width=MAX_DOC_CONTEXT_CHARS, placeholder=" …"
             )
-            doc_instructions = f"""
+
+            # Add document-specific instructions if we have document context
+            if document_context:
+                trimmed_context = shorten(
+                    document_context, width=MAX_DOC_CONTEXT_CHARS, placeholder=" …"
+                )
+                doc_instructions = f"""
 
 DOCUMENT-BASED RESEARCH MODE:
 You have been provided with a document to thoroughly analyze. You MUST:
@@ -828,9 +833,27 @@ When citing from this document, use:
 - description: "From document: [document name], [section/topic being cited]"
 - confidence: "high" (since it's direct from the document)
 """
-            full_instructions = base_instructions + doc_instructions
-        else:
-            full_instructions = base_instructions
+                return base_instructions + doc_instructions
+
+            return base_instructions
+
+        full_instructions = await build_cached(
+            cache_key_prefix="research_instructions",
+            payload={
+                "v": 1,
+                "type": "research_agent_instructions",
+                "user_id": user_id,
+                "has_document_context": document_context is not None,
+                "doc_hash": hash_text(document_context) if document_context else None,
+                "current_date": current_date,
+                "current_year": current_year,
+                "current_month": current_month,
+                "max_doc_context_chars": MAX_DOC_CONTEXT_CHARS,
+                "model": model,
+            },
+            factory=_assemble_instructions,
+            allow_anonymous=document_context is None,
+        )
 
         deep_research_chat_agent = ChatAgent(
             name="DeepResearchAgent",
@@ -891,7 +914,11 @@ When citing from this document, use:
         )
 
         # Create a fresh agent for this run
-        agent = await self._create_research_agent(document_context=document_context, model=model)
+        agent = await self._create_research_agent(
+            document_context=document_context,
+            user_id=user_id,
+            model=model,
+        )
         thread = agent.get_new_thread()
 
         # Store the agent, thread, and state for tracking

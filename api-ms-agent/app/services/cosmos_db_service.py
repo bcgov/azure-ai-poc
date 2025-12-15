@@ -13,7 +13,7 @@ Uses the async Cosmos DB SDK (azure.cosmos.aio) for non-blocking I/O operations.
 
 from __future__ import annotations
 
-import asyncio
+import json
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -21,22 +21,33 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from azure.cosmos.aio import ContainerProxy, CosmosClient, DatabaseProxy
-from azure.cosmos.exceptions import CosmosHttpResponseError, CosmosResourceNotFoundError
+from azure.cosmos.aio import (
+    ContainerProxy,
+    CosmosClient,
+    DatabaseProxy,
+)
+from azure.cosmos.exceptions import (
+    CosmosHttpResponseError,
+    CosmosResourceNotFoundError,
+)
 from azure.cosmos.partition_key import PartitionKey
 from azure.identity.aio import DefaultAzureCredential
 
 from app.config import settings
+from app.core.cache.keys import canonical_json, hash_text
+from app.core.cache.provider import get_cache
 from app.logger import get_logger
 
 logger = get_logger(__name__)
 
-# LRU cache for chat history (performance optimization)
-# Key: (session_id, user_id), Value: (timestamp, messages)
-_chat_history_cache: dict[tuple[str, str], tuple[float, list[ChatMessage]]] = {}
-_chat_history_cache_lock = asyncio.Lock()
-_CACHE_TTL_SECONDS = 30  # Cache TTL - short to ensure freshness
-_MAX_CACHE_SIZE = 100  # Maximum sessions to cache
+
+def _cache_key(prefix: str, payload: dict[str, Any]) -> str:
+    # Never log or store raw IDs; hash all inputs.
+    return f"{prefix}:{hash_text(canonical_json(payload))}"
+
+
+def _get_db_cache():
+    return get_cache("db")
 
 
 @dataclass
@@ -291,6 +302,9 @@ class CosmosDbService:
         try:
             await self.chat_container.create_item(body=item)
             logger.info("session_created", session_id=session_id, user_id=user_id)
+
+            # Invalidate session listing cache (unfiltered) for this user.
+            self._invalidate_user_sessions_cache(user_id)
             return session
         except Exception as error:
             logger.error("session_create_failed", error=str(error), user_id=user_id)
@@ -350,7 +364,8 @@ class CosmosDbService:
             logger.debug("message_saved", message_id=message_id, session_id=session_id)
 
             # Invalidate cache so next read gets fresh data
-            await self._invalidate_chat_cache(session_id, user_id)
+            self._invalidate_chat_history_cache(session_id, user_id)
+            self._invalidate_user_sessions_cache(user_id)
 
             # Update session metadata - pass content for title if user message
             first_msg = content if role == "user" else None
@@ -364,24 +379,21 @@ class CosmosDbService:
             )
             return message
 
-    async def _invalidate_chat_cache(self, session_id: str, user_id: str) -> None:
-        """Invalidate cache entry for a session when new messages are added."""
-        cache_key = (session_id, user_id)
-        async with _chat_history_cache_lock:
-            if cache_key in _chat_history_cache:
-                del _chat_history_cache[cache_key]
-                logger.debug("chat_cache_invalidated", session_id=session_id)
+    def _invalidate_chat_history_cache(self, session_id: str, user_id: str) -> None:
+        key = _cache_key("chat_history", {"session_id": session_id, "user_id": user_id})
+        _get_db_cache().delete(key)
 
-    async def _prune_cache_if_needed(self) -> None:
-        """Remove oldest entries if cache exceeds max size."""
-        async with _chat_history_cache_lock:
-            if len(_chat_history_cache) > _MAX_CACHE_SIZE:
-                # Sort by timestamp and remove oldest 20%
-                sorted_items = sorted(_chat_history_cache.items(), key=lambda x: x[1][0])
-                items_to_remove = len(sorted_items) // 5  # Remove 20%
-                for key, _ in sorted_items[:items_to_remove]:
-                    del _chat_history_cache[key]
-                logger.debug("chat_cache_pruned", removed=items_to_remove)
+    def _invalidate_user_sessions_cache(self, user_id: str) -> None:
+        key = _cache_key("user_sessions", {"user_id": user_id})
+        _get_db_cache().delete(key)
+
+    def _invalidate_user_documents_cache(self, user_id: str) -> None:
+        key = _cache_key("user_documents", {"user_id": user_id})
+        _get_db_cache().delete(key)
+
+    def _invalidate_workflow_state_cache(self, workflow_id: str, user_id: str) -> None:
+        key = _cache_key("workflow_state", {"workflow_id": workflow_id, "user_id": user_id})
+        _get_db_cache().delete(key)
 
     async def get_chat_history(
         self,
@@ -406,18 +418,29 @@ class CosmosDbService:
         if not await self._ensure_initialized():
             return []
 
-        # Check cache first (lock held only briefly)
-        cache_key = (session_id, user_id)
-        async with _chat_history_cache_lock:
-            if cache_key in _chat_history_cache:
-                cached_time, cached_messages = _chat_history_cache[cache_key]
-                if time.time() - cached_time < _CACHE_TTL_SECONDS:
-                    logger.debug(
-                        "chat_history_cache_hit",
-                        session_id=session_id,
-                        message_count=len(cached_messages),
-                    )
-                    return cached_messages[:limit]
+        cache_key = _cache_key("chat_history", {"session_id": session_id, "user_id": user_id})
+        cached = _get_db_cache().get(cache_key)
+        if cached is not None:
+            try:
+                payload = json.loads(cached.decode("utf-8"))
+                cached_items = payload.get("messages", [])
+                if isinstance(cached_items, list) and len(cached_items) >= limit:
+                    return [
+                        ChatMessage(
+                            id=item["id"],
+                            session_id=item["session_id"],
+                            user_id=item["user_id"],
+                            role=item["role"],
+                            content=item["content"],
+                            timestamp=datetime.fromisoformat(item["timestamp"]),
+                            sources=item.get("sources", []),
+                            metadata=item.get("metadata", {}),
+                        )
+                        for item in cached_items[:limit]
+                    ]
+            except Exception:
+                # Cache is best-effort; ignore parse errors.
+                pass
 
         try:
             query = """
@@ -458,10 +481,26 @@ class CosmosDbService:
                     )
                 )
 
-            # Update cache
-            await self._prune_cache_if_needed()
-            async with _chat_history_cache_lock:
-                _chat_history_cache[cache_key] = (time.time(), messages)
+            # Update cache (store as JSON bytes, hashed key).
+            try:
+                serialized = {
+                    "messages": [
+                        {
+                            "id": m.id,
+                            "session_id": m.session_id,
+                            "user_id": m.user_id,
+                            "role": m.role,
+                            "content": m.content,
+                            "timestamp": m.timestamp.isoformat(),
+                            "sources": m.sources,
+                            "metadata": m.metadata,
+                        }
+                        for m in messages
+                    ]
+                }
+                _get_db_cache().set(cache_key, canonical_json(serialized).encode("utf-8"))
+            except Exception:
+                pass
 
             logger.debug(
                 "chat_history_loaded",
@@ -499,6 +538,31 @@ class CosmosDbService:
         """
         if not await self._ensure_initialized():
             return []
+
+        # Cache only the unfiltered listing to avoid incorrect prefix-filtered caching.
+        if session_id_prefix is None:
+            cache_key = _cache_key("user_sessions", {"user_id": user_id})
+            cached = _get_db_cache().get(cache_key)
+            if cached is not None:
+                try:
+                    payload = json.loads(cached.decode("utf-8"))
+                    cached_items = payload.get("sessions", [])
+                    if isinstance(cached_items, list) and len(cached_items) >= limit:
+                        return [
+                            ConversationSession(
+                                id=item["id"],
+                                session_id=item["session_id"],
+                                user_id=item["user_id"],
+                                title=item.get("title", "Untitled"),
+                                created_at=datetime.fromisoformat(item["created_at"]),
+                                last_updated=datetime.fromisoformat(item["last_updated"]),
+                                message_count=item.get("message_count", 0),
+                                tags=item.get("tags", []),
+                            )
+                            for item in cached_items[:limit]
+                        ]
+                except Exception:
+                    pass
 
         try:
             query = """
@@ -542,6 +606,28 @@ class CosmosDbService:
                         tags=item.get("tags", []),
                     )
                 )
+
+            if session_id_prefix is None:
+                try:
+                    serialized = {
+                        "sessions": [
+                            {
+                                "id": s.id,
+                                "session_id": s.session_id,
+                                "user_id": s.user_id,
+                                "title": s.title,
+                                "created_at": s.created_at.isoformat(),
+                                "last_updated": s.last_updated.isoformat(),
+                                "message_count": s.message_count,
+                                "tags": s.tags,
+                            }
+                            for s in sessions
+                        ]
+                    }
+                    cache_key = _cache_key("user_sessions", {"user_id": user_id})
+                    _get_db_cache().set(cache_key, canonical_json(serialized).encode("utf-8"))
+                except Exception:
+                    pass
 
             return sessions
 
@@ -618,6 +704,8 @@ class CosmosDbService:
 
             if deleted:
                 logger.info("session_deleted", session_id=session_id, user_id=user_id)
+                self._invalidate_chat_history_cache(session_id, user_id)
+                self._invalidate_user_sessions_cache(user_id)
                 return True
             else:
                 logger.warning("session_not_found", session_id=session_id)
@@ -646,6 +734,7 @@ class CosmosDbService:
             existing["message_count"] = existing.get("message_count", 0) + 1
             existing["last_updated"] = datetime.now(UTC).isoformat()
             await self.chat_container.replace_item(item=item_id, body=existing)
+            self._invalidate_user_sessions_cache(user_id)
         except CosmosResourceNotFoundError:
             # Session doesn't exist yet - create it
             now = datetime.now(UTC)
@@ -668,6 +757,7 @@ class CosmosDbService:
             try:
                 await self.chat_container.create_item(body=new_session)
                 logger.info("session_auto_created", session_id=session_id, user_id=user_id)
+                self._invalidate_user_sessions_cache(user_id)
             except Exception as create_error:
                 logger.debug(
                     "session_auto_create_failed",
@@ -754,6 +844,7 @@ class CosmosDbService:
         try:
             await self.documents_container.upsert_item(body=item)
             logger.info("document_metadata_saved", document_id=document_id, user_id=user_id)
+            self._invalidate_user_documents_cache(user_id)
             return doc_meta
         except Exception as error:
             logger.error("document_metadata_save_failed", error=str(error), document_id=document_id)
@@ -772,6 +863,17 @@ class CosmosDbService:
         """
         if not await self._ensure_initialized():
             return []
+
+        cache_key = _cache_key("user_documents", {"user_id": user_id})
+        cached = _get_db_cache().get(cache_key)
+        if cached is not None:
+            try:
+                payload = json.loads(cached.decode("utf-8"))
+                cached_items = payload.get("documents", [])
+                if isinstance(cached_items, list) and len(cached_items) >= limit:
+                    return cached_items[:limit]
+            except Exception:
+                pass
 
         try:
             query = """
@@ -806,6 +908,12 @@ class CosmosDbService:
                 for item in items
             ]
 
+            try:
+                serialized = {"documents": result}
+                _get_db_cache().set(cache_key, canonical_json(serialized).encode("utf-8"))
+            except Exception:
+                pass
+
             logger.info("documents_listed", user_id=user_id, count=len(result))
             return result
 
@@ -838,6 +946,7 @@ class CosmosDbService:
                 partition_key=user_id,
             )
             logger.info("document_metadata_deleted", document_id=document_id)
+            self._invalidate_user_documents_cache(user_id)
             return True
         except CosmosResourceNotFoundError:
             logger.warning("document_metadata_not_found", document_id=document_id)
@@ -917,6 +1026,28 @@ class CosmosDbService:
                 status=status,
                 current_step=current_step,
             )
+
+            try:
+                cache_key = _cache_key(
+                    "workflow_state", {"workflow_id": workflow_id, "user_id": user_id}
+                )
+                serialized = {
+                    "id": workflow_state.id,
+                    "workflow_id": workflow_state.workflow_id,
+                    "user_id": workflow_state.user_id,
+                    "workflow_type": workflow_state.workflow_type,
+                    "status": workflow_state.status,
+                    "current_step": workflow_state.current_step,
+                    "context": workflow_state.context,
+                    "result": workflow_state.result,
+                    "error": workflow_state.error,
+                    "created_at": workflow_state.created_at.isoformat(),
+                    "updated_at": workflow_state.updated_at.isoformat(),
+                }
+                _get_db_cache().set(cache_key, canonical_json(serialized).encode("utf-8"))
+            except Exception:
+                pass
+
             return workflow_state
         except Exception as err:
             logger.error("workflow_state_save_failed", error=str(err), workflow_id=workflow_id)
@@ -936,13 +1067,34 @@ class CosmosDbService:
         if not await self._ensure_initialized():
             return None
 
+        cache_key = _cache_key("workflow_state", {"workflow_id": workflow_id, "user_id": user_id})
+        cached = _get_db_cache().get(cache_key)
+        if cached is not None:
+            try:
+                item = json.loads(cached.decode("utf-8"))
+                return WorkflowState(
+                    id=item["id"],
+                    workflow_id=item["workflow_id"],
+                    user_id=item["user_id"],
+                    workflow_type=item["workflow_type"],
+                    status=item["status"],
+                    current_step=item.get("current_step"),
+                    context=item.get("context", {}),
+                    result=item.get("result"),
+                    error=item.get("error"),
+                    created_at=datetime.fromisoformat(item["created_at"]),
+                    updated_at=datetime.fromisoformat(item["updated_at"]),
+                )
+            except Exception:
+                pass
+
         try:
             item = await self.workflows_container.read_item(
                 item=f"wf_{workflow_id}",
                 partition_key=user_id,
             )
 
-            return WorkflowState(
+            state = WorkflowState(
                 id=item["id"],
                 workflow_id=item["workflow_id"],
                 user_id=item["user_id"],
@@ -955,6 +1107,26 @@ class CosmosDbService:
                 created_at=datetime.fromisoformat(item["created_at"]),
                 updated_at=datetime.fromisoformat(item["updated_at"]),
             )
+
+            try:
+                serialized = {
+                    "id": state.id,
+                    "workflow_id": state.workflow_id,
+                    "user_id": state.user_id,
+                    "workflow_type": state.workflow_type,
+                    "status": state.status,
+                    "current_step": state.current_step,
+                    "context": state.context,
+                    "result": state.result,
+                    "error": state.error,
+                    "created_at": state.created_at.isoformat(),
+                    "updated_at": state.updated_at.isoformat(),
+                }
+                _get_db_cache().set(cache_key, canonical_json(serialized).encode("utf-8"))
+            except Exception:
+                pass
+
+            return state
         except CosmosResourceNotFoundError:
             return None
         except Exception as error:
@@ -1055,6 +1227,7 @@ class CosmosDbService:
                 partition_key=user_id,
             )
             logger.info("workflow_deleted", workflow_id=workflow_id)
+            self._invalidate_workflow_state_cache(workflow_id, user_id)
             return True
         except CosmosResourceNotFoundError:
             logger.warning("workflow_not_found", workflow_id=workflow_id)

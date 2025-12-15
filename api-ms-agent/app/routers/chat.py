@@ -144,7 +144,7 @@ async def chat(
     if request.document_id:
         try:
             # Get embedding for the user's message
-            embedding = await embedding_service.generate_embedding(request.message)
+            embedding = await embedding_service.generate_embedding(request.message, user_id=user_id)
             if embedding:
                 from app.services.azure_search_service import VectorSearchOptions
 
