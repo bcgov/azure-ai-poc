@@ -233,7 +233,7 @@ resource "azurerm_container_app" "backend" {
     }
     http_scale_rule {
       name                = "http-scaling"
-      concurrent_requests = "20"
+      concurrent_requests = "10"
     }
   }
 

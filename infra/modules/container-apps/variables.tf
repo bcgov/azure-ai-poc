@@ -109,14 +109,14 @@ variable "container_apps_subnet_id" {
 variable "container_cpu" {
   description = "CPU allocation for backend container app (in cores)"
   type        = number
-  default     = 0.5
+  default     = 0.25
   nullable    = false
 }
 
 variable "container_memory" {
   description = "Memory allocation for backend container app"
   type        = string
-  default     = "1Gi"
+  default     = "512Mi"
   nullable    = false
 }
 
