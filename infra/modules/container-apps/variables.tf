@@ -116,7 +116,7 @@ variable "container_cpu" {
 variable "container_memory" {
   description = "Memory allocation for backend container app"
   type        = string
-  default     = "512Mi"
+  default     = "0.5Gi"
   nullable    = false
 }
 
@@ -167,6 +167,19 @@ variable "location" {
 variable "log_analytics_workspace_id" {
   description = "Log Analytics Workspace ID for Container Apps Environment"
   type        = string
+  nullable    = false
+}
+
+variable "log_analytics_workspace_customer_id" {
+  description = "Log Analytics Workspace customer ID (GUID) for Container Apps Environment logs"
+  type        = string
+  nullable    = false
+}
+
+variable "log_analytics_workspace_key" {
+  description = "Log Analytics Workspace primary shared key for Container Apps Environment logs"
+  type        = string
+  sensitive   = true
   nullable    = false
 }
 
