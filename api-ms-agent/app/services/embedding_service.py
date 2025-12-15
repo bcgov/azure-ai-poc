@@ -11,6 +11,7 @@ Storage Architecture:
 from __future__ import annotations
 
 import asyncio
+import json
 import random
 import uuid
 from dataclasses import dataclass, field
@@ -18,6 +19,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.config import settings
+from app.core.cache.keys import canonical_json, hash_text
+from app.core.cache.provider import get_cache
 from app.logger import get_logger
 from app.services.azure_search_service import (
     AzureSearchService,
@@ -33,6 +36,15 @@ from app.services.document_intelligence_service import ParagraphWithPage
 from app.services.openai_clients import get_embedding_client
 
 logger = get_logger(__name__)
+
+
+def _embedding_cache_key(*, deployment: str, user_id: str | None, text: str) -> str:
+    payload = {
+        "deployment": deployment,
+        "user_id": user_id or "",
+        "text_hash": hash_text(text),
+    }
+    return f"embed:{hash_text(canonical_json(payload))}"
 
 
 @dataclass
@@ -182,7 +194,7 @@ class EmbeddingService:
                 )
                 await asyncio.sleep(delay)
 
-    async def generate_embedding(self, text: str) -> list[float]:
+    async def generate_embedding(self, text: str, *, user_id: str | None = None) -> list[float]:
         """
         Generate an embedding vector for the given text.
 
@@ -192,6 +204,22 @@ class EmbeddingService:
         Returns:
             The embedding vector
         """
+        cache = get_cache("embed")
+        cache_key = _embedding_cache_key(
+            deployment=settings.azure_openai_embedding_deployment,
+            user_id=user_id,
+            text=text,
+        )
+
+        cached = cache.get(cache_key)
+        if cached is not None:
+            try:
+                embedding = json.loads(cached.decode("utf-8"))
+                if isinstance(embedding, list):
+                    return embedding
+            except Exception:
+                pass
+
         client = await get_embedding_client()
 
         try:
@@ -202,13 +230,24 @@ class EmbeddingService:
                 text_length=len(text),
                 embedding_dims=len(embedding),
             )
+
+            try:
+                cache.set(cache_key, canonical_json(embedding).encode("utf-8"))
+            except Exception:
+                pass
+
             return embedding
         except Exception as e:
             logger.error("embedding_generation_failed", error=str(e))
             raise
 
     async def generate_embeddings_batch(
-        self, texts: list[str], batch_size: int = 2048, max_concurrent: int = 4
+        self,
+        texts: list[str],
+        batch_size: int = 2048,
+        max_concurrent: int = 4,
+        *,
+        user_id: str | None = None,
     ) -> list[list[float]]:
         """
         Generate embedding vectors for multiple texts in parallel batches.
@@ -228,6 +267,28 @@ class EmbeddingService:
         if not texts:
             return []
 
+        cache = get_cache("embed")
+        deployment = settings.azure_openai_embedding_deployment
+
+        results: list[list[float] | None] = [None] * len(texts)
+        missing: list[tuple[int, str]] = []
+        for i, text in enumerate(texts):
+            cache_key = _embedding_cache_key(deployment=deployment, user_id=user_id, text=text)
+            cached = cache.get(cache_key)
+            if cached is not None:
+                try:
+                    embedding = json.loads(cached.decode("utf-8"))
+                    if isinstance(embedding, list):
+                        results[i] = embedding
+                        continue
+                except Exception:
+                    pass
+            missing.append((i, text))
+
+        if not missing:
+            # All hits.
+            return [r for r in results if r is not None]
+
         client = await get_embedding_client()
 
         async def process_batch(batch: list[str]) -> list[list[float]]:
@@ -238,8 +299,10 @@ class EmbeddingService:
             return [item.embedding for item in sorted_data]
 
         try:
-            # Create batches
-            batches = [texts[i : i + batch_size] for i in range(0, len(texts), batch_size)]
+            missing_texts = [t for _, t in missing]
+            batches = [
+                missing_texts[i : i + batch_size] for i in range(0, len(missing_texts), batch_size)
+            ]
 
             # Process batches concurrently with semaphore to limit parallel requests
             semaphore = asyncio.Semaphore(max_concurrent)
@@ -254,13 +317,31 @@ class EmbeddingService:
             # Flatten results maintaining order
             all_embeddings = [emb for batch_embs in batch_results for emb in batch_embs]
 
+            # Write back into original order + populate cache.
+            for (index, text), embedding in zip(missing, all_embeddings, strict=True):
+                results[index] = embedding
+                try:
+                    cache_key = _embedding_cache_key(
+                        deployment=deployment,
+                        user_id=user_id,
+                        text=text,
+                    )
+                    cache.set(cache_key, canonical_json(embedding).encode("utf-8"))
+                except Exception:
+                    pass
+
             logger.debug(
                 "batch_embeddings_generated",
                 total_texts=len(texts),
                 batches=len(batches),
                 concurrent=min(max_concurrent, len(batches)),
             )
-            return all_embeddings
+            final: list[list[float]] = []
+            for r in results:
+                if r is None:
+                    raise RuntimeError("Embedding batch result missing entry")
+                final.append(r)
+            return final
 
         except Exception as e:
             logger.error("batch_embedding_generation_failed", error=str(e))
@@ -418,7 +499,7 @@ class EmbeddingService:
         )
 
         # Generate all embeddings in batches (batch_size=2048 for Azure OpenAI)
-        embeddings = await self.generate_embeddings_batch(chunks)
+        embeddings = await self.generate_embeddings_batch(chunks, user_id=user_id)
 
         # Build DocumentChunk objects for bulk upload
         now = datetime.now(UTC)
@@ -512,7 +593,7 @@ class EmbeddingService:
             List of search results ordered by similarity
         """
         # Generate embedding for the query
-        query_embedding = await self.generate_embedding(query)
+        query_embedding = await self.generate_embedding(query, user_id=user_id)
 
         # Perform vector search in Azure AI Search
         options = VectorSearchOptions(

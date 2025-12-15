@@ -39,13 +39,16 @@ from agent_framework.azure import AzureOpenAIChatClient
 from azure.identity.aio import DefaultAzureCredential
 
 from app.config import settings
+from app.core.cache.keys import canonical_json, hash_text
+from app.core.cache.provider import get_cache
 from app.logger import get_logger
 from app.services.agent_run_compat import run_agent_compat
 from app.services.mcp.base import MCPToolResult
 from app.services.mcp.geocoder_mcp import GeocoderMCP
 from app.services.mcp.orgbook_mcp import OrgBookMCP
 from app.services.mcp.parks_mcp import ParksMCP
-from app.utils import MAX_HISTORY_CHARS, sort_source_dicts_by_confidence, trim_text
+from app.services.prompt_builder import build_history_augmented_query
+from app.utils import MAX_HISTORY_CHARS, sort_source_dicts_by_confidence
 
 logger = get_logger(__name__)
 
@@ -152,11 +155,38 @@ async def _execute_mcp_tool(
     result: MCPToolResult | None = None
     error_type: str | None = None
 
+    cache = get_cache("http")
+    cache_payload = {"tool": tool_name, "args": arguments or {}}
+    cache_key = f"mcp_tool:{hash_text(canonical_json(cache_payload))}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        try:
+            payload = json.loads(cached.decode("utf-8"))
+            if isinstance(payload, dict) and payload.get("success") is True:
+                return MCPToolResult(
+                    success=True,
+                    data=payload.get("data"),
+                    error=None,
+                    source_info=payload.get("source_info"),
+                )
+        except Exception:
+            pass
+
     try:
         result = await asyncio.wait_for(
             mcp.execute_tool(tool_name, arguments),
             timeout=timeout_seconds,
         )
+
+        if isinstance(result, MCPToolResult) and result.success:
+            try:
+                cache.set(
+                    cache_key,
+                    canonical_json(result.to_dict()).encode("utf-8"),
+                )
+            except Exception:
+                pass
+
         return result
     except TimeoutError:
         error_type = "timeout"
@@ -693,14 +723,13 @@ class OrchestratorAgentService:
 
             # If conversation history is provided, prepend a short transcript so the
             # LLM can remain aware of the ongoing thread.
-            llm_query = query
-            if history:
-                history_text = "\n".join(
-                    f"{msg.get('role', '').upper()}: {msg.get('content', '')}"
-                    for msg in history[-5:]
-                )
-                history_text = trim_text(history_text, MAX_HISTORY_CHARS)
-                llm_query = f"Previous conversation:\n{history_text}\n\nCurrent question: {query}"
+            llm_query = await build_history_augmented_query(
+                query=query,
+                history=history,
+                user_id=user_id,
+                max_history_chars=MAX_HISTORY_CHARS,
+                max_history_messages=5,
+            )
 
             # MAF's ChatAgent.run() handles everything:
             # - Tool selection (based on tool_choice="auto")

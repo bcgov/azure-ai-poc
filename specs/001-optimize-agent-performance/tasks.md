@@ -46,18 +46,19 @@
 ### Implementation (US1)
 
 - [ ] T013 [US1] Add safe Cosmos read caching wrappers in api-ms-agent/app/services/cosmos_db_service.py
-- [ ] T014 [US1] Add targeted cache invalidation on Cosmos writes in api-ms-agent/app/services/cosmos_db_service.py
-- [ ] T015 [US1] Add GET-only outbound HTTP caching in api-ms-agent/app/http_client.py
-- [ ] T016 [US1] Apply caching to orchestrator tool calls in api-ms-agent/app/services/orchestrator_agent.py
-- [ ] T017 [US1] Apply caching to workflow state reads in api-ms-agent/app/services/workflow_state_service.py
-- [ ] T018 [US1] Add embedding caching in api-ms-agent/app/services/embedding_service.py
-- [ ] T019 [US1] (Optional) Add prompt assembly caching in api-ms-agent/app/services/prompt_builder.py
-- [ ] T020 [US1] (Opt-in) Add deterministic-only LLM response caching in api-ms-agent/app/services/azure_openai_chat_service.py
+- [x] T013 [US1] Add safe Cosmos read caching wrappers in api-ms-agent/app/services/cosmos_db_service.py
+- [x] T014 [US1] Add targeted cache invalidation on Cosmos writes in api-ms-agent/app/services/cosmos_db_service.py
+- [x] T015 [US1] Add GET-only outbound HTTP caching in api-ms-agent/app/http_client.py
+- [x] T016 [US1] Apply caching to orchestrator tool calls in api-ms-agent/app/services/orchestrator_agent.py
+- [x] T017 [US1] Apply caching to workflow state reads in api-ms-agent/app/services/cosmos_db_service.py
+- [x] T018 [US1] Add embedding caching in api-ms-agent/app/services/embedding_service.py
+- [x] T019 [US1] (Optional) Add prompt assembly caching in api-ms-agent/app/services/prompt_builder.py
+- [x] T020 [US1] (Opt-in) Add deterministic-only LLM response caching in api-ms-agent/app/services/azure_openai_chat_service.py
 
 ### Tests (required by FR-003)
 
-- [ ] T021 [US1] Integration-style test for Cosmos read caching (mocked) in api-ms-agent/tests/test_cosmos_db_cache.py
-- [ ] T022 [US1] Integration-style test for HTTP GET caching (mocked) in api-ms-agent/tests/test_http_cache.py
+- [x] T021 [US1] Integration-style test for Cosmos read caching (mocked) in api-ms-agent/tests/test_cosmos_db_cache.py
+- [x] T022 [US1] Integration-style test for HTTP GET caching (mocked) in api-ms-agent/tests/test_http_cache.py
 
 **Checkpoint**: US1 complete; caching yields measurable latency improvements on repeat calls.
 

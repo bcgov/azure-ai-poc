@@ -16,7 +16,7 @@ import httpx
 from jsonschema import ValidationError as JsonSchemaValidationError
 from jsonschema import validate as jsonschema_validate
 
-from app.http_client import create_scoped_client
+from app.http_client import cached_get_json, create_scoped_client
 from app.logger import get_logger
 
 logger = get_logger(__name__)
@@ -226,6 +226,10 @@ class MCPWrapper(ABC):
             httpx.HTTPError: If the request fails
         """
         client = await self._get_client()
+
+        if method.upper() == "GET" and json_data is None:
+            # Use shared GET caching for idempotent tool calls.
+            return await cached_get_json(client, path, params=params)
 
         last_exc: Exception | None = None
         for attempt in range(1, self._max_retries + 1):
