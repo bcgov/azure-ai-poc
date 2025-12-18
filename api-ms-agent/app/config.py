@@ -95,6 +95,9 @@ class Settings(BaseSettings):
     cosmos_db_endpoint: str = ""
     cosmos_db_key: str = ""  # Optional if using managed identity
     cosmos_db_database_name: str = "azure-ai-poc"
+    # Optional: when set, use a single container for chat sessions/messages and document metadata.
+    # This matches the Terraform wiring via COSMOS_DB_CONTAINER_NAME.
+    cosmos_db_container_name: str = ""
 
     # Azure AI Search settings - for vector embeddings storage
     azure_search_endpoint: str = ""
