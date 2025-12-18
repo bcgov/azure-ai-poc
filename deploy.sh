@@ -95,6 +95,7 @@ readonly LOG_DIR="${SCRIPT_DIR}/logs"
 readonly DEFAULT_TFVARS="terraform.tfvars"
 readonly TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 readonly LOG_FILE="${LOG_DIR}/deploy_${TIMESTAMP}.log"
+readonly DEFAULT_SUBSCRIPTION_ID="ffc5e617-7f2d-4ddb-8b57-33fc43989a8c"
 
 # Container configuration
 declare -A CONTAINERS=(
@@ -198,6 +199,28 @@ EXAMPLES:
 
 EOF
   exit 0
+}
+
+#
+# Sets the Azure CLI subscription to the default subscription ID
+# Arguments: None
+# Returns: 0 on success, 1 on failure
+#
+set_default_subscription() {
+  log "INFO" "Setting Azure subscription to: $DEFAULT_SUBSCRIPTION_ID"
+  
+  if ! az account set --subscription "$DEFAULT_SUBSCRIPTION_ID" 2>/dev/null; then
+    log "ERROR" "Failed to set Azure subscription to $DEFAULT_SUBSCRIPTION_ID"
+    log "ERROR" "This subscription may not be accessible or may not exist"
+    log "ERROR" "Available subscriptions:"
+    az account list --output table --query "[].{Name:name, SubscriptionId:id, State:state}" 2>/dev/null | while IFS= read -r line; do
+      log "ERROR" "  $line"
+    done
+    return 1
+  fi
+  
+  log "SUCCESS" "Azure subscription set to $DEFAULT_SUBSCRIPTION_ID"
+  return 0
 }
 
 #
@@ -1115,6 +1138,11 @@ main() {
   log "INFO" "Starting Azure Container Infrastructure Deployment"
   log "INFO" "Script version: 1.0.0"
   log "INFO" "Execution timestamp: $TIMESTAMP"
+  
+  # Set default subscription before any Azure operations
+  if ! set_default_subscription; then
+    return 1
+  fi
   
   # Check prerequisites
   if ! check_prerequisites; then

@@ -32,25 +32,16 @@ resource "azurerm_container_app_environment" "main" {
   }
 }
 
-# -----------------------------------------------------------------------------
-# Fix Log Analytics Configuration
-# -----------------------------------------------------------------------------
-# The azurerm_container_app_environment resource doesn't properly set the
-# Log Analytics shared key. Use azapi to patch the configuration.
-resource "azapi_update_resource" "container_app_env_logs" {
-  type        = "Microsoft.App/managedEnvironments@2024-03-01"
-  resource_id = azurerm_container_app_environment.main.id
 
-  body = {
-    properties = {
-      appLogsConfiguration = {
-        destination = "log-analytics"
-        logAnalyticsConfiguration = {
-          customerId = var.log_analytics_workspace_customer_id
-          sharedKey  = var.log_analytics_workspace_key
-        }
-      }
-    }
+# Update Container Apps Environment with Log Analytics shared key using Azure CLI
+resource "null_resource" "container_app_env_logs" {
+  triggers = {
+    env_id       = azurerm_container_app_environment.main.id
+    workspace_id = var.log_analytics_workspace_customer_id
+  }
+
+  provisioner "local-exec" {
+    command = "az containerapp env update --name ${azurerm_container_app_environment.main.name} --resource-group ${var.resource_group_name} --logs-destination log-analytics --logs-workspace-id ${var.log_analytics_workspace_customer_id} --logs-workspace-key ${var.log_analytics_workspace_key}"
   }
 
   depends_on = [azurerm_container_app_environment.main]
