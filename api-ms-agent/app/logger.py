@@ -119,6 +119,29 @@ def setup_logging() -> None:
     # Disable Uvicorn's default access logs (we use our own middleware)
     # This must be done here before uvicorn fully initializes
     uvicorn_access = logging.getLogger("uvicorn.access")
+
+    # Add a targeted filter to suppress noisy access lines for root and health endpoints
+    class _UvicornAccessFilter(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:  # pragma: no cover - trivial
+            try:
+                msg = record.getMessage()
+            except Exception:
+                return True
+            # Suppress lines like: '127.0.0.1:xxxxx - "GET /health HTTP/1.1" 200 123B'
+            if (
+                '"GET / ' in msg
+                or '"GET /"' in msg
+                or "GET /health" in msg
+                or "GET /favicon.ico" in msg
+            ):
+                return False
+            return True
+
+    uvicorn_access.addFilter(_UvicornAccessFilter())
+
+    # Also attach filter to the broader uvicorn logger in case access lines are routed there
+    logging.getLogger("uvicorn").addFilter(_UvicornAccessFilter())
+
     uvicorn_access.handlers = []
     uvicorn_access.propagate = False
     uvicorn_access.disabled = True

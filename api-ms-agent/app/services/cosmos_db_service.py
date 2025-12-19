@@ -117,9 +117,9 @@ class CosmosDbService:
     Uses the async Cosmos DB SDK for non-blocking I/O operations.
     """
 
-    # Container names
-    CHAT_CONTAINER = "chat_history"
-    DOCUMENTS_CONTAINER = "documents"
+    # Legacy container names (used when COSMOS_DB_CONTAINER_NAME isn't provided)
+    _LEGACY_CHAT_CONTAINER = "chat_history"
+    _LEGACY_DOCUMENTS_CONTAINER = "documents"
     WORKFLOWS_CONTAINER = "workflows"
 
     def __init__(self) -> None:
@@ -131,6 +131,7 @@ class CosmosDbService:
         self.workflows_container: ContainerProxy | None = None
         self._initialized = False
         self._credential: DefaultAzureCredential | None = None
+        self._main_container_name: str | None = None
 
     async def _initialize_client(self) -> None:
         """Initialize the Cosmos DB client with managed identity or key authentication."""
@@ -139,6 +140,9 @@ class CosmosDbService:
 
         endpoint = settings.cosmos_db_endpoint
         database_name = settings.cosmos_db_database_name
+        # When set, we use a single container for chat + documents metadata.
+        # This matches the Terraform wiring via COSMOS_DB_CONTAINER_NAME.
+        self._main_container_name = (settings.cosmos_db_container_name or "").strip() or None
 
         if not endpoint or not database_name:
             logger.warning(
@@ -178,8 +182,18 @@ class CosmosDbService:
             await self._ensure_containers_exist()
 
             # Get container clients
-            self.chat_container = self.database.get_container_client(self.CHAT_CONTAINER)
-            self.documents_container = self.database.get_container_client(self.DOCUMENTS_CONTAINER)
+            if self._main_container_name:
+                main = self.database.get_container_client(self._main_container_name)
+                self.chat_container = main
+                self.documents_container = main
+            else:
+                self.chat_container = self.database.get_container_client(
+                    self._LEGACY_CHAT_CONTAINER
+                )
+                self.documents_container = self.database.get_container_client(
+                    self._LEGACY_DOCUMENTS_CONTAINER
+                )
+
             self.workflows_container = self.database.get_container_client(self.WORKFLOWS_CONTAINER)
 
             self._initialized = True
@@ -194,35 +208,69 @@ class CosmosDbService:
         if not self.database:
             return
 
+        # If a main container is configured, ensure just that one (plus workflows).
+        if self._main_container_name:
+            try:
+                await self.database.create_container_if_not_exists(
+                    id=self._main_container_name,
+                    partition_key=PartitionKey(path="/user_id"),
+                    offer_throughput=400,
+                )
+                logger.info("container_ensured", container=self._main_container_name)
+            except CosmosHttpResponseError as e:
+                if e.status_code != 409:  # 409 = already exists
+                    logger.warning(
+                        "container_create_warning",
+                        container=self._main_container_name,
+                        error=str(e),
+                    )
+
+            # Ensure workflows container for agent framework state persistence
+            try:
+                await self.database.create_container_if_not_exists(
+                    id=self.WORKFLOWS_CONTAINER,
+                    partition_key=PartitionKey(path="/user_id"),
+                    offer_throughput=400,
+                )
+                logger.info("container_ensured", container=self.WORKFLOWS_CONTAINER)
+            except CosmosHttpResponseError as e:
+                if e.status_code != 409:  # 409 = already exists
+                    logger.warning(
+                        "container_create_warning",
+                        container=self.WORKFLOWS_CONTAINER,
+                        error=str(e),
+                    )
+            return
+
         # Create chat_history container if it doesn't exist
         try:
             await self.database.create_container_if_not_exists(
-                id=self.CHAT_CONTAINER,
+                id=self._LEGACY_CHAT_CONTAINER,
                 partition_key=PartitionKey(path="/user_id"),
                 offer_throughput=400,
             )
-            logger.info("container_ensured", container=self.CHAT_CONTAINER)
+            logger.info("container_ensured", container=self._LEGACY_CHAT_CONTAINER)
         except CosmosHttpResponseError as e:
             if e.status_code != 409:  # 409 = already exists
                 logger.warning(
                     "container_create_warning",
-                    container=self.CHAT_CONTAINER,
+                    container=self._LEGACY_CHAT_CONTAINER,
                     error=str(e),
                 )
 
         # Create documents container for metadata only (embeddings in Azure AI Search)
         try:
             await self.database.create_container_if_not_exists(
-                id=self.DOCUMENTS_CONTAINER,
+                id=self._LEGACY_DOCUMENTS_CONTAINER,
                 partition_key=PartitionKey(path="/user_id"),
                 offer_throughput=400,
             )
-            logger.info("container_ensured", container=self.DOCUMENTS_CONTAINER)
+            logger.info("container_ensured", container=self._LEGACY_DOCUMENTS_CONTAINER)
         except CosmosHttpResponseError as e:
             if e.status_code != 409:  # 409 = already exists
                 logger.warning(
                     "container_create_warning",
-                    container=self.DOCUMENTS_CONTAINER,
+                    container=self._LEGACY_DOCUMENTS_CONTAINER,
                     error=str(e),
                 )
 
