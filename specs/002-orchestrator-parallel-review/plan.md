@@ -6,14 +6,14 @@
 
 ## Summary
 
-Upgrade the orchestrator agent in `api-ms-agent` to support concurrent task execution using Microsoft Agent Framework SDK's async primitives, with a specialized Review Agent that validates orchestration outputs, redacts sensitive information, and applies ethical AI safeguards. The Review Agent will be reusable across the application for all AI responses.
+Upgrade the orchestrator agent in `api-ms-agent` to support concurrent task execution using **Microsoft Agent Framework's ConcurrentBuilder** (NO custom asyncio code), with a specialized Review Agent that validates orchestration outputs, redacts sensitive information, and applies ethical AI safeguards. The Review Agent will be reusable across the application for all AI responses.
 
 **Key Design Decisions**:
-- Leverage **Microsoft Agent Framework SDK** exclusively for orchestration, task execution, and review agent logic
-- Use **asyncio** for parallel task execution (built into Python 3.13)
-- Implement Review Agent as a **specialized Tool/Agent** in MS Agent Framework with configurable validation rules
+- Leverage **Microsoft Agent Framework ConcurrentBuilder** exclusively for parallel orchestration (ZERO custom asyncio code)
+- Implement Review Agent as a **specialized Agent with Tools** in MS Agent Framework with configurable validation rules
 - Reuse Review Agent across the application via dependency injection
 - Store review criteria in **Azure Cosmos DB** for runtime configurability without code changes
+- Custom aggregator callback for result consolidation (framework handles all parallelism)
 
 ---
 
