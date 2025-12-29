@@ -110,9 +110,9 @@ api-ms-agent/
 │   │   └── orchestrator/                      # NEW MODULE: Phase 1
 │   │       ├── __init__.py
 │   │       ├── models.py                      # Pydantic models for orchestration
-│   │       ├── executor.py                    # Parallel task executor (MS Agent Framework)
+│   │       ├── workflow_builder.py            # ConcurrentBuilder orchestration (MS Agent Framework)
 │   │       ├── review_agent.py                # Review agent using MS Agent Framework
-│   │       └── coordinator.py                 # Orchestration coordinator (main logic)
+│   │       └── orchestration_handler.py       # Orchestration request handler (main logic)
 │   │
 │   ├── services/
 │   │   ├── orchestration_service.py           # [MODIFY] Public API service
@@ -150,16 +150,16 @@ api-ms-agent/
 └── [other files unchanged]
 ```
 
-**Structure Decision**: Modular extension to existing `api-ms-agent` codebase. New `app/core/orchestrator/` module encapsulates all parallel execution logic using MS Agent Framework SDK. Review Agent is implemented as a standalone agent that can be injected as a dependency. Separation of concerns: executor (task running), coordinator (workflow management), review_agent (validation + redaction).
+**Structure Decision**: Modular extension to existing `api-ms-agent` codebase. New `app/core/orchestrator/` module encapsulates all parallel execution logic using **MS Agent Framework's `ConcurrentBuilder`** (NO custom asyncio code). Review Agent is implemented as a standalone agent that can be injected as a dependency. Separation of concerns: workflow_builder (orchestration), review_agent (validation + redaction), orchestration_handler (API request processing).
 
 ---
 
 ## Complexity Tracking
 
 No violations of constitution principles. Design is intentionally simple:
-- ✅ No custom async orchestration code (use MS Agent Framework)
-- ✅ No custom task scheduling (use MS Agent Framework async primitives)
-- ✅ No custom agent logic (MS Agent Framework agents for orchestration + review)
+- ✅ No custom async orchestration code (use MS Agent Framework ConcurrentBuilder)
+- ✅ No custom task scheduling (MS Agent Framework handles parallel execution natively)
+- ✅ No custom agent logic (MS Agent Framework agents + tools for orchestration + review)
 - ✅ Configurable review criteria via Cosmos DB (no code changes needed)
 
 ---
@@ -167,20 +167,22 @@ No violations of constitution principles. Design is intentionally simple:
 ## Phase 0: Research & Technical Decisions
 
 **Output**: `research.md` with decisions on:
-1. Microsoft Agent Framework SDK async patterns for parallel execution
-2. Review agent design using MS Agent Framework tools/agents
-3. Sensitive data detection patterns for PII redaction
-4. Cosmos DB schema for review criteria and orchestration metadata
-5. Integration with existing `api-ms-agent` architecture
+1. MS Agent Framework ConcurrentBuilder patterns and integration with existing agents
+2. Custom aggregator callback design for result consolidation
+3. Review agent design using MS Agent Framework Agent with tool definitions
+4. Sensitive data detection patterns for PII redaction
+5. Cosmos DB schema for review criteria and orchestration metadata
 
 **Research Tasks**:
-- [ ] Document MS Agent Framework SDK async execution patterns and best practices
-- [ ] Design review agent as a MS Agent Framework Agent with tools (validation tools, redaction tools)
+- [ ] Study MS Agent Framework ConcurrentBuilder for parallel agent execution (link: https://learn.microsoft.com/en-us/agent-framework/user-guide/workflows/orchestrations/concurrent)
+- [ ] Design custom aggregator callbacks for orchestration result consolidation
+- [ ] Design review agent as MS Agent Framework Agent with validation/redaction tools
 - [ ] Identify PII/sensitive data patterns (SSN, credit card, health info, personal identifiers)
 - [ ] Design Cosmos DB collections for review criteria (configurable without code)
-- [ ] Verify compatibility with existing authentication, logging, observability in api-ms-agent
+- [ ] Verify ConcurrentBuilder timeout handling strategy (task isolation, partial results)
+- [ ] Map existing api-ms-agent agents to orchestration participants
 
-**Gate**: All research questions answered, technical approach aligned with MS Agent Framework patterns
+**Gate**: All research questions answered, ConcurrentBuilder patterns documented, technical approach validated
 
 ---
 
@@ -448,21 +450,22 @@ Run `.specify/scripts/powershell/update-agent-context.ps1 -AgentType copilot` to
 - [ ] Set up Cosmos DB collections for review criteria and metadata
 - [ ] Implement review criteria caching service
 
-### Phase 2.2: Core Orchestrator (Blocking for Phase 2.3)
-- [ ] Implement TaskExecutor using MS Agent Framework async agents
-- [ ] Implement dependency resolution and task ordering
-- [ ] Implement parallel task execution with asyncio
-- [ ] Implement timeout handling and task isolation
+### Phase 2.2: Core Orchestration Workflow (Blocking for Phase 2.3)
+- [ ] Implement OrchestrationWorkflow using MS Agent Framework ConcurrentBuilder
+- [ ] Implement custom aggregator callback for result consolidation
+- [ ] Implement workflow builder with agent registry integration
+- [ ] Add event streaming for progress monitoring
+- [ ] Test parallel agent execution via ConcurrentBuilder
 
 ### Phase 2.3: Review Agent (Blocking for Phase 2.4)
-- [ ] Implement ReviewAgent using MS Agent Framework agents/tools
-- [ ] Implement sensitive data detection and redaction tools
+- [ ] Implement ReviewAgent using MS Agent Framework Agent
 - [ ] Implement validation tools (sections, consistency, thresholds)
+- [ ] Implement sensitive data detection and redaction tools
 - [ ] Implement ethical AI safeguards tools (bias, discrimination, harm checks)
-- [ ] Test review agent across sample responses
+- [ ] Test review agent across sample orchestration results
 
 ### Phase 2.4: Integration & API
-- [ ] Create orchestration service (orchestration_service.py)
+- [ ] Create orchestration handler (orchestration_handler.py)
 - [ ] Create REST endpoints (routers/orchestration.py)
 - [ ] Integrate with existing auth and multi-tenancy
 - [ ] Integration tests for complete workflows
@@ -475,178 +478,271 @@ Run `.specify/scripts/powershell/update-agent-context.ps1 -AgentType copilot` to
 
 ---
 
-## Implementation Approach: Microsoft Agent Framework SDK Only
+## Implementation Approach: Microsoft Agent Framework ConcurrentBuilder
 
-### Why MS Agent Framework for Orchestration?
+### Why MS Agent Framework ConcurrentBuilder?
 
-The Microsoft Agent Framework SDK (v1.0.0b251120+) provides:
-- ✅ **Async Task Execution**: Native asyncio support for parallel task running
-- ✅ **Agent Model**: Agents can represent orchestration tasks, coordinators, and the review agent
-- ✅ **Tool System**: Tools for validation, redaction, and policy checks
-- ✅ **State Management**: Built-in state for tracking orchestration progress
-- ✅ **Event Model**: Event streaming for observability and progress updates
-- ✅ **No Custom Code**: All orchestration logic via framework primitives
+The Microsoft Agent Framework provides **`ConcurrentBuilder`** for parallel orchestration:
+- ✅ **Native Parallel Execution**: Multiple agents work on tasks simultaneously 
+- ✅ **Result Aggregation**: Built-in result collection and aggregation
+- ✅ **No Custom Code**: Framework handles all concurrency logic
+- ✅ **Event Streaming**: Progress events via `run_stream()` for observability
+- ✅ **Custom Aggregator Support**: Process results with custom logic
+- ✅ **Dependency Injection**: Agents injected as participants
 
-### Core Components (No Custom Code)
+### Core Components (Zero Custom Parallelism Code)
 
-**1. TaskExecutor** (using MS Agent Framework agents)
+**1. Orchestration Workflow** (using MS Agent Framework ConcurrentBuilder)
 ```python
-# Pseudo-code: actual implementation in orchestrator/executor.py
+# Pseudo-code: actual implementation in orchestrator/workflow_builder.py
 
-class TaskExecutor:
-    """Executes tasks using MS Agent Framework agents"""
+from agent_framework import ConcurrentBuilder, ChatMessage, WorkflowOutputEvent
+from agent_framework.azure import AzureChatClient
+
+class OrchestrationWorkflow:
+    """Builds concurrent workflows using MS Agent Framework ConcurrentBuilder"""
     
-    async def execute_task(self, task: Task) -> TaskResult:
-        # Load MS Agent Framework agent by name
-        agent = await self.agent_registry.get_agent(task.agent_name)
-        
-        # Execute agent with timeout
-        try:
-            result = await asyncio.wait_for(
-                agent.run(task.input_params),
-                timeout=task.timeout
-            )
-            return TaskResult(status="SUCCESS", output=result)
-        except asyncio.TimeoutError:
-            return TaskResult(status="TIMEOUT", error="Task exceeded timeout")
-        except Exception as e:
-            return TaskResult(status="FAILED", error=str(e))
+    def __init__(self, chat_client: AzureChatClient, agent_registry: AgentRegistry):
+        self.chat_client = chat_client
+        self.agent_registry = agent_registry
     
-    async def execute_parallel(
-        self, 
-        tasks: List[Task],
-        dependencies: Dict[str, List[str]]
-    ) -> Dict[str, TaskResult]:
-        """Execute tasks respecting dependency graph"""
-        results = {}
-        pending = set(t.task_id for t in tasks)
+    async def build_and_run(
+        self,
+        request: OrchestrationRequest,
+        aggregator_callback: Callable = None
+    ) -> WorkflowOutputEvent:
+        """
+        Build concurrent workflow from request and execute
+        MS Agent Framework handles all parallelism - NO custom asyncio code
+        """
         
-        while pending:
-            # Find tasks with no unmet dependencies
-            ready = [
-                t for t in tasks 
-                if t.task_id in pending 
-                and all(dep in results for dep in dependencies.get(t.task_id, []))
-            ]
-            
-            # Execute ready tasks in parallel
-            task_futures = [
-                self.execute_task(t) 
-                for t in ready
-            ]
-            
-            # Collect results as they complete
-            for task, future in zip(ready, asyncio.as_completed(task_futures)):
-                results[task.task_id] = await future
-                pending.discard(task.task_id)
+        # Get agents for each task from registry
+        agents = []
+        for task in request.tasks:
+            agent = await self.agent_registry.get_agent(task.agent_name)
+            agents.append(agent)
         
-        return results
+        # Build workflow using ConcurrentBuilder (handles all parallelism)
+        workflow_builder = ConcurrentBuilder().participants(agents)
+        
+        # Add custom aggregator if provided (e.g., for result synthesis)
+        if aggregator_callback:
+            workflow_builder = workflow_builder.with_aggregator(aggregator_callback)
+        
+        workflow = workflow_builder.build()
+        
+        # Run workflow with streaming (agents run in parallel automatically)
+        # ConcurrentBuilder manages all concurrent execution
+        output_evt: WorkflowOutputEvent | None = None
+        async for event in workflow.run_stream(self._format_prompt(request)):
+            if isinstance(event, WorkflowOutputEvent):
+                output_evt = event
+                # Event streaming enables progress monitoring
+        
+        return output_evt
+    
+    def _format_prompt(self, request: OrchestrationRequest) -> str:
+        """Format orchestration request as prompt for agents"""
+        return f"""
+        Process this request with your expertise:
+        
+        {json.dumps(request.to_dict())}
+        
+        Provide your analysis and recommendations.
+        """
 ```
 
-**2. ReviewAgent** (using MS Agent Framework with tools)
+**2. ReviewAgent** (using MS Agent Framework Agent with Tools)
 ```python
 # Pseudo-code: actual implementation in orchestrator/review_agent.py
 
+from agent_framework import ChatAgent
+from agent_framework.azure import AzureChatClient
+
 class ReviewAgent:
-    """Validates and redacts orchestration results"""
+    """Review agent with validation and redaction tools"""
     
-    def __init__(self, criteria_service, model_client):
+    def __init__(self, chat_client: AzureChatClient, criteria_service):
+        self.chat_client = chat_client
         self.criteria_service = criteria_service
-        self.model_client = model_client
         
-        # Define tools for validation and redaction
-        self.tools = [
-            self._make_tool("validate_required_sections", self.validate_required_sections),
-            self._make_tool("check_consistency", self.check_consistency),
-            self._make_tool("validate_quality", self.validate_quality),
-            self._make_tool("redact_sensitive_data", self.redact_sensitive_data),
-            self._make_tool("check_ethical_safeguards", self.check_ethical_safeguards),
-        ]
+        # Create review agent with specialized instructions
+        self.agent = chat_client.create_agent(
+            name="review_agent",
+            instructions="""
+            You are a quality assurance and compliance reviewer for AI-generated responses.
+            
+            Your responsibilities:
+            1. Validate that response contains all required sections
+            2. Check for internal consistency and contradictions
+            3. Verify response meets quality thresholds
+            4. Identify and redact sensitive personal information (PII, health data, etc.)
+            5. Apply ethical safeguards (no bias, discrimination, harmful content)
+            
+            Use the provided tools to perform your review systematically.
+            Provide clear, actionable feedback for any issues found.
+            """
+        )
+        
+        # Register tools (called by agent as needed)
+        self.tools = {
+            "validate_sections": self.validate_sections,
+            "check_consistency": self.check_consistency,
+            "validate_quality": self.validate_quality,
+            "redact_pii": self.redact_pii,
+            "check_ethical": self.check_ethical,
+        }
     
     async def review(
         self,
-        result: Dict[str, Any],
+        orchestration_result: Dict[str, Any],
         criteria_id: str
     ) -> ReviewDecision:
-        """Run review agent on orchestration result"""
+        """
+        Run review agent on orchestration result
+        MS Agent Framework agent invokes tools as needed
+        """
         
         criteria = await self.criteria_service.get_criteria(criteria_id)
         
-        # Create MS Agent Framework agent with tools
-        review_agent = Agent(
-            name="review_agent",
-            tools=self.tools,
-            model=self.model_client
-        )
+        # Prepare context for review agent
+        review_context = f"""
+        Orchestration Result to Review:
+        {json.dumps(orchestration_result, indent=2)}
         
-        # Prompt agent to review result using tools
-        prompt = f"""
-        Review this orchestration result against criteria.
+        Validation Criteria:
+        - Required Sections: {criteria.required_sections}
+        - Quality Thresholds: {criteria.quality_thresholds}
+        - Policy Rules: {criteria.policy_rules}
         
-        Result: {json.dumps(result)}
-        
-        Required sections: {criteria.required_sections}
-        Quality thresholds: {criteria.quality_thresholds}
-        Policy rules: {criteria.policy_rules}
-        
-        Use the following tools in this order:
-        1. validate_required_sections
-        2. check_consistency
-        3. validate_quality
-        4. check_ethical_safeguards
-        5. redact_sensitive_data
-        
-        Provide your final decision: APPROVED or REJECTED
+        Please review systematically using available tools.
         """
         
-        response = await review_agent.run(prompt)
+        # Agent calls tools as needed - framework handles orchestration
+        from agent_framework import ChatMessage, Role
+        response = await self.agent.run([
+            ChatMessage(Role.USER, text=review_context)
+        ])
         
-        # Parse response and create ReviewDecision
-        return ReviewDecision(
-            status=response.decision,  # APPROVED or REJECTED
-            issues_found=response.issues,
-            redacted_result=response.redacted_data,
-            feedback=response.feedback
-        )
+        # Parse agent response and create ReviewDecision
+        return self._parse_review_response(response, criteria)
+    
+    async def validate_sections(self, result: Dict, required: List[str]) -> Dict:
+        """Tool: Validate required sections are present"""
+        missing = [s for s in required if s not in result]
+        return {"valid": len(missing) == 0, "missing": missing}
+    
+    async def check_consistency(self, result: Dict) -> Dict:
+        """Tool: Check for contradictions"""
+        # LLM-based consistency checking via tool call
+        return {"consistent": True, "issues": []}
+    
+    async def validate_quality(self, result: Dict, thresholds: Dict) -> Dict:
+        """Tool: Validate quality metrics against thresholds"""
+        return {"meets_threshold": True, "score": 0.95}
+    
+    async def redact_pii(self, result: Dict) -> Dict:
+        """Tool: Redact personally identifiable information"""
+        # PII patterns: SSN, credit card, health info, personal identifiers
+        return {"redacted": result, "redactions_applied": 5}
+    
+    async def check_ethical(self, result: Dict) -> Dict:
+        """Tool: Check for ethical AI violations"""
+        return {"ethical": True, "issues": []}
+    
+    def _parse_review_response(self, response, criteria) -> ReviewDecision:
+        """Parse agent response into ReviewDecision object"""
+        # Extract decision, issues, feedback from agent messages
+        return ReviewDecision(...)
 ```
 
-**3. Orchestrator Coordinator** (uses MS Agent Framework agents + executor)
+**3. Orchestration Handler** (uses workflow + review agent)
 ```python
-# Pseudo-code: actual implementation in orchestrator/coordinator.py
+# Pseudo-code: actual implementation in orchestrator/orchestration_handler.py
 
-class OrchestrationCoordinator:
-    """Orchestrates parallel task execution with review"""
+class OrchestrationHandler:
+    """Handles orchestration requests end-to-end"""
     
-    def __init__(self, executor: TaskExecutor, review_agent: ReviewAgent):
-        self.executor = executor
+    def __init__(
+        self,
+        workflow_builder: OrchestrationWorkflow,
+        review_agent: ReviewAgent
+    ):
+        self.workflow_builder = workflow_builder
         self.review_agent = review_agent
     
-    async def orchestrate(
+    async def handle_orchestration(
         self,
         request: OrchestrationRequest
     ) -> OrchestrationResult:
-        """Execute orchestration with parallel tasks and review"""
+        """
+        Orchestrate parallel execution with review
         
-        # Phase 1: Execute tasks in parallel
-        task_results = await self.executor.execute_parallel(
-            request.tasks,
-            request.dependencies
+        Execution flow:
+        1. ConcurrentBuilder runs all tasks in parallel (MS Agent Framework)
+        2. Results are aggregated by framework
+        3. Review agent validates and redacts combined result
+        """
+        
+        # Step 1: Run parallel tasks via ConcurrentBuilder
+        # All agents execute concurrently - NO custom parallelism code
+        orchestration_output = await self.workflow_builder.build_and_run(
+            request,
+            aggregator_callback=self._aggregate_results  # Custom aggregator
         )
         
-        # Phase 2: Combine results
-        combined = self._combine_results(task_results)
+        combined_result = self._extract_result(orchestration_output)
         
-        # Phase 3: Run review agent
+        # Step 2: Review the combined result
         review_decision = await self.review_agent.review(
-            combined,
+            combined_result,
             request.review_criteria_id
         )
         
+        # Step 3: Prepare final result
         return OrchestrationResult(
-            task_results=task_results,
+            orchestration_id=str(uuid4()),
+            task_results=self._extract_task_results(orchestration_output),
             review_decision=review_decision,
-            total_execution_time_ms=...
+            total_execution_time_ms=self._calculate_execution_time()
         )
+    
+    async def _aggregate_results(self, results: List[Any]) -> Dict:
+        """Custom aggregator callback for ConcurrentBuilder"""
+        # MS Agent Framework calls this to aggregate results
+        aggregated = {}
+        for result in results:
+            executor_id = getattr(result, "executor_id", "unknown")
+            aggregated[executor_id] = self._extract_content(result)
+        return aggregated
+```
+
+---
+
+### Key Difference: Zero Custom Parallelism Code
+
+**Before (❌ Custom asyncio code)**:
+```python
+# OLD: Custom code for parallelism
+async def execute_parallel(tasks, dependencies):
+    results = {}
+    pending = set(...)
+    while pending:
+        ready = [t for t in tasks if dependencies_met(t)]
+        futures = [execute_task(t) for t in ready]  # ← Custom asyncio logic
+        for task, future in zip(ready, asyncio.as_completed(futures)):  # ← Manual concurrency
+            results[task.task_id] = await future
+            pending.discard(task.task_id)
+    return results
+```
+
+**After (✅ MS Agent Framework ConcurrentBuilder)**:
+```python
+# NEW: MS Agent Framework handles ALL parallelism
+workflow = ConcurrentBuilder().participants(agents).build()
+async for event in workflow.run_stream(prompt):  # ← Framework runs agents in parallel
+    if isinstance(event, WorkflowOutputEvent):
+        results = event.data  # ← Framework aggregates results automatically
 ```
 
 ---
