@@ -1,30 +1,8 @@
-<!-- 
-SYNC IMPACT REPORT
-==================
-Version: 1.0.0 (new constitution - initial)
-Ratified: 2025-10-28
-Status: Complete
-
-CHANGES:
-- Created 5 core principles: Code Quality, Testing Standards, Type Safety, User Experience, Performance
-- Added Security & Azure Best Practices section
-- Added Development Workflow & Quality Gates section
-- Established governance procedures and amendment rules
-
-TEMPLATES TO UPDATE:
-- ✅ .specify/templates/spec-template.md (aligned with principles)
-- ✅ .specify/templates/tasks-template.md (aligned with testing principle)
-- ✅ .specify/templates/plan-template.md (performance goals section ready)
-
-FOLLOW-UP TODOS:
-- None - constitution is complete and binding
--->
-
 # Azure AI POC Constitution
 
 **Project Name**: Azure AI Proof of Concept  
-**Technology Stack**: Python 3.11 (FastAPI), React 19 (TypeScript), Azure Cloud Services  
-**Primary Purpose**: Document intelligence and conversational AI platform with multi-tenant support
+**Technology Stack**: Python 3.13 (FastAPI), React 19 (TypeScript), Azure Cloud Services  
+**Primary Purpose**: Agentic Workflows, Document intelligence and conversational AI platform with multi-tenant support
 
 ---
 
@@ -41,6 +19,10 @@ FOLLOW-UP TODOS:
 - Type annotations MUST be complete in all modules (mypy: `disallow_untyped_defs = true`)
 - Imports MUST be sorted (isort via ruff)
 - All code MUST follow BC Government design system standards (frontend)
+- NO deprecated sdk or interfaces
+- Never add secrets, credentials, or sensitive data to the repository
+- use 2 spaces for indentation
+- always use LF line endings
 
 **Rationale**: Type safety and consistent code style prevent runtime errors, improve maintainability, and reduce cognitive load during code reviews. Strict mypy enforcement catches classes of bugs at compile time.
 

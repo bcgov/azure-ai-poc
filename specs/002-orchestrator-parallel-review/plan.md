@@ -6,11 +6,11 @@
 
 ## Summary
 
-Upgrade the orchestrator agent in `api-ms-agent` to support concurrent task execution using **Microsoft Agent Framework's ConcurrentBuilder** (NO custom asyncio code), with a specialized Review Agent that validates orchestration outputs, redacts sensitive information, and applies ethical AI safeguards. The Review Agent will be reusable across the application for all AI responses.
+Update the existing orchestrator agent in `api-ms-agent` (no new top-level folder structure introduced) to support concurrent task execution using **Microsoft Agent Framework's ConcurrentBuilder** (NO custom asyncio code), with a specialized Review Agent that validates orchestration outputs, redacts sensitive information, and applies ethical AI safeguards. The Review Agent will be reusable across the application for all AI responses.
 
 **Key Design Decisions**:
 - Leverage **Microsoft Agent Framework ConcurrentBuilder** exclusively for parallel orchestration (ZERO custom asyncio code)
-- Implement Review Agent as a **specialized Agent with Tools** in MS Agent Framework with configurable validation rules
+- Implement Review Agent as a **service in the existing `app/services/` folder**, following the same structural pattern as the orchestrator agent service (specialized Agent with Tools + configurable validation rules)
 - Reuse Review Agent across the application via dependency injection
 - Store review criteria in **Azure Cosmos DB** for runtime configurability without code changes
 - Custom aggregator callback for result consolidation (framework handles all parallelism)
@@ -35,7 +35,7 @@ Upgrade the orchestrator agent in `api-ms-agent` to support concurrent task exec
 - Review agent decisions and feedback (ReviewDecisions collection)
 
 **Testing**: pytest + pytest-asyncio with:
-- Unit tests for orchestrator logic (>=75% coverage for `app/core/orchestrator/`)
+- Unit tests for orchestrator/review services (>=75% coverage for orchestrator + review service modules)
 - Integration tests for parallel task execution
 - Contract tests for orchestration API endpoints
 - Review agent validation tests
@@ -105,17 +105,9 @@ specs/002-orchestrator-parallel-review/
 ```text
 api-ms-agent/
 ├── app/
-│   ├── core/
-│   │   ├── __init__.py
-│   │   └── orchestrator/                      # NEW MODULE: Phase 1
-│   │       ├── __init__.py
-│   │       ├── models.py                      # Pydantic models for orchestration
-│   │       ├── workflow_builder.py            # ConcurrentBuilder orchestration (MS Agent Framework)
-│   │       ├── review_agent.py                # Review agent using MS Agent Framework
-│   │       └── orchestration_handler.py       # Orchestration request handler (main logic)
-│   │
 │   ├── services/
-│   │   ├── orchestration_service.py           # [MODIFY] Public API service
+│   │   ├── orchestrator_agent.py              # [MODIFY] Existing orchestrator agent (updated)
+│   │   ├── review_agent.py                    # [NEW] Review agent service (same structure as orchestrator)
 │   │   ├── review_criteria_service.py         # [NEW] Load/cache review criteria from Cosmos DB
 │   │   └── sensitive_data_detector.py         # [NEW] PII/sensitive data patterns
 │   │
@@ -131,11 +123,10 @@ api-ms-agent/
 │
 ├── tests/
 │   ├── unit/
-│   │   └── orchestrator/                      # [NEW] Unit tests for orchestrator
-│   │       ├── test_executor.py
+│   │   └── services/                          # [NEW] Unit tests for orchestrator + review services
+│   │       ├── test_orchestrator_agent.py
 │   │       ├── test_review_agent.py
-│   │       ├── test_coordinator.py
-│   │       └── test_models.py
+│   │       └── test_sensitive_data_detector.py
 │   │
 │   ├── integration/
 │   │   └── test_orchestration_flow.py         # [NEW] End-to-end integration tests
@@ -150,7 +141,7 @@ api-ms-agent/
 └── [other files unchanged]
 ```
 
-**Structure Decision**: Modular extension to existing `api-ms-agent` codebase. New `app/core/orchestrator/` module encapsulates all parallel execution logic using **MS Agent Framework's `ConcurrentBuilder`** (NO custom asyncio code). Review Agent is implemented as a standalone agent that can be injected as a dependency. Separation of concerns: workflow_builder (orchestration), review_agent (validation + redaction), orchestration_handler (API request processing).
+**Structure Decision**: No new folder structure is introduced. This feature is implemented by updating the existing orchestrator agent service and adding a Review Agent as another service under `app/services/`, following the same service structure/patterns as the orchestrator. Parallel execution is provided via **MS Agent Framework's `ConcurrentBuilder`** (NO custom asyncio code), with review/validation handled by the Review Agent service.
 
 ---
 
@@ -434,7 +425,7 @@ async with httpx.AsyncClient() as client:
 ### 1.4 Update Agent Context
 
 Run `.specify/scripts/powershell/update-agent-context.ps1 -AgentType copilot` to document:
-- New `app/core/orchestrator/` module with MS Agent Framework usage
+- No new folder structure introduced (existing orchestrator agent service updated)
 - Review Agent pattern for sensitive data redaction
 - Reusable review agent across application
 
@@ -445,27 +436,27 @@ Run `.specify/scripts/powershell/update-agent-context.ps1 -AgentType copilot` to
 **Phase 2 will be generated by `/speckit.tasks` command**
 
 ### Phase 2.1: Foundation & Setup (Blocking)
-- [ ] Create orchestrator module structure
-- [ ] Define Pydantic models for orchestration requests/responses
+- [ ] Confirm no new folder structure is required (update existing services only)
+- [ ] Define Pydantic models for orchestration requests/responses (place in existing `app/models/` or existing model modules)
 - [ ] Set up Cosmos DB collections for review criteria and metadata
 - [ ] Implement review criteria caching service
 
 ### Phase 2.2: Core Orchestration Workflow (Blocking for Phase 2.3)
-- [ ] Implement OrchestrationWorkflow using MS Agent Framework ConcurrentBuilder
+- [ ] Update existing orchestrator agent service to use MS Agent Framework ConcurrentBuilder
 - [ ] Implement custom aggregator callback for result consolidation
-- [ ] Implement workflow builder with agent registry integration
+- [ ] Implement workflow builder logic within the existing service structure (no new module tree)
 - [ ] Add event streaming for progress monitoring
 - [ ] Test parallel agent execution via ConcurrentBuilder
 
 ### Phase 2.3: Review Agent (Blocking for Phase 2.4)
-- [ ] Implement ReviewAgent using MS Agent Framework Agent
+- [ ] Implement ReviewAgent as a service under `app/services/` (same structural pattern as orchestrator agent)
 - [ ] Implement validation tools (sections, consistency, thresholds)
 - [ ] Implement sensitive data detection and redaction tools
 - [ ] Implement ethical AI safeguards tools (bias, discrimination, harm checks)
 - [ ] Test review agent across sample orchestration results
 
 ### Phase 2.4: Integration & API
-- [ ] Create orchestration handler (orchestration_handler.py)
+- [ ] Wire orchestration flow through existing services (no new handler module); router calls orchestrator agent service
 - [ ] Create REST endpoints (routers/orchestration.py)
 - [ ] Integrate with existing auth and multi-tenancy
 - [ ] Integration tests for complete workflows
@@ -494,7 +485,7 @@ The Microsoft Agent Framework provides **`ConcurrentBuilder`** for parallel orch
 
 **1. Orchestration Workflow** (using MS Agent Framework ConcurrentBuilder)
 ```python
-# Pseudo-code: actual implementation in orchestrator/workflow_builder.py
+# Pseudo-code: actual implementation in app/services/orchestrator_agent.py (no new module tree)
 
 from agent_framework import ConcurrentBuilder, ChatMessage, WorkflowOutputEvent
 from agent_framework.azure import AzureChatClient
@@ -554,7 +545,7 @@ class OrchestrationWorkflow:
 
 **2. ReviewAgent** (using MS Agent Framework Agent with Tools)
 ```python
-# Pseudo-code: actual implementation in orchestrator/review_agent.py
+# Pseudo-code: actual implementation in app/services/review_agent.py
 
 from agent_framework import ChatAgent
 from agent_framework.azure import AzureChatClient
@@ -658,7 +649,7 @@ class ReviewAgent:
 
 **3. Orchestration Handler** (uses workflow + review agent)
 ```python
-# Pseudo-code: actual implementation in orchestrator/orchestration_handler.py
+# Pseudo-code: actual implementation in app/services/orchestrator_agent.py (service method called from router)
 
 class OrchestrationHandler:
     """Handles orchestration requests end-to-end"""
