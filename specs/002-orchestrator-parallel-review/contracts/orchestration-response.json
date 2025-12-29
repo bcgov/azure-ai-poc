@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/orchestration-response.json",
+  "title": "OrchestrationResponse",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["orchestration_id", "tenant_id", "task_results", "review_decision"],
+  "properties": {
+    "orchestration_id": { "type": "string", "format": "uuid" },
+    "tenant_id": { "type": "string" },
+    "request_id": { "type": "string", "format": "uuid" },
+    "task_results": {
+      "type": "object",
+      "description": "Map of task_id -> TaskResult",
+      "additionalProperties": { "$ref": "#/$defs/TaskResult" }
+    },
+    "aggregated_result": {
+      "description": "Combined output after aggregation and review redactions",
+      "type": ["object", "string", "array", "number", "boolean", "null"]
+    },
+    "review_decision": { "$ref": "#/$defs/ReviewDecision" },
+    "total_execution_time_ms": { "type": "number", "minimum": 0 }
+  },
+  "$defs": {
+    "TaskResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id", "status"],
+      "properties": {
+        "task_id": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": ["PENDING", "RUNNING", "SUCCESS", "FAILED", "TIMEOUT"]
+        },
+        "output": { "type": ["object", "string", "array", "number", "boolean", "null"] },
+        "error": { "type": ["string", "null"] },
+        "started_at": { "type": ["string", "null"], "format": "date-time" },
+        "completed_at": { "type": ["string", "null"], "format": "date-time" },
+        "execution_time_ms": { "type": "number", "minimum": 0 },
+        "retry_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "ReviewDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approved", "feedback"],
+      "properties": {
+        "decision_id": { "type": "string" },
+        "criteria_id": { "type": ["string", "null"] },
+        "approved": { "type": "boolean" },
+        "feedback": { "type": "array", "items": { "type": "string" } },
+        "redactions_applied": { "type": "integer", "minimum": 0 },
+        "reject_action": { "type": ["string", "null"], "enum": ["retry", "escalate", "error", null] }
+      }
+    }
+  }
+}

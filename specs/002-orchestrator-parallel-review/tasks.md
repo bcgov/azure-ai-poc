@@ -20,13 +20,13 @@ description: "Actionable task list for 002-orchestrator-parallel-review"
 
 ## Phase 1: Setup (Shared Documentation & Contracts)
 
-- [ ] T001 [P] Create research notes scaffold in specs/002-orchestrator-parallel-review/research.md
-- [ ] T002 [P] Create data model doc scaffold in specs/002-orchestrator-parallel-review/data-model.md
-- [ ] T003 [P] Create developer quickstart with local run + test steps in specs/002-orchestrator-parallel-review/quickstart.md
-- [ ] T004 [P] Add request schema contract in specs/002-orchestrator-parallel-review/contracts/orchestration-request.json
-- [ ] T005 [P] Add response schema contract in specs/002-orchestrator-parallel-review/contracts/orchestration-response.json
-- [ ] T006 [P] Add review criteria schema contract in specs/002-orchestrator-parallel-review/contracts/review-criteria.json
-- [ ] T007 Update plan references in specs/002-orchestrator-parallel-review/plan.md if any remaining wording implies a new module tree
+- [x] T001 [P] Create research notes scaffold in specs/002-orchestrator-parallel-review/research.md
+- [x] T002 [P] Create data model doc scaffold in specs/002-orchestrator-parallel-review/data-model.md
+- [x] T003 [P] Create developer quickstart with local run + test steps in specs/002-orchestrator-parallel-review/quickstart.md
+- [x] T004 [P] Add request schema contract in specs/002-orchestrator-parallel-review/contracts/orchestration-request.json
+- [x] T005 [P] Add response schema contract in specs/002-orchestrator-parallel-review/contracts/orchestration-response.json
+- [x] T006 [P] Add review criteria schema contract in specs/002-orchestrator-parallel-review/contracts/review-criteria.json
+- [x] T007 Update plan references in specs/002-orchestrator-parallel-review/plan.md if any remaining wording implies a new module tree
 
 ---
 

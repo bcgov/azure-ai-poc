@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/review-criteria.json",
+  "title": "ReviewCriteria",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "required_sections": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Sections that must be present in the final response"
+    },
+    "quality_thresholds": {
+      "type": "object",
+      "description": "Named thresholds used by the review agent"
+    },
+    "policy_checks": {
+      "type": "object",
+      "description": "Policy/compliance checks (e.g., disallowed content classes)"
+    },
+    "redaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "pii_categories": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "reject_action": {
+      "type": "string",
+      "enum": ["retry", "escalate", "error"],
+      "default": "error",
+      "description": "Action when review rejects: retry orchestration, escalate, or return error"
+    },
+    "updated_at": { "type": "string", "format": "date-time" }
+  }
+}
