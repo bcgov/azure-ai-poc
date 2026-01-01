@@ -4,7 +4,7 @@ FROM alpine:3.20
 
 RUN apk add --no-cache ca-certificates busybox-extras
 
-COPY --from=chisel /chisel /usr/local/bin/chisel
+COPY --from=chisel /app/bin /usr/local/bin/chisel
 COPY --chmod=0755 start-chisel.sh /usr/local/bin/start-chisel.sh
 COPY healthz.json /var/www/healthz
 
