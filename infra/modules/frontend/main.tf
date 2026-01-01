@@ -25,6 +25,11 @@ resource "azurerm_service_plan" "frontend_proxy" {
   }
 }
 
+resource "random_password" "proxy_chisel_password" {
+  length  = 32
+  special = false
+}
+
 # App Service for Frontend with container
 resource "azurerm_linux_web_app" "frontend" {
   name                      = "${var.repo_name}-${var.app_env}-frontend"
@@ -126,6 +131,8 @@ resource "azurerm_linux_web_app" "frontend_proxy" {
     AZURE_OPENAI_HOST                     = var.azure_openai_host
     AZURE_SEARCH_ENDPOINT                 = var.azure_search_endpoint
     AZURE_SEARCH_HOST                     = var.azure_search_host
+    AZURE_SPEECH_ENDPOINT                 = var.azure_speech_endpoint
+    CHISEL_AUTH                           = "tunnel:${random_password.proxy_chisel_password.result}"
 
   }
   logs {

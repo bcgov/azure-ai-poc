@@ -1,14 +1,17 @@
-FROM caddy:2-alpine
+FROM jpillora/chisel:latest AS chisel
 
-# Copy config and retry wrapper; set executable bits at build time
-COPY Caddyfile /etc/caddy/Caddyfile
-COPY --chmod=0755 start-caddy.sh /usr/local/bin/start-caddy.sh
+FROM alpine:3.20
+
+RUN apk add --no-cache ca-certificates busybox-extras
+
+COPY --from=chisel /app/bin /usr/local/bin/chisel
+COPY --chmod=0755 start-chisel.sh /usr/local/bin/start-chisel.sh
+COPY healthz.json /var/www/healthz
 
 EXPOSE 80
 
-# Health check using the /healthz endpoint
+# Health check using the /healthz endpoint (served via chisel --backend)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
     CMD wget -qO- http://localhost:80/healthz || exit 1
 
-# Use the retry wrapper as entrypoint
-ENTRYPOINT ["/usr/local/bin/start-caddy.sh"]
+ENTRYPOINT ["/usr/local/bin/start-chisel.sh"]
