@@ -132,6 +132,12 @@ variable "azure_search_host" {
   type        = string
   nullable    = false
 }
+
+variable "azure_speech_endpoint" {
+  description = "The Azure Speech endpoint URL."
+  type        = string
+  nullable    = false
+}
 variable "proxy_image" {
   description = "The image for the Frontend proxy container"
   type        = string

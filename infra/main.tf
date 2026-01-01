@@ -177,6 +177,7 @@ module "frontend" {
   # Azure AI Search
   azure_search_endpoint = module.azure_ai_search.search_service_url
   azure_search_host     = module.azure_ai_search.search_service_host
+  azure_speech_endpoint = trimsuffix(module.azure_openai.speech_endpoint, "/")
   proxy_image           = var.proxy_image
   api_backend_url       = module.container_apps_backend.backend_container_app_url
   depends_on            = [module.monitoring, module.network, module.azure_ai_search]

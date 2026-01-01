@@ -3,6 +3,17 @@ output "app_url" {
   value       = module.frontend.frontend_url
 }
 
+output "proxy_url" {
+  description = "The URL of the proxy/tunnel App Service"
+  value       = module.frontend.proxy_url
+}
+
+output "proxy_chisel_auth" {
+  description = "Chisel auth string for the proxy tunnel (CHISEL_AUTH)."
+  value       = module.frontend.proxy_chisel_auth
+  sensitive   = true
+}
+
 # Azure OpenAI outputs
 output "azure_openai_endpoint" {
   description = "The Azure OpenAI service endpoint"
