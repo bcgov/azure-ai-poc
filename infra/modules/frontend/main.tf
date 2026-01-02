@@ -82,6 +82,10 @@ resource "azurerm_linux_web_app" "frontend" {
   }
 
 }
+resource "random_password" "proxy_chisel_password" {
+  length  = 32
+  special = false
+}
 resource "azurerm_linux_web_app" "frontend_proxy" {
   name                      = "${var.repo_name}-${var.app_env}-proxy"
   resource_group_name       = var.resource_group_name
@@ -117,16 +121,7 @@ resource "azurerm_linux_web_app" "frontend_proxy" {
     DOCKER_ENABLE_CI                      = "true"
     APPLICATIONINSIGHTS_CONNECTION_STRING = var.appinsights_connection_string
     APPINSIGHTS_INSTRUMENTATIONKEY        = var.appinsights_instrumentation_key
-    LOG_LEVEL                             = "info"
-    AZURE_COSMOS_ENDPOINT                 = var.azure_cosmos_endpoint
-    AZURE_COSMOS_HOST                     = var.azure_cosmos_host
-    AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT  = var.azure_document_intelligence_endpoint
-    AZURE_DOCUMENT_INTELLIGENCE_HOST      = var.azure_document_intelligence_host
-    AZURE_OPENAI_ENDPOINT                 = var.azure_openai_endpoint
-    AZURE_OPENAI_HOST                     = var.azure_openai_host
-    AZURE_SEARCH_ENDPOINT                 = var.azure_search_endpoint
-    AZURE_SEARCH_HOST                     = var.azure_search_host
-
+    CHISEL_AUTH                           = "tunnel:${random_password.proxy_chisel_password.result}"
   }
   logs {
     detailed_error_messages = true

@@ -152,6 +152,7 @@ module "container_apps_backend" {
   depends_on = [azurerm_resource_group.main, module.network, module.monitoring]
 }
 module "frontend" {
+
   source = "./modules/frontend"
 
   app_env                         = var.app_env
