@@ -122,6 +122,9 @@ USE_STATIC_IMAGES=false
 MAX_RETRIES=3
 RETRY_DELAY=30
 
+# Optional Terraform targeting (repeatable)
+TF_TARGETS=()
+
 # Backend configuration (can be overridden by environment variables)
 BACKEND_RESOURCE_GROUP="${BACKEND_RESOURCE_GROUP:-b9cee3-tools-networking}"
 BACKEND_STORAGE_ACCOUNT="${BACKEND_STORAGE_ACCOUNT:-tfstateazureaipoctools}"
@@ -180,6 +183,8 @@ COMMANDS:
 
 OPTIONS:
   --tfvars=FILE        Specify Terraform variables file (default: terraform.tfvars)
+  --target=RESOURCE    Target a specific Terraform resource/module (repeatable)
+  -target=RESOURCE     Same as --target (repeatable)
   --build              Also build containers before Terraform operations
   --no-cache           Build containers without using cache
   --static-images      Use static image values from tfvars (don't override with git tags)
@@ -192,6 +197,8 @@ OPTIONS:
 EXAMPLES:
   $0 apply                                    # Deploy with default tfvars and dynamic images
   $0 plan --tfvars=prod.tfvars               # Plan with custom tfvars
+  $0 apply --target=module.jumpbox            # Apply only a specific module
+  $0 destroy -target=module.bastion           # Destroy only a specific module
   $0 build --no-cache                        # Force rebuild all containers
   $0 apply --build --tfvars=dev.tfvars       # Build and deploy with dynamic images
   $0 apply --static-images                   # Deploy using static images from tfvars
@@ -860,22 +867,29 @@ terraform_validate() {
 #
 terraform_plan() {
   log "INFO" "Creating Terraform execution plan..."
-  
-  local plan_args="-var-file=$TFVARS_FILE"
+
+  local -a plan_args=("-var-file=$TFVARS_FILE")
   local plan_file="${INFRA_DIR}/tfplan_${TIMESTAMP}.out"
-  
+
   if [ "$VERBOSE" = false ]; then
-    plan_args+=" -no-color"
+    plan_args+=("-no-color")
   fi
-  
-  plan_args+=" -out=$plan_file"
+
+  plan_args+=("-out=$plan_file")
+
+  if [ ${#TF_TARGETS[@]} -gt 0 ]; then
+    log "INFO" "Terraform targets: ${TF_TARGETS[*]}"
+    for target in "${TF_TARGETS[@]}"; do
+      plan_args+=("-target=$target")
+    done
+  fi
   
   cd "$INFRA_DIR"
   
   if [ "$DRY_RUN" = true ]; then
-    log "INFO" "[DRY RUN] Would execute: terraform plan $plan_args"
+    log "INFO" "[DRY RUN] Would execute: terraform plan ${plan_args[*]}"
   else
-    if terraform plan $plan_args; then
+    if terraform plan "${plan_args[@]}"; then
       log "SUCCESS" "Terraform plan created successfully"
       log "INFO" "Plan saved to: $plan_file"
     else
@@ -897,7 +911,7 @@ terraform_plan() {
 retry_command() {
   local description="$1"
   shift
-  local cmd="$@"
+  local -a cmd=("$@")
   local attempt=1
   local exit_code=0
   
@@ -905,7 +919,7 @@ retry_command() {
     log "INFO" "$description (attempt $attempt/$MAX_RETRIES)"
     
     # Execute the command
-    if eval "$cmd"; then
+    if "${cmd[@]}"; then
       return 0
     fi
     
@@ -937,29 +951,36 @@ retry_command() {
 #
 terraform_apply() {
   log "INFO" "Applying Terraform configuration..."
-  
-  local apply_args="-var-file=$TFVARS_FILE"
-  
+
+  local -a apply_args=("-var-file=$TFVARS_FILE")
+
   if [ "$VERBOSE" = false ]; then
-    apply_args+=" -no-color"
+    apply_args+=("-no-color")
   fi
   
   # Auto-approve only in non-interactive environments or if explicitly set
   if [ "${CI:-false}" = "true" ] || [ "${AUTO_APPROVE:-false}" = "true" ]; then
-    apply_args+=" -auto-approve"
+    apply_args+=("-auto-approve")
     log "INFO" "Auto-approve enabled for non-interactive environment"
   else
     log "WARN" "Interactive approval required for apply operation"
+  fi
+
+  if [ ${#TF_TARGETS[@]} -gt 0 ]; then
+    log "INFO" "Terraform targets: ${TF_TARGETS[*]}"
+    for target in "${TF_TARGETS[@]}"; do
+      apply_args+=("-target=$target")
+    done
   fi
   
   cd "$INFRA_DIR"
   
   if [ "$DRY_RUN" = true ]; then
-    log "INFO" "[DRY RUN] Would execute: terraform apply $apply_args"
+    log "INFO" "[DRY RUN] Would execute: terraform apply ${apply_args[*]}"
   else
     # Use retry wrapper for terraform apply
     local original_retry_delay=$RETRY_DELAY
-    if retry_command "Terraform apply" "terraform apply $apply_args"; then
+    if retry_command "Terraform apply" terraform apply "${apply_args[@]}"; then
       RETRY_DELAY=$original_retry_delay  # Reset for future operations
       log "SUCCESS" "Terraform apply completed successfully"
       
@@ -1004,24 +1025,32 @@ terraform_destroy() {
     fi
   fi
   
-  local destroy_args="-var-file=$TFVARS_FILE"
-  
+
+  local -a destroy_args=("-var-file=$TFVARS_FILE")
+
   if [ "$VERBOSE" = false ]; then
-    destroy_args+=" -no-color"
+    destroy_args+=("-no-color")
   fi
-  
+
   if [ "${CI:-false}" = "true" ] || [ "${AUTO_APPROVE:-false}" = "true" ]; then
-    destroy_args+=" -auto-approve"
+    destroy_args+=("-auto-approve")
+  fi
+
+  if [ ${#TF_TARGETS[@]} -gt 0 ]; then
+    log "INFO" "Terraform targets: ${TF_TARGETS[*]}"
+    for target in "${TF_TARGETS[@]}"; do
+      destroy_args+=("-target=$target")
+    done
   fi
   
   cd "$INFRA_DIR"
   
   if [ "$DRY_RUN" = true ]; then
-    log "INFO" "[DRY RUN] Would execute: terraform destroy $destroy_args"
+    log "INFO" "[DRY RUN] Would execute: terraform destroy ${destroy_args[*]}"
   else
     # Use retry wrapper for terraform destroy
     local original_retry_delay=$RETRY_DELAY
-    if retry_command "Terraform destroy" "terraform destroy $destroy_args"; then
+    if retry_command "Terraform destroy" terraform destroy "${destroy_args[@]}"; then
       RETRY_DELAY=$original_retry_delay  # Reset for future operations
       log "SUCCESS" "Terraform destroy completed successfully"
     else
@@ -1056,6 +1085,10 @@ parse_arguments() {
     case $1 in
       --tfvars=*)
         TFVARS_FILE="${1#*=}"
+        shift
+        ;;
+      --target=*|-target=*)
+        TF_TARGETS+=("${1#*=}")
         shift
         ;;
       --build)
