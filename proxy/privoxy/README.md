@@ -3,7 +3,7 @@
 This folder contains a tiny Alpine-based Docker image that runs **Privoxy** as an **HTTP proxy** and forwards all traffic through an existing **SOCKS5** proxy (typically a Chisel client tunnel).
 
 Why this exists:
-- Many tools (VS Code REST Client, Postman, browsers) support **HTTP/HTTPS proxies** more reliably than **SOCKS**.
+- Many tools (VS Code REST Client, Postman, running APIs locally) support **HTTP/HTTPS proxies** more reliably than **SOCKS**.
 - For Azure Private Endpoints, it’s important to preserve the **real HTTPS hostname** (SNI) and often do **remote DNS**; this bridge uses `forward-socks5t` for that.
 
 ## Architecture
@@ -48,11 +48,7 @@ docker build -t local/privoxy-socks-bridge:latest .\http-client\proxy\privoxy
 This runs Privoxy on `127.0.0.1:8118` and forwards through the SOCKS proxy.
 
 ```powershell
-docker run --rm -d --name privoxy \
-  -p 127.0.0.1:8118:8118 \
-  -e SOCKS_HOST=host.docker.internal \
-  -e SOCKS_PORT=18080 \
-  local/privoxy-socks-bridge:latest
+docker run --rm -d --name privoxy -p 127.0.0.1:8118:8118 -e SOCKS_HOST=host.docker.internal -e SOCKS_PORT=18080  local/privoxy-socks-bridge:latest
 ```
 
 Environment variables:
@@ -65,7 +61,7 @@ If your SOCKS proxy is not on the host, set `SOCKS_HOST` to the appropriate host
 
 Confirm traffic is going through the proxy:
 
-```powershell
+```bash
 curl.exe --proxy http://127.0.0.1:8118 https://ifconfig.me
 ```
 
@@ -73,22 +69,6 @@ This should return the outbound IP from the tunnel side (not your local public I
 
 ## 5) Configure clients
 
-### VS Code REST Client
-
-These proxy settings are **Application scoped**, so they must be set in **User Settings (Default profile)**, not workspace settings.
-
-Add:
-
-```jsonc
-{
-  "http.proxy": "http://127.0.0.1:8118",
-  "http.proxySupport": "on",
-  "rest-client.useHostProxy": true,
-  "rest-client.proxy": "http://127.0.0.1:8118"
-}
-```
-
-Then run `Developer: Reload Window`.
 
 ### Postman
 
@@ -99,6 +79,49 @@ Then run `Developer: Reload Window`.
   - Port: `8118`
 - Do **not** enable “proxy auth” unless you configured Privoxy to require it.
 
+### Vscode launcher with uvicorn example
+```json
+{
+        "name": "MSAGENT-Python Debugger: FastAPI Uvicorn",
+        "type": "debugpy",
+        "request": "launch",
+        "module": "uvicorn",
+        "args": [
+            "app.main:app",
+            "--log-level",
+            "critical",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "4000",
+            "--reload",
+            "--no-access-log"
+        ],
+        "console": "integratedTerminal",
+        "justMyCode": false,
+        "cwd": "${workspaceFolder}/api-ms-agent",
+        "python": "${workspaceFolder}/api-ms-agent/.venv/Scripts/python.exe",
+        "preLaunchTask": "uv sync - ms agent",
+          "env": {
+            "PYTHONPATH": "${workspaceFolder}/api-ms-agent",
+            "PYTHONUNBUFFERED": "1",
+            "PYTHONNOUSERSITE": "1",
+              // Proxy (set to your proxy URL)
+            "HTTP_PROXY": "http://localhost:8118",
+            "HTTPS_PROXY": "http://localhost:8118",
+            "ALL_PROXY": "http://localhost:8118",
+
+            // Some libraries read lowercase variants
+            "http_proxy": "http://localhost:8118",
+            "https_proxy": "http://localhost:8118",
+            "all_proxy": "http://localhost:8118",
+
+            // Avoid proxying local traffic
+            "NO_PROXY": "localhost,127.0.0.1",
+            "no_proxy": "localhost,127.0.0.1"
+        },
+    },
+```
 ## Key Vault / Private Endpoint notes
 
 - Use the real service URL (example):

@@ -186,6 +186,13 @@ sync_azure_openai() {
 
     log_info "Found Azure OpenAI account: $account_name"
 
+    if [[ -n "$endpoint" && "$endpoint" != "null" ]]; then
+        update_env_var "AZURE_OPENAI_ENDPOINT" "$endpoint"
+        log_success "Azure OpenAI endpoint synced"
+    else
+        log_warn "Failed to retrieve Azure OpenAI endpoint"
+    fi
+
     # Get API key
     local api_key
     api_key=$(az cognitiveservices account keys list \
@@ -224,6 +231,13 @@ sync_cosmos_db() {
     local endpoint=$(echo "$cosmos_accounts" | jq -r '.[0].documentEndpoint')
 
     log_info "Found Cosmos DB account: $account_name"
+
+    if [[ -n "$endpoint" && "$endpoint" != "null" ]]; then
+        update_env_var "COSMOS_DB_ENDPOINT" "$endpoint"
+        log_success "Cosmos DB endpoint synced"
+    else
+        log_warn "Failed to retrieve Cosmos DB endpoint"
+    fi
 
     # Get primary key
     local primary_key
@@ -265,6 +279,13 @@ sync_azure_search() {
 
     log_info "Found Azure AI Search service: $service_name"
 
+    if [[ -n "$endpoint" && "$endpoint" != "null" ]]; then
+        update_env_var "AZURE_SEARCH_ENDPOINT" "$endpoint"
+        log_success "Azure AI Search endpoint synced"
+    else
+        log_warn "Failed to retrieve Azure AI Search endpoint"
+    fi
+
     # Get admin key
     local admin_key
     admin_key=$(az search admin-key show \
@@ -305,6 +326,13 @@ sync_document_intelligence() {
 
     log_info "Found Document Intelligence account: $account_name"
 
+    if [[ -n "$endpoint" && "$endpoint" != "null" ]]; then
+        update_env_var "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT" "$endpoint"
+        log_success "Document Intelligence endpoint synced"
+    else
+        log_warn "Failed to retrieve Document Intelligence endpoint"
+    fi
+
     # Get API key
     local api_key
     api_key=$(az cognitiveservices account keys list \
@@ -342,8 +370,16 @@ sync_azure_speech() {
     # Use first account if multiple exist
     local account_name=$(echo "$speech_accounts" | jq -r '.[0].name')
     local location=$(echo "$speech_accounts" | jq -r '.[0].location')
+    local endpoint=$(echo "$speech_accounts" | jq -r '.[0].properties.endpoint')
 
     log_info "Found Speech Services account: $account_name"
+
+    if [[ -n "$endpoint" && "$endpoint" != "null" ]]; then
+        update_env_var "AZURE_SPEECH_ENDPOINT" "$endpoint"
+        log_success "Speech Services endpoint synced"
+    else
+        log_warn "Failed to retrieve Speech Services endpoint"
+    fi
 
     # Get API key
     local api_key
@@ -364,12 +400,13 @@ sync_azure_speech() {
 
 # Main execution
 main() {
+    parse_args "$@"
+
     log_info "Starting Azure service keys sync..."
     log_info "Resource Group: $RESOURCE_GROUP"
     log_info "Env File: $ENV_FILE"
     echo ""
 
-    parse_args "$@"
     check_prerequisites
     backup_env_file
 
